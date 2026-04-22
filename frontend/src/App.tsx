@@ -6,6 +6,7 @@ import DutyRosterView from "./pages/DutyRosterView";
 import FairnessView from "./pages/FairnessView";
 import StaffView from "./pages/StaffView";
 import TeamsView from "./pages/TeamsView";
+import ResourcesView from "./pages/ResourcesView";
 import "./styles/app.css";
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="/fairness" element={<FairnessView />} />
             <Route path="/staff" element={<StaffView />} />
             <Route path="/teams" element={<TeamsView />} />
+            <Route path="/resources" element={<ResourcesView />} />
           </Route>
         </Routes>
       </BrowserRouter>

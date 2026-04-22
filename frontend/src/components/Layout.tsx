@@ -27,6 +27,17 @@ export default function Layout() {
     }
   }
 
+  async function deleteMonth() {
+    if (!active) return;
+    if (!confirm(`Delete ${MONTH_NAMES[active.month]} ${active.year} and all its data?`)) return;
+    try {
+      await api.deleteConfig(active.id);
+      await reload();
+    } catch (e: any) {
+      alert(e.message);
+    }
+  }
+
   return (
     <div className="app">
       <aside className="sidebar">
@@ -44,6 +55,10 @@ export default function Layout() {
             ))}
           </select>
           <button className="btn-add-month" onClick={addMonth} title="Add month">+</button>
+          {active && configs.length > 1 && (
+            <button className="btn-add-month" onClick={deleteMonth} title="Delete month"
+              style={{ background: "rgba(220,38,38,0.3)" }}>-</button>
+          )}
         </div>
 
         <nav>
@@ -52,6 +67,7 @@ export default function Layout() {
           <NavLink to="/fairness">Fairness</NavLink>
           <NavLink to="/staff">Staff</NavLink>
           <NavLink to="/teams">Teams</NavLink>
+          <NavLink to="/resources">Resources</NavLink>
         </nav>
       </aside>
       <main className="main">

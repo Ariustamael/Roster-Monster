@@ -77,10 +77,13 @@ class Staff(Base):
     active = Column(Boolean, default=True)
     has_admin_role = Column(Boolean, default=False)
 
-    team_assignments = relationship("TeamAssignment", back_populates="staff")
-    leaves = relationship("Leave", back_populates="staff")
-    call_preferences = relationship("CallPreference", back_populates="staff")
-    call_assignments = relationship("CallAssignment", back_populates="staff")
+    team_assignments = relationship(
+        "TeamAssignment", back_populates="staff",
+        foreign_keys="TeamAssignment.staff_id", cascade="all, delete-orphan",
+    )
+    leaves = relationship("Leave", back_populates="staff", cascade="all, delete-orphan")
+    call_preferences = relationship("CallPreference", back_populates="staff", cascade="all, delete-orphan")
+    call_assignments = relationship("CallAssignment", back_populates="staff", cascade="all, delete-orphan")
 
 
 # ── Teams ────────────────────────────────────────────────────────────────
@@ -91,7 +94,7 @@ class Team(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String(60), nullable=False, unique=True)
 
-    assignments = relationship("TeamAssignment", back_populates="team")
+    assignments = relationship("TeamAssignment", back_populates="team", cascade="all, delete-orphan")
 
 
 class TeamAssignment(Base):
@@ -101,11 +104,13 @@ class TeamAssignment(Base):
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
     team_id = Column(Integer, ForeignKey("team.id"), nullable=False)
     role = Column(String(20), nullable=False)  # "consultant" or "mo"
+    supervisor_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date, nullable=True)
 
-    staff = relationship("Staff", back_populates="team_assignments")
+    staff = relationship("Staff", back_populates="team_assignments", foreign_keys=[staff_id])
     team = relationship("Team", back_populates="assignments")
+    supervisor = relationship("Staff", foreign_keys=[supervisor_id])
 
 
 # ── Leave ────────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ from ..models import (
     MonthlyConfig, ConsultantOnCall, ACOnCall, StepdownDay, EveningOTDate,
     Staff, TeamAssignment, Team, Leave, CallPreference, CallAssignment,
     PublicHoliday, MO_GRADES, PreferenceType, Grade,
+    OTTemplate, ClinicTemplate, CallType,
 )
 from ..schemas import RosterResponse, DayRoster, CallAssignmentOut, ManualOverrideCreate
 from ..services.solver import (
@@ -87,6 +88,7 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
             name=s.name,
             grade=s.grade,
             team_id=ta.team_id if ta else None,
+            supervisor_id=ta.supervisor_id if ta else None,
         ))
 
     leave_dates: dict[int, set[date]] = defaultdict(set)
@@ -252,6 +254,117 @@ def export_roster(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/{config_id}/resources")
+def get_resources(config_id: int, db: Session = Depends(get_db)):
+    config = db.query(MonthlyConfig).get(config_id)
+    if not config:
+        raise HTTPException(404, "Config not found")
+
+    year, month = config.year, config.month
+    num_days = calendar.monthrange(year, month)[1]
+
+    ot_templates = db.query(OTTemplate).all()
+    clinic_templates = db.query(ClinicTemplate).all()
+
+    ph_dates = {
+        r.date for r in db.query(PublicHoliday).all()
+        if r.date.year == year and r.date.month == month
+    }
+    stepdown = {r.date for r in config.stepdown_days}
+    evening_ot = {r.date for r in config.evening_ot_dates}
+
+    mo_staff = (
+        db.query(Staff)
+        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in MO_GRADES]))
+        .all()
+    )
+    total_mos = len(mo_staff)
+
+    leave_counts: dict[str, int] = defaultdict(int)
+    for lv in db.query(Leave).filter(
+        Leave.date >= date(year, month, 1),
+        Leave.date <= date(year, month, num_days),
+    ).all():
+        if lv.staff.grade.value in [g.value for g in MO_GRADES]:
+            leave_counts[lv.date.isoformat()] += 1
+
+    call_assignments = (
+        db.query(CallAssignment)
+        .filter(CallAssignment.config_id == config_id)
+        .all()
+    )
+    oncall_counts: dict[str, int] = defaultdict(int)
+    postcall_dates: set[str] = set()
+    for ca in call_assignments:
+        oncall_counts[ca.date.isoformat()] += 1
+        if ca.call_type in {CallType.MO1, CallType.MO2}:
+            next_day = ca.date + timedelta(days=1)
+            postcall_dates.add(next_day.isoformat())
+        if ca.call_type == CallType.MO3 and ca.date in stepdown:
+            next_day = ca.date + timedelta(days=1)
+            postcall_dates.add(next_day.isoformat())
+
+    days = []
+    for day_num in range(1, num_days + 1):
+        d = date(year, month, day_num)
+        ds = d.isoformat()
+        dow = d.weekday()
+        is_wknd = dow >= 5
+        is_ph = d in ph_dates
+
+        ot_rooms = 0
+        ot_assistants = 0
+        clinic_sup = 0
+        clinic_mopd = 0
+        if not is_wknd and not is_ph:
+            for ot in ot_templates:
+                if ot.day_of_week == dow:
+                    ot_rooms += 1
+                    ot_assistants += ot.assistants_needed
+            for cl in clinic_templates:
+                if cl.day_of_week == dow:
+                    if cl.is_supervised:
+                        clinic_sup += 1
+                    else:
+                        clinic_mopd += 1
+
+        call_slots = 2
+        if not is_wknd and not is_ph:
+            call_slots = 3
+            if d in evening_ot:
+                call_slots = 5
+        elif d in stepdown:
+            call_slots = 3
+
+        on_leave = leave_counts.get(ds, 0)
+        on_call = oncall_counts.get(ds, 0)
+        post_call = 1 if ds in postcall_dates else 0
+        available = total_mos - on_leave - on_call - post_call
+        needed = ot_assistants + clinic_sup + 3 if not is_wknd and not is_ph else 0
+        surplus = available - needed if not is_wknd and not is_ph else available
+
+        days.append({
+            "date": ds,
+            "day_name": d.strftime("%a"),
+            "is_weekend": is_wknd,
+            "is_ph": is_ph,
+            "ot_rooms": ot_rooms,
+            "ot_assistants_needed": ot_assistants,
+            "supervised_clinics": clinic_sup,
+            "mopd_clinics": clinic_mopd,
+            "call_slots": call_slots,
+            "total_mos": total_mos,
+            "on_leave": on_leave,
+            "on_call": on_call,
+            "post_call": post_call,
+            "available": max(available, 0),
+            "needed_for_duties": needed,
+            "surplus": surplus,
+        })
+
+    return {"year": year, "month": month, "days": days}
 
 
 @router.put("/{config_id}/override", response_model=CallAssignmentOut)

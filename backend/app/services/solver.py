@@ -41,6 +41,7 @@ class PersonInfo:
     name: str
     grade: Grade
     team_id: int | None = None
+    supervisor_id: int | None = None
 
 
 @dataclass
@@ -165,8 +166,10 @@ def _score_candidate(
 
     score += fairness.score(person.id, call_type, is_wknd_ph)
 
-    if call_type == CallType.MO1 and day.consultant_oncall_team_id is not None:
-        if person.team_id == day.consultant_oncall_team_id:
+    if call_type == CallType.MO1 and day.consultant_oncall_id is not None:
+        if person.supervisor_id == day.consultant_oncall_id:
+            score += 5.0
+        elif day.consultant_oncall_team_id is not None and person.team_id == day.consultant_oncall_team_id:
             score += 3.0
 
     if day.d in request_dates.get(person.id, set()):

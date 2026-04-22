@@ -49,14 +49,35 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ year, month }),
     }),
+  deleteConfig: (id: number) =>
+    request<{ ok: boolean }>(`/config/${id}`, { method: "DELETE" }),
 
-  // Team assignments
+  deleteStaff: (id: number) =>
+    request<{ ok: boolean }>(`/staff/${id}`, { method: "DELETE" }),
+
+  // Team CRUD
+  createTeam: (name: string) =>
+    request<import("./types").Team>("/teams", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  deleteTeam: (id: number) =>
+    request<{ ok: boolean }>(`/teams/${id}`, { method: "DELETE" }),
   getAllTeamAssignments: () =>
     request<import("./types").TeamAssignment[]>("/teams/all-assignments"),
-  reassignStaff: (staffId: number, teamId: number) =>
-    request<import("./types").TeamAssignment>(`/teams/reassign/${staffId}/${teamId}`, {
+  reassignStaff: (staffId: number, teamId: number, supervisorId?: number) =>
+    request<import("./types").TeamAssignment>(
+      `/teams/reassign/${staffId}/${teamId}${supervisorId ? `?supervisor_id=${supervisorId}` : ""}`,
+      { method: "PUT" }
+    ),
+  setSupervisor: (staffId: number, supervisorId: number) =>
+    request<import("./types").TeamAssignment>(`/teams/set-supervisor/${staffId}/${supervisorId}`, {
       method: "PUT",
     }),
+
+  // Resources
+  getResources: (configId: number) =>
+    request<import("./types").ResourcesResponse>(`/roster/${configId}/resources`),
 
   generateCallRoster: (configId: number) =>
     request<import("./types").RosterResponse>(`/roster/${configId}/generate`, {

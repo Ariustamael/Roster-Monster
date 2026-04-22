@@ -544,3 +544,61 @@ td.override {
   border-top: 1px solid var(--border);
   text-align: right;
 }
+
+/* ── Consultant-MO hierarchy in teams ───────────────── */
+
+.consultant-section {
+  margin-bottom: 4px;
+}
+
+.consultant-card {
+  background: #e0e7ff !important;
+  border-color: #a5b4fc !important;
+  font-weight: 600;
+}
+
+.consultant-card.drop-target {
+  border-style: dashed;
+  border-color: var(--primary) !important;
+}
+
+.tagged-mo {
+  margin-left: 16px;
+  border-left: 3px solid #a5b4fc;
+}
+
+/* ── Resources view ─────────────────────────────────── */
+
+.resources-table td.leave-cell { color: var(--danger); font-weight: 500; }
+.resources-table td.deficit { background: #fee2e2; color: var(--danger); font-weight: 700; }
+.resources-table td.tight { background: #fef3c7; color: #92400e; font-weight: 600; }
+.resources-table td.surplus { background: #d1fae5; color: var(--success); font-weight: 500; }
+
+.summary-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 20px;
+  text-align: center;
+  min-width: 120px;
+}
+
+.summary-card.summary-danger { border-color: var(--danger); background: #fef2f2; }
+.summary-card.summary-warn { border-color: #f59e0b; background: #fffbeb; }
+
+.summary-value {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.summary-danger .summary-value { color: var(--danger); }
+.summary-warn .summary-value { color: #d97706; }
+
+.summary-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}

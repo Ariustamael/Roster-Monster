@@ -124,6 +124,33 @@ export interface TeamAssignment {
   team_id: number;
   team_name: string;
   role: string;
+  supervisor_id: number | null;
+  supervisor_name: string | null;
   effective_from: string;
   effective_to: string | null;
+}
+
+export interface ResourceDay {
+  date: string;
+  day_name: string;
+  is_weekend: boolean;
+  is_ph: boolean;
+  ot_rooms: number;
+  ot_assistants_needed: number;
+  supervised_clinics: number;
+  mopd_clinics: number;
+  call_slots: number;
+  total_mos: number;
+  on_leave: number;
+  on_call: number;
+  post_call: number;
+  available: number;
+  needed_for_duties: number;
+  surplus: number;
+}
+
+export interface ResourcesResponse {
+  year: number;
+  month: number;
+  days: ResourceDay[];
 }

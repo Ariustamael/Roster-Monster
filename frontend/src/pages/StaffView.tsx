@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { Staff, Leave, CallPreference, Team } from "../types";
+import type { Staff, Leave, CallPreference } from "../types";
 
 const GRADE_ORDER: Record<string, number> = {
   "Senior Consultant": 0,
@@ -28,7 +28,6 @@ const MONTH_NAMES = [
 export default function StaffView() {
   const { active } = useConfig();
   const [staff, setStaff] = useState<Staff[]>([]);
-  const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
@@ -42,7 +41,6 @@ export default function StaffView() {
 
   useEffect(() => {
     api.getStaff().then(setStaff).finally(() => setLoading(false));
-    api.getTeams().then(setTeams);
   }, []);
 
   useEffect(() => {
@@ -69,10 +67,22 @@ export default function StaffView() {
     setShowAdd(false);
   }
 
-  async function saveEdit(id: number, name: string, grade: string, active: boolean) {
-    const updated = await api.updateStaff(id, name, grade, active);
+  async function saveEdit(id: number, name: string, grade: string) {
+    const updated = await api.updateStaff(id, name, grade, true);
     setStaff((prev) => prev.map((s) => (s.id === id ? updated : s)));
     setEditing(null);
+  }
+
+  async function deleteStaffMember(id: number, name: string) {
+    if (!confirm(`Delete ${name}? This removes all their assignments, leaves, and preferences.`)) return;
+    try {
+      await api.deleteStaff(id);
+      setStaff((prev) => prev.filter((s) => s.id !== id));
+      setLeaves((prev) => prev.filter((l) => l.staff_id !== id));
+      setPrefs((prev) => prev.filter((p) => p.staff_id !== id));
+    } catch (e: any) {
+      alert(e.message);
+    }
   }
 
   async function addLeave(staffId: number) {
@@ -142,10 +152,9 @@ export default function StaffView() {
                   <th>Name</th>
                   <th>Grade</th>
                   <th>Team</th>
-                  <th>Status</th>
                   <th>Leaves</th>
                   <th>Prefs</th>
-                  <th style={{ width: 60 }}></th>
+                  <th style={{ width: 120 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -161,7 +170,6 @@ export default function StaffView() {
                       <EditRow
                         key={s.id}
                         staff={s}
-                        teams={teams}
                         onSave={saveEdit}
                         onCancel={() => setEditing(null)}
                       />
@@ -179,6 +187,7 @@ export default function StaffView() {
                       monthLabel={`${MONTH_NAMES[month]} ${year}`}
                       onToggle={() => setExpanded(isExpanded ? null : s.id)}
                       onEdit={() => setEditing(s.id)}
+                      onDelete={() => deleteStaffMember(s.id, s.name)}
                       onAddLeave={() => addLeave(s.id)}
                       onRemoveLeave={removeLeave}
                       onAddPref={(type) => addPreference(s.id, type)}
@@ -208,6 +217,7 @@ function StaffRow({
   monthLabel,
   onToggle,
   onEdit,
+  onDelete,
   onAddLeave,
   onRemoveLeave,
   onAddPref,
@@ -221,6 +231,7 @@ function StaffRow({
   monthLabel: string;
   onToggle: () => void;
   onEdit: () => void;
+  onDelete: () => void;
   onAddLeave: () => void;
   onRemoveLeave: (id: number) => void;
   onAddPref: (type: "request" | "block") => void;
@@ -235,28 +246,18 @@ function StaffRow({
         <td style={{ fontWeight: 500 }}>{s.name}</td>
         <td>{s.grade}</td>
         <td>{s.team_name || "-"}</td>
-        <td>
-          <span style={{
-            color: s.active ? "var(--success)" : "var(--danger)",
-            fontWeight: 500,
-          }}>
-            {s.active ? "Active" : "Inactive"}
-          </span>
-        </td>
         <td>{leaves.length || "-"}</td>
         <td>{prefs.length || "-"}</td>
         <td>
-          <button
-            className="btn btn-sm btn-secondary"
-            onClick={(e) => { e.stopPropagation(); onEdit(); }}
-          >
-            Edit
-          </button>
+          <div className="btn-group" onClick={(e) => e.stopPropagation()}>
+            <button className="btn btn-sm btn-secondary" onClick={onEdit}>Edit</button>
+            <button className="btn btn-sm btn-danger" onClick={onDelete}>Delete</button>
+          </div>
         </td>
       </tr>
       {isExpanded && (
         <tr className="staff-detail">
-          <td colSpan={8}>
+          <td colSpan={7}>
             <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
               <div>
                 <strong style={{ fontSize: 12 }}>Leaves ({monthLabel})</strong>
@@ -300,18 +301,15 @@ function StaffRow({
 
 function EditRow({
   staff,
-  teams,
   onSave,
   onCancel,
 }: {
   staff: Staff;
-  teams: Team[];
-  onSave: (id: number, name: string, grade: string, active: boolean) => void;
+  onSave: (id: number, name: string, grade: string) => void;
   onCancel: () => void;
 }) {
   const [name, setName] = useState(staff.name);
   const [grade, setGrade] = useState(staff.grade);
-  const [active, setActive] = useState(staff.active);
 
   return (
     <tr>
@@ -327,17 +325,10 @@ function EditRow({
         </select>
       </td>
       <td>{staff.team_name || "-"}</td>
-      <td>
-        <select value={active ? "1" : "0"} onChange={(e) => setActive(e.target.value === "1")}
-          style={{ padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13 }}>
-          <option value="1">Active</option>
-          <option value="0">Inactive</option>
-        </select>
-      </td>
       <td colSpan={2}></td>
       <td>
         <div className="btn-group">
-          <button className="btn btn-sm btn-primary" onClick={() => onSave(staff.id, name, grade, active)}>Save</button>
+          <button className="btn btn-sm btn-primary" onClick={() => onSave(staff.id, name, grade)}>Save</button>
           <button className="btn btn-sm btn-secondary" onClick={onCancel}>Cancel</button>
         </div>
       </td>

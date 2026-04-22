@@ -33,10 +33,15 @@ class TeamOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TeamCreate(BaseModel):
+    name: str
+
+
 class TeamAssignmentCreate(BaseModel):
     staff_id: int
     team_id: int
     role: str
+    supervisor_id: Optional[int] = None
     effective_from: date
     effective_to: Optional[date] = None
 
@@ -48,6 +53,8 @@ class TeamAssignmentOut(BaseModel):
     team_id: int
     team_name: str
     role: str
+    supervisor_id: Optional[int] = None
+    supervisor_name: Optional[str] = None
     effective_from: date
     effective_to: Optional[date]
 

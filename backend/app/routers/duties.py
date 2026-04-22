@@ -210,6 +210,7 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         mo_pool.append(PersonInfo(
             id=s.id, name=s.name,
             team_id=ta.team_id if ta else None,
+            supervisor_id=ta.supervisor_id if ta else None,
         ))
 
     leave_dates: dict[int, set[date]] = defaultdict(set)

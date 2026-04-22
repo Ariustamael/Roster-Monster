@@ -44,6 +44,16 @@ def get_config(config_id: int, db: Session = Depends(get_db)):
     return cfg
 
 
+@router.delete("/{config_id}")
+def delete_config(config_id: int, db: Session = Depends(get_db)):
+    cfg = db.query(MonthlyConfig).get(config_id)
+    if not cfg:
+        raise HTTPException(404, "Config not found")
+    db.delete(cfg)
+    db.commit()
+    return {"ok": True}
+
+
 # ── Consultant On-Call ───────────────────────────────────────────────────
 
 @router.post("/{config_id}/consultant-oncall")

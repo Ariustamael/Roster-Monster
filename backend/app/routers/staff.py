@@ -72,6 +72,30 @@ def update_staff(staff_id: int, payload: StaffCreate, db: Session = Depends(get_
     )
 
 
+@router.delete("/{staff_id}")
+def delete_staff(staff_id: int, db: Session = Depends(get_db)):
+    s = db.query(Staff).get(staff_id)
+    if not s:
+        raise HTTPException(404, "Staff not found")
+    from ..models import (
+        ConsultantOnCall, ACOnCall, RegistrarDuty,
+        DutyAssignment, OTTemplate, ClinicTemplate,
+    )
+    db.query(ConsultantOnCall).filter(ConsultantOnCall.consultant_id == staff_id).delete()
+    db.query(ACOnCall).filter(ACOnCall.ac_id == staff_id).delete()
+    db.query(RegistrarDuty).filter(RegistrarDuty.registrar_id == staff_id).delete()
+    db.query(DutyAssignment).filter(DutyAssignment.staff_id == staff_id).delete()
+    db.query(DutyAssignment).filter(DutyAssignment.consultant_id == staff_id).delete()
+    db.query(OTTemplate).filter(OTTemplate.consultant_id == staff_id).delete()
+    db.query(ClinicTemplate).filter(ClinicTemplate.consultant_id == staff_id).delete()
+    db.query(TeamAssignment).filter(TeamAssignment.supervisor_id == staff_id).update(
+        {TeamAssignment.supervisor_id: None}
+    )
+    db.delete(s)
+    db.commit()
+    return {"ok": True}
+
+
 # ── Leave ────────────────────────────────────────────────────────────────
 
 @router.get("/{staff_id}/leave", response_model=list[LeaveOut])
