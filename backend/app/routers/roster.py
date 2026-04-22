@@ -2,7 +2,8 @@ import calendar
 from datetime import date, timedelta
 from collections import defaultdict
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -15,6 +16,7 @@ from ..schemas import RosterResponse, DayRoster, CallAssignmentOut
 from ..services.solver import (
     SolverInput, DayConfig, PersonInfo, solve, compute_fairness_stats,
 )
+from ..services.exporter import export_original, export_clean
 
 router = APIRouter(prefix="/api/roster", tags=["roster"])
 
@@ -195,6 +197,31 @@ def generate_roster(config_id: int, db: Session = Depends(get_db)):
         days=day_rosters,
         violations=violations,
         fairness=fairness,
+    )
+
+
+@router.get("/{config_id}/export")
+def export_roster(
+    config_id: int,
+    format: str = Query("original", pattern="^(original|clean)$"),
+    db: Session = Depends(get_db),
+):
+    config = db.query(MonthlyConfig).get(config_id)
+    if not config:
+        raise HTTPException(404, "Config not found")
+
+    month_name = calendar.month_name[config.month]
+    if format == "clean":
+        buf = export_clean(config, db)
+        filename = f"Roster_Clean_{month_name}_{config.year}.xlsx"
+    else:
+        buf = export_original(config, db)
+        filename = f"Roster_Original_{month_name}_{config.year}.xlsx"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -20,13 +20,33 @@ export default function DutyRosterView() {
     }
   }
 
+  async function exportFile(format: "original" | "clean") {
+    try {
+      await api.exportRoster(1, format);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
   return (
     <>
       <div className="page-header">
         <h2>Duty Roster {roster ? `- ${monthName(roster.month)} ${roster.year}` : ""}</h2>
-        <button className="btn btn-primary" onClick={generate} disabled={loading}>
-          {loading ? <><span className="spinner" /> Generating...</> : "Generate Duty Roster"}
-        </button>
+        <div className="btn-group">
+          <button className="btn btn-primary" onClick={generate} disabled={loading}>
+            {loading ? <><span className="spinner" /> Generating...</> : "Generate Duty Roster"}
+          </button>
+          {roster && (
+            <>
+              <button className="btn" onClick={() => exportFile("original")}>
+                Export Original
+              </button>
+              <button className="btn" onClick={() => exportFile("clean")}>
+                Export Clean
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       {error && <div className="violations"><h4>Error</h4><p>{error}</p></div>}

@@ -20,6 +20,14 @@ export default function CallRosterView() {
     }
   }
 
+  async function exportFile(format: "original" | "clean") {
+    try {
+      await api.exportRoster(1, format);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
   return (
     <>
       <div className="page-header">
@@ -28,6 +36,16 @@ export default function CallRosterView() {
           <button className="btn btn-primary" onClick={generate} disabled={loading}>
             {loading ? <><span className="spinner" /> Generating...</> : "Generate Call Roster"}
           </button>
+          {roster && (
+            <>
+              <button className="btn" onClick={() => exportFile("original")}>
+                Export Original
+              </button>
+              <button className="btn" onClick={() => exportFile("clean")}>
+                Export Clean
+              </button>
+            </>
+          )}
         </div>
       </div>
 
