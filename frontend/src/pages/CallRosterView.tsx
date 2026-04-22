@@ -1,11 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { RosterResponse } from "../types";
+import type { RosterResponse, Staff, CallAssignment, DayRoster } from "../types";
+
+const MO_GRADES = ["Resident Physician", "Clinical Associate", "Medical Officer"];
+const CALL_SLOTS = ["MO1", "MO2", "MO3", "MO4", "MO5"] as const;
 
 export default function CallRosterView() {
   const [roster, setRoster] = useState<RosterResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [moStaff, setMoStaff] = useState<Staff[]>([]);
+  const [assignments, setAssignments] = useState<CallAssignment[]>([]);
+  const [editCell, setEditCell] = useState<{ date: string; slot: string } | null>(null);
+
+  useEffect(() => {
+    api.getMOStaff().then((all) => setMoStaff(all.filter((s) => MO_GRADES.includes(s.grade))));
+  }, []);
 
   async function generate() {
     setLoading(true);
@@ -13,6 +23,8 @@ export default function CallRosterView() {
     try {
       const data = await api.generateCallRoster(1);
       setRoster(data);
+      const a = await api.getAssignments(1);
+      setAssignments(a);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -28,6 +40,38 @@ export default function CallRosterView() {
     }
   }
 
+  function isOverride(date: string, slot: string): boolean {
+    return assignments.some(
+      (a) => a.date === date && a.call_type === slot && a.is_manual_override
+    );
+  }
+
+  function getSlotValue(day: DayRoster, slot: string): string | null {
+    const key = slot.toLowerCase() as keyof DayRoster;
+    return (day[key] as string | null) ?? null;
+  }
+
+  async function handleOverride(staffId: number) {
+    if (!editCell) return;
+    try {
+      await api.setOverride(1, editCell.date, editCell.slot, staffId);
+      const a = await api.getAssignments(1);
+      setAssignments(a);
+      if (roster) {
+        const staffName = moStaff.find((s) => s.id === staffId)?.name || "";
+        const updatedDays = roster.days.map((day) => {
+          if (day.date !== editCell.date) return day;
+          const key = editCell.slot.toLowerCase() as keyof DayRoster;
+          return { ...day, [key]: staffName };
+        });
+        setRoster({ ...roster, days: updatedDays });
+      }
+    } catch (e: any) {
+      setError(e.message);
+    }
+    setEditCell(null);
+  }
+
   return (
     <>
       <div className="page-header">
@@ -38,10 +82,10 @@ export default function CallRosterView() {
           </button>
           {roster && (
             <>
-              <button className="btn" onClick={() => exportFile("original")}>
+              <button className="btn btn-secondary" onClick={() => exportFile("original")}>
                 Export Original
               </button>
-              <button className="btn" onClick={() => exportFile("clean")}>
+              <button className="btn btn-secondary" onClick={() => exportFile("clean")}>
                 Export Clean
               </button>
             </>
@@ -62,7 +106,11 @@ export default function CallRosterView() {
             </div>
           )}
 
-          <div className="card" style={{ marginTop: 12 }}>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "8px 0" }}>
+            Click any MO cell to manually override the assignment.
+          </p>
+
+          <div className="card" style={{ marginTop: 4 }}>
             <div className="table-wrap">
               <table className="roster-table">
                 <thead>
@@ -88,13 +136,19 @@ export default function CallRosterView() {
                       <td>{day.day_name}</td>
                       <td>{day.consultant_oncall || "-"}</td>
                       <td>{day.ac_oncall || "-"}</td>
-                      <td className="mo1">{day.mo1 || "-"}</td>
-                      <td>{day.mo2 || "-"}</td>
-                      <td className={day.mo3 ? "" : "empty"}>
-                        {day.mo3 || (day.is_weekend && !day.is_stepdown ? "-" : "-")}
-                      </td>
-                      <td className={day.mo4 ? "" : "empty"}>{day.mo4 || "-"}</td>
-                      <td className={day.mo5 ? "" : "empty"}>{day.mo5 || "-"}</td>
+                      {CALL_SLOTS.map((slot) => {
+                        const val = getSlotValue(day, slot);
+                        const over = isOverride(day.date, slot);
+                        return (
+                          <td
+                            key={slot}
+                            className={`editable ${slot === "MO1" ? "mo1" : ""} ${over ? "override" : ""} ${!val ? "empty" : ""}`}
+                            onClick={() => setEditCell({ date: day.date, slot })}
+                          >
+                            {val || "-"}
+                          </td>
+                        );
+                      })}
                     </tr>
                   ))}
                 </tbody>
@@ -102,6 +156,34 @@ export default function CallRosterView() {
             </div>
           </div>
         </>
+      )}
+
+      {editCell && (
+        <div className="modal-backdrop" onClick={() => setEditCell(null)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Override {editCell.slot} on {editCell.date}</h3>
+            <div className="form-group">
+              <label>Select MO</label>
+              <select
+                autoFocus
+                defaultValue=""
+                onChange={(e) => {
+                  if (e.target.value) handleOverride(Number(e.target.value));
+                }}
+              >
+                <option value="" disabled>Choose staff...</option>
+                {moStaff
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>{s.name} ({s.grade})</option>
+                  ))}
+              </select>
+            </div>
+            <div className="modal-actions">
+              <button className="btn btn-secondary" onClick={() => setEditCell(null)}>Cancel</button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

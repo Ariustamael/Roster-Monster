@@ -50,4 +50,44 @@ export const api = {
       `/roster/${configId}/export?format=${format}`,
       `Roster_${format === "clean" ? "Clean" : "Original"}.xlsx`
     ),
+
+  // Leave
+  getLeavesForMonth: (year: number, month: number) =>
+    request<import("./types").Leave[]>(`/staff/leave/month/${year}/${month}`),
+  createLeave: (staffId: number, date: string, leaveType = "AL") =>
+    request<import("./types").Leave>("/staff/leave", {
+      method: "POST",
+      body: JSON.stringify({ staff_id: staffId, date, leave_type: leaveType }),
+    }),
+  deleteLeave: (id: number) =>
+    request<{ ok: boolean }>(`/staff/leave/${id}`, { method: "DELETE" }),
+
+  // Preferences
+  getPreferencesForMonth: (year: number, month: number) =>
+    request<import("./types").CallPreference[]>(`/staff/preferences/month/${year}/${month}`),
+  createPreference: (staffId: number, date: string, type: "request" | "block", reason?: string) =>
+    request<import("./types").CallPreference>("/staff/preferences", {
+      method: "POST",
+      body: JSON.stringify({ staff_id: staffId, date, preference_type: type, reason }),
+    }),
+  deletePreference: (id: number) =>
+    request<{ ok: boolean }>(`/staff/preferences/${id}`, { method: "DELETE" }),
+
+  // Manual overrides
+  setOverride: (configId: number, date: string, callType: string, staffId: number) =>
+    request<import("./types").CallAssignment>(`/roster/${configId}/override`, {
+      method: "PUT",
+      body: JSON.stringify({ date, call_type: callType, staff_id: staffId }),
+    }),
+  removeOverride: (configId: number, date: string, callType: string) =>
+    request<{ ok: boolean }>(
+      `/roster/${configId}/override?date=${date}&call_type=${callType}`,
+      { method: "DELETE" }
+    ),
+  getAssignments: (configId: number) =>
+    request<import("./types").CallAssignment[]>(`/roster/${configId}/assignments`),
+
+  // MO staff for dropdown
+  getMOStaff: () =>
+    request<import("./types").Staff[]>("/staff?active_only=true"),
 };

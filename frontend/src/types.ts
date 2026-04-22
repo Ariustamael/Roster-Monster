@@ -90,3 +90,29 @@ export interface MonthlyConfig {
   month: number;
   status: string;
 }
+
+export interface Leave {
+  id: number;
+  staff_id: number;
+  staff_name: string;
+  date: string;
+  leave_type: string;
+}
+
+export interface CallPreference {
+  id: number;
+  staff_id: number;
+  staff_name: string;
+  date: string;
+  preference_type: "request" | "block";
+  reason: string | null;
+}
+
+export interface CallAssignment {
+  id: number;
+  date: string;
+  staff_id: number;
+  staff_name: string;
+  call_type: string;
+  is_manual_override: boolean;
+}

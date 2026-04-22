@@ -153,3 +153,42 @@ def delete_preference(pref_id: int, db: Session = Depends(get_db)):
     db.delete(cp)
     db.commit()
     return {"ok": True}
+
+
+# ── Bulk queries for a month ────────────────────────────────────────────
+
+@router.get("/leave/month/{year}/{month}", response_model=list[LeaveOut])
+def list_leaves_for_month(year: int, month: int, db: Session = Depends(get_db)):
+    from datetime import date as d_type
+    import calendar
+    start = d_type(year, month, 1)
+    end = d_type(year, month, calendar.monthrange(year, month)[1])
+    rows = db.query(Leave).filter(Leave.date >= start, Leave.date <= end).order_by(Leave.date).all()
+    return [
+        LeaveOut(
+            id=r.id, staff_id=r.staff_id, staff_name=r.staff.name,
+            date=r.date, leave_type=r.leave_type,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/preferences/month/{year}/{month}", response_model=list[CallPreferenceOut])
+def list_preferences_for_month(year: int, month: int, db: Session = Depends(get_db)):
+    from datetime import date as d_type
+    import calendar
+    start = d_type(year, month, 1)
+    end = d_type(year, month, calendar.monthrange(year, month)[1])
+    rows = (
+        db.query(CallPreference)
+        .filter(CallPreference.date >= start, CallPreference.date <= end)
+        .order_by(CallPreference.date)
+        .all()
+    )
+    return [
+        CallPreferenceOut(
+            id=r.id, staff_id=r.staff_id, staff_name=r.staff.name,
+            date=r.date, preference_type=r.preference_type, reason=r.reason,
+        )
+        for r in rows
+    ]

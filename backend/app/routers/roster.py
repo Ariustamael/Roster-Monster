@@ -12,11 +12,12 @@ from ..models import (
     Staff, TeamAssignment, Team, Leave, CallPreference, CallAssignment,
     PublicHoliday, MO_GRADES, PreferenceType, Grade,
 )
-from ..schemas import RosterResponse, DayRoster, CallAssignmentOut
+from ..schemas import RosterResponse, DayRoster, CallAssignmentOut, ManualOverrideCreate
 from ..services.solver import (
     SolverInput, DayConfig, PersonInfo, solve, compute_fairness_stats,
 )
 from ..services.exporter import export_original, export_clean
+from ..services.validators import validate_full_roster as _validate
 
 router = APIRouter(prefix="/api/roster", tags=["roster"])
 
@@ -106,6 +107,33 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
         else:
             request_dates[cp.staff_id].add(cp.date)
 
+    prior_assignments: dict[date, dict[int, CallType]] = {}
+    prev_month = month - 1
+    prev_year = year
+    if prev_month == 0:
+        prev_month = 12
+        prev_year = year - 1
+    prev_config = (
+        db.query(MonthlyConfig)
+        .filter(MonthlyConfig.year == prev_year, MonthlyConfig.month == prev_month)
+        .first()
+    )
+    if prev_config:
+        prev_num_days = calendar.monthrange(prev_year, prev_month)[1]
+        lookback_start = date(prev_year, prev_month, max(1, prev_num_days - 6))
+        prev_calls = (
+            db.query(CallAssignment)
+            .filter(
+                CallAssignment.config_id == prev_config.id,
+                CallAssignment.date >= lookback_start,
+            )
+            .all()
+        )
+        for c in prev_calls:
+            if c.date not in prior_assignments:
+                prior_assignments[c.date] = {}
+            prior_assignments[c.date][c.staff_id] = c.call_type
+
     return SolverInput(
         year=year,
         month=month,
@@ -114,6 +142,7 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
         leave_dates=dict(leave_dates),
         block_dates=dict(block_dates),
         request_dates=dict(request_dates),
+        prior_assignments=prior_assignments,
     )
 
 
@@ -223,6 +252,73 @@ def export_roster(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.put("/{config_id}/override", response_model=CallAssignmentOut)
+def set_override(config_id: int, payload: ManualOverrideCreate, db: Session = Depends(get_db)):
+    config = db.query(MonthlyConfig).get(config_id)
+    if not config:
+        raise HTTPException(404, "Config not found")
+    staff = db.query(Staff).get(payload.staff_id)
+    if not staff:
+        raise HTTPException(404, "Staff not found")
+
+    existing = (
+        db.query(CallAssignment)
+        .filter(
+            CallAssignment.config_id == config_id,
+            CallAssignment.date == payload.date,
+            CallAssignment.call_type == payload.call_type,
+        )
+        .first()
+    )
+    if existing:
+        existing.staff_id = payload.staff_id
+        existing.is_manual_override = True
+    else:
+        existing = CallAssignment(
+            config_id=config_id,
+            date=payload.date,
+            staff_id=payload.staff_id,
+            call_type=payload.call_type,
+            is_manual_override=True,
+        )
+        db.add(existing)
+    db.commit()
+    db.refresh(existing)
+    return CallAssignmentOut(
+        id=existing.id,
+        date=existing.date,
+        staff_id=existing.staff_id,
+        staff_name=staff.name,
+        call_type=existing.call_type,
+        is_manual_override=True,
+    )
+
+
+@router.delete("/{config_id}/override")
+def remove_override(
+    config_id: int,
+    date_str: str = Query(..., alias="date"),
+    call_type: str = Query(...),
+    db: Session = Depends(get_db),
+):
+    from datetime import datetime as dt
+    d = dt.strptime(date_str, "%Y-%m-%d").date()
+    existing = (
+        db.query(CallAssignment)
+        .filter(
+            CallAssignment.config_id == config_id,
+            CallAssignment.date == d,
+            CallAssignment.call_type == call_type,
+        )
+        .first()
+    )
+    if not existing:
+        raise HTTPException(404, "Assignment not found")
+    db.delete(existing)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/{config_id}/assignments", response_model=list[CallAssignmentOut])

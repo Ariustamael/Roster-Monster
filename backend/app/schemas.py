@@ -161,6 +161,12 @@ class CallAssignmentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ManualOverrideCreate(BaseModel):
+    date: date
+    call_type: CallType
+    staff_id: int
+
+
 class DayRoster(BaseModel):
     date: date
     day_name: str

@@ -257,3 +257,148 @@ tr.weekend.ph { background: var(--ph); }
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Modal ──────────────────────────────────────────── */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.modal {
+  background: var(--surface);
+  border-radius: 10px;
+  padding: 24px;
+  min-width: 340px;
+  max-width: 480px;
+  box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+}
+
+.modal h3 {
+  font-size: 16px;
+  margin-bottom: 16px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+/* ── Forms ──────────────────────────────────────────── */
+
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.form-group select,
+.form-group input[type="date"],
+.form-group input[type="text"] {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 13px;
+  background: var(--surface);
+}
+
+/* ── Secondary button ───────────────────────────────── */
+
+.btn-secondary {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover { background: var(--border); }
+
+.btn-danger {
+  background: var(--danger);
+  color: white;
+}
+
+.btn-danger:hover { background: #b91c1c; }
+
+.btn-sm {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+/* ── Clickable roster cell ──────────────────────────── */
+
+td.editable {
+  cursor: pointer;
+  position: relative;
+}
+
+td.editable:hover {
+  background: #e0e7ff !important;
+}
+
+td.override {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+
+/* ── Expandable staff row ───────────────────────────── */
+
+.expand-toggle {
+  cursor: pointer;
+  user-select: none;
+}
+
+.expand-toggle:hover td {
+  background: #f0f1f5;
+}
+
+.staff-detail {
+  background: #f8f9fb;
+}
+
+.staff-detail td {
+  padding: 12px 16px;
+}
+
+.detail-section {
+  display: inline-flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.detail-section .chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.chip .remove {
+  cursor: pointer;
+  color: var(--danger);
+  font-weight: bold;
+  margin-left: 2px;
+}
+
+.chip .remove:hover { opacity: 0.7; }
+
+.chip.block { background: #fee2e2; border-color: #fecaca; }
+.chip.request { background: #dbeafe; border-color: #bfdbfe; }
+.chip.leave { background: #fef9c3; border-color: #fde68a; }
