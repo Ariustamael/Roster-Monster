@@ -36,6 +36,20 @@ class CallType(str, enum.Enum):
 OVERNIGHT_CALL_TYPES = {CallType.MO1, CallType.MO2}
 
 
+class DutyType(str, enum.Enum):
+    OT = "OT"
+    SUPERVISED_CLINIC = "Supervised Clinic"
+    MOPD = "MOPD"
+    ADMIN = "Admin"
+    SPECIAL = "Special"
+
+
+class Session(str, enum.Enum):
+    AM = "AM"
+    PM = "PM"
+    FULL_DAY = "Full Day"
+
+
 class PreferenceType(str, enum.Enum):
     REQUEST = "request"
     BLOCK = "block"
@@ -151,6 +165,7 @@ class MonthlyConfig(Base):
     stepdown_days = relationship("StepdownDay", back_populates="config", cascade="all, delete-orphan")
     evening_ot_dates = relationship("EveningOTDate", back_populates="config", cascade="all, delete-orphan")
     call_assignments = relationship("CallAssignment", back_populates="config", cascade="all, delete-orphan")
+    duty_assignments = relationship("DutyAssignment", back_populates="config", cascade="all, delete-orphan")
 
     __table_args__ = (UniqueConstraint("year", "month"),)
 
@@ -237,3 +252,55 @@ class CallAssignment(Base):
     staff = relationship("Staff", back_populates="call_assignments")
 
     __table_args__ = (UniqueConstraint("config_id", "date", "call_type"),)
+
+
+# ── OT Templates (weekly recurring) ─────────────────────────────────────
+
+class OTTemplate(Base):
+    __tablename__ = "ot_template"
+
+    id = Column(Integer, primary_key=True)
+    day_of_week = Column(Integer, nullable=False)  # 0=Mon..4=Fri
+    room = Column(String(20), nullable=False)       # OT3, OT4, OT10, DSOT3, OT6
+    consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
+    assistants_needed = Column(Integer, default=2)  # 2 for active OT, 1 for LA
+    is_la = Column(Boolean, default=False)
+
+    consultant = relationship("Staff")
+
+    __table_args__ = (UniqueConstraint("day_of_week", "room"),)
+
+
+# ── Clinic Templates (weekly recurring) ──────────────────────────────────
+
+class ClinicTemplate(Base):
+    __tablename__ = "clinic_template"
+
+    id = Column(Integer, primary_key=True)
+    day_of_week = Column(Integer, nullable=False)  # 0=Mon..4=Fri
+    session = Column(SAEnum(Session), nullable=False)  # AM or PM
+    room = Column(String(20), nullable=False)
+    is_supervised = Column(Boolean, default=False)
+    consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
+
+    consultant = relationship("Staff")
+
+
+# ── Duty Assignments (output) ────────────────────────────────────────────
+
+class DutyAssignment(Base):
+    __tablename__ = "duty_assignment"
+
+    id = Column(Integer, primary_key=True)
+    config_id = Column(Integer, ForeignKey("monthly_config.id"), nullable=False)
+    date = Column(Date, nullable=False)
+    staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
+    session = Column(SAEnum(Session), nullable=False)
+    duty_type = Column(SAEnum(DutyType), nullable=False)
+    location = Column(String(30), nullable=True)
+    consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
+    is_manual_override = Column(Boolean, default=False)
+
+    config = relationship("MonthlyConfig", back_populates="duty_assignments")
+    staff = relationship("Staff", foreign_keys=[staff_id])
+    consultant = relationship("Staff", foreign_keys=[consultant_id])

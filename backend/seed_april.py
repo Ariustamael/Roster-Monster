@@ -1,6 +1,7 @@
 """
 Seed the database with April 2026 data from CGH Orthopaedic Surgery.
-Includes staff, teams, consultant/AC on-call, leaves, and evening OT dates.
+Includes staff, teams, consultant/AC on-call, leaves, evening OT dates,
+OT templates, and clinic templates.
 """
 
 import sys
@@ -13,7 +14,8 @@ from app.database import init_db, SessionLocal
 from app.models import (
     Staff, Team, TeamAssignment, Leave, CallPreference,
     PublicHoliday, MonthlyConfig, ConsultantOnCall, ACOnCall,
-    StepdownDay, EveningOTDate, Grade, PreferenceType,
+    StepdownDay, EveningOTDate, OTTemplate, ClinicTemplate,
+    Grade, PreferenceType, Session,
 )
 
 def seed():
@@ -24,7 +26,7 @@ def seed():
     for table in [
         EveningOTDate, StepdownDay, ACOnCall, ConsultantOnCall,
         CallPreference, Leave, TeamAssignment, PublicHoliday,
-        MonthlyConfig, Staff, Team,
+        MonthlyConfig, ClinicTemplate, OTTemplate, Staff, Team,
     ]:
         db.query(table).delete()
     db.commit()
@@ -244,6 +246,60 @@ def seed():
         reason="Prefer this date",
     ))
 
+    # ── OT Templates (weekly recurring schedule) ───────────────────────
+    # Mon=0, Tue=1, Wed=2, Thu=3, Fri=4
+    ot_template_data = [
+        # (day_of_week, room, consultant_name, assistants_needed, is_la)
+        (0, "OT3",  "Kinjal Mehta",  2, False),   # Mon OT3 = Kinjal (F&A)
+        (0, "OT4",  "Ing How",       2, False),   # Mon OT4 = Ing How (H&K)
+        (0, "OT10", "Andy Yeo",      2, False),   # Mon OT10 = Andy Yeo (Trauma)
+        (1, "OT3",  "Kuo CL",        2, False),   # Tue OT3 = Kuo CL (S&E)
+        (1, "OT4",  "James Loh",     2, False),   # Tue OT4 = James Loh (H&K)
+        (1, "OT10", "Zhihong",       2, False),   # Tue OT10 = Zhihong (Spine)
+        (2, "OT3",  "Raghu",         2, False),   # Wed OT3 = Raghu (H&K)
+        (2, "OT4",  "David Chua",    2, False),   # Wed OT4 = David Chua (Trauma)
+        (2, "OT10", "Shree Dinesh",  2, False),   # Wed OT10 = Dinesh (Spine)
+        (3, "OT3",  "Charles Kon",   2, False),   # Thu OT3 = Charles Kon (F&A)
+        (3, "OT4",  "Wei Sheng",     2, False),   # Thu OT4 = Wei Sheng (S&E)
+        (4, "OT3",  "Jonathan Gan",  2, False),   # Fri OT3 = Jon Gan (F&A)
+        (4, "OT4",  "Ho Chin",       2, False),   # Fri OT4 = Ho Chin (Trauma)
+        (4, "OT10", "Justine Lee",   2, False),   # Fri OT10 = Justine Lee (Trauma)
+    ]
+
+    for dow, room, cons_name, assists, is_la in ot_template_data:
+        db.add(OTTemplate(
+            day_of_week=dow, room=room,
+            consultant_id=staff[cons_name].id,
+            assistants_needed=assists, is_la=is_la,
+        ))
+
+    # ── Clinic Templates (4E supervised + MOPD rooms) ────────────────
+    # Supervised clinics: consultant + 1 MO, prefer team match
+    supervised_clinics = [
+        # (day_of_week, session, room, consultant_name)
+        (0, Session.AM, "4E-Sup", "James Loh"),       # Mon AM
+        (0, Session.PM, "4E-Sup", "Kuo CL"),          # Mon PM
+        (1, Session.AM, "4E-Sup1", "Justine Lee"),     # Tue AM (2 clinics)
+        (1, Session.AM, "4E-Sup2", "Ing How"),         # Tue AM
+        (1, Session.PM, "4E-Sup", "Ho Chin"),          # Tue PM
+        (2, Session.AM, "4E-Sup", "Kinjal Mehta"),     # Wed AM
+        (2, Session.PM, "4E-Sup", "Andy Yeo"),         # Wed PM
+        (3, Session.AM, "4E-Sup1", "Raghu"),           # Thu AM (2 clinics)
+        (3, Session.AM, "4E-Sup2", "Jonathan Gan"),    # Thu AM
+        (3, Session.PM, "4E-Sup", "Zhihong"),          # Thu PM
+        (4, Session.AM, "4E-Sup", "Wei Sheng"),        # Fri AM
+        (4, Session.PM, "4E-Sup", "Charles Kon"),      # Fri PM
+    ]
+
+    for dow, session, room, cons_name in supervised_clinics:
+        db.add(ClinicTemplate(
+            day_of_week=dow, session=session, room=room,
+            is_supervised=True, consultant_id=staff[cons_name].id,
+        ))
+
+    # MOPD rooms (6 rooms per session, not all need explicit template)
+    # The solver fills remaining capacity with MOPD MOs automatically.
+
     db.commit()
     db.close()
 
@@ -254,6 +310,8 @@ def seed():
     print(f"  AC on-call days: {len(ac_oncall)}")
     print(f"  Evening OT dates: 10")
     print(f"  Stepdown days: 3")
+    print(f"  OT templates: {len(ot_template_data)}")
+    print(f"  Supervised clinic templates: {len(supervised_clinics)}")
     print(f"  Sample leaves: {len(sample_leaves)}")
     print(f"  Sample preferences: 2")
 
