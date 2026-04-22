@@ -2,7 +2,7 @@ import { useEffect, useState, type DragEvent } from "react";
 import { api } from "../api";
 import type { Staff, Team, TeamAssignment } from "../types";
 
-const MO_GRADES = ["Resident Physician", "Clinical Associate", "Medical Officer"];
+const TRAINEE_GRADES = ["Registrar", "Senior Resident", "Medical Officer"];
 const CONS_GRADES = ["Senior Consultant", "Consultant", "Associate Consultant"];
 
 export default function TeamsView() {
@@ -27,7 +27,7 @@ export default function TeamsView() {
 
   useEffect(() => { reload(); }, []);
 
-  const moStaff = staff.filter((s) => MO_GRADES.includes(s.grade));
+  const moStaff = staff.filter((s) => TRAINEE_GRADES.includes(s.grade));
   const consStaff = staff.filter((s) => CONS_GRADES.includes(s.grade));
 
   function getTeamConsultants(teamId: number): Staff[] {
@@ -97,7 +97,7 @@ export default function TeamsView() {
     const staffId = Number(e.dataTransfer.getData("text/plain"));
     if (!staffId) return;
     const droppedStaff = staff.find((s) => s.id === staffId);
-    if (!droppedStaff || !MO_GRADES.includes(droppedStaff.grade)) return;
+    if (!droppedStaff || !TRAINEE_GRADES.includes(droppedStaff.grade)) return;
     setDragId(null);
     try {
       await api.reassignStaff(staffId, teamId, consultantId);
@@ -175,7 +175,7 @@ export default function TeamsView() {
                   return (
                     <div key={cons.id} className="consultant-section">
                       <div
-                        className={`team-card consultant-card ${dragId !== null && dragGrade !== "" && MO_GRADES.includes(dragGrade) ? "drop-target" : ""}`}
+                        className={`team-card consultant-card ${dragId !== null && dragGrade !== "" && TRAINEE_GRADES.includes(dragGrade) ? "drop-target" : ""}`}
                         draggable
                         onDragStart={(e) => onDragStart(e, cons.id, cons.grade)}
                         onDragEnd={onDragEnd}

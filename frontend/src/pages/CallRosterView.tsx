@@ -3,7 +3,7 @@ import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
 import type { RosterResponse, Staff, CallAssignment, DayRoster } from "../types";
 
-const MO_GRADES = ["Resident Physician", "Clinical Associate", "Medical Officer"];
+const MO_GRADES = ["Senior Resident", "Medical Officer"];
 const CALL_SLOTS = ["MO1", "MO2", "MO3", "MO4", "MO5"] as const;
 
 export default function CallRosterView() {

@@ -62,7 +62,8 @@ export default function FairnessView() {
               <thead>
                 <tr>
                   <th>Name</th>
-                  <th>Total</th>
+                  <th>24h Calls</th>
+                  <th>All Calls</th>
                   <th>MO1</th>
                   <th>MO2</th>
                   <th>MO3</th>
@@ -73,17 +74,18 @@ export default function FairnessView() {
               </thead>
               <tbody>
                 {Object.entries(callFairness)
-                  .filter(([, s]) => s.total > 0)
+                  .filter(([, s]) => s.total_all > 0)
                   .sort(([a], [b]) => a.localeCompare(b))
                   .map(([name, s]) => {
-                    const totals = Object.values(callFairness).map((v) => v.total).filter((v) => v > 0);
-                    const avg = totals.reduce((a, b) => a + b, 0) / totals.length;
+                    const totals24h = Object.values(callFairness).map((v) => v.total_24h).filter((v) => v > 0);
+                    const avg = totals24h.length > 0 ? totals24h.reduce((a, b) => a + b, 0) / totals24h.length : 0;
                     return (
                       <tr key={name}>
                         <td>{name}</td>
-                        <td className={s.total > avg + 1 ? "high" : s.total < avg - 1 ? "low" : ""}>
-                          {s.total}
+                        <td className={s.total_24h > avg + 1 ? "high" : s.total_24h < avg - 1 ? "low" : ""}>
+                          {s.total_24h}
                         </td>
+                        <td>{s.total_all}</td>
                         <td>{s.MO1}</td>
                         <td>{s.MO2}</td>
                         <td>{s.MO3}</td>

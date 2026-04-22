@@ -13,14 +13,18 @@ class Grade(str, enum.Enum):
     CONSULTANT = "Consultant"
     ASSOCIATE_CONSULTANT = "Associate Consultant"
     REGISTRAR = "Registrar"
-    RESIDENT_PHYSICIAN = "Resident Physician"
-    CLINICAL_ASSOCIATE = "Clinical Associate"
+    SENIOR_RESIDENT = "Senior Resident"
     MEDICAL_OFFICER = "Medical Officer"
 
 
 MO_GRADES = {
-    Grade.RESIDENT_PHYSICIAN,
-    Grade.CLINICAL_ASSOCIATE,
+    Grade.SENIOR_RESIDENT,
+    Grade.MEDICAL_OFFICER,
+}
+
+DUTY_GRADES = {
+    Grade.REGISTRAR,
+    Grade.SENIOR_RESIDENT,
     Grade.MEDICAL_OFFICER,
 }
 
@@ -182,9 +186,11 @@ class ConsultantOnCall(Base):
     config_id = Column(Integer, ForeignKey("monthly_config.id"), nullable=False)
     date = Column(Date, nullable=False)
     consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
+    supervising_consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
 
     config = relationship("MonthlyConfig", back_populates="consultant_oncalls")
-    consultant = relationship("Staff")
+    consultant = relationship("Staff", foreign_keys=[consultant_id])
+    supervising_consultant = relationship("Staff", foreign_keys=[supervising_consultant_id])
 
     __table_args__ = (UniqueConstraint("config_id", "date"),)
 

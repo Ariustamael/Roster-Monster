@@ -8,17 +8,16 @@ const GRADE_ORDER: Record<string, number> = {
   "Consultant": 1,
   "Associate Consultant": 2,
   "Registrar": 3,
-  "Resident Physician": 4,
-  "Clinical Associate": 5,
-  "Medical Officer": 6,
+  "Senior Resident": 4,
+  "Medical Officer": 5,
 };
 
 const ALL_GRADES = [
   "Senior Consultant", "Consultant", "Associate Consultant",
-  "Registrar", "Resident Physician", "Clinical Associate", "Medical Officer",
+  "Registrar", "Senior Resident", "Medical Officer",
 ];
 
-const MO_GRADES = ["Resident Physician", "Clinical Associate", "Medical Officer"];
+const ALLOCATABLE_GRADES = ["Registrar", "Senior Resident", "Medical Officer"];
 
 const MONTH_NAMES = [
   "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -59,7 +58,7 @@ export default function StaffView() {
     )
     .sort((a, b) => (GRADE_ORDER[a.grade] ?? 9) - (GRADE_ORDER[b.grade] ?? 9) || a.name.localeCompare(b.name));
 
-  const moCount = staff.filter((s) => MO_GRADES.includes(s.grade)).length;
+  const moCount = staff.filter((s) => ALLOCATABLE_GRADES.includes(s.grade)).length;
 
   async function addStaff(name: string, grade: string) {
     const s = await api.createStaff(name, grade);
@@ -161,7 +160,7 @@ export default function StaffView() {
                 {filtered.map((s) => {
                   const staffLeaves = leaves.filter((l) => l.staff_id === s.id);
                   const staffPrefs = prefs.filter((p) => p.staff_id === s.id);
-                  const isMO = MO_GRADES.includes(s.grade);
+                  const isMO = ALLOCATABLE_GRADES.includes(s.grade);
                   const isExpanded = expanded === s.id;
                   const isEditing = editing === s.id;
 

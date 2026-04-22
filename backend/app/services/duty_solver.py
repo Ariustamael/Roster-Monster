@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 
 from ..models import (
-    CallType, DutyType, Session, OVERNIGHT_CALL_TYPES, MO_GRADES,
+    CallType, DutyType, Session, OVERNIGHT_CALL_TYPES, DUTY_GRADES, Grade,
 )
 
 
@@ -42,6 +42,7 @@ class ClinicSlot:
 class PersonInfo:
     id: int
     name: str
+    grade: str = ""
     team_id: int | None = None
     supervisor_id: int | None = None
 
@@ -154,6 +155,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                     fairness.ot_score(p.id)
                     + (5.0 if p.supervisor_id == ot.consultant_id else 0.0)
                     + (3.0 if ot.consultant_team_id and p.team_id == ot.consultant_team_id else 0.0)
+                    + (-3.0 if p.grade == Grade.SENIOR_RESIDENT.value else 0.0)
                 ),
                 reverse=True,
             )
@@ -173,11 +175,14 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
         # ── 2. AM session ───────────────────────────────────────────
         am_pool = [p for p in available if p.id not in am_assigned]
 
-        # Supervised clinics AM
+        # Supervised clinics AM (Registrars excluded, Senior Residents preferred)
         for clinic in day.am_clinics:
             if not clinic.is_supervised:
                 continue
-            candidates = [p for p in am_pool if p.id not in am_assigned]
+            candidates = [
+                p for p in am_pool
+                if p.id not in am_assigned and p.grade != Grade.REGISTRAR.value
+            ]
             if not candidates:
                 break
             scored = sorted(
@@ -186,6 +191,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                     fairness.clinic_score(p.id)
                     + (5.0 if clinic.consultant_id and p.supervisor_id == clinic.consultant_id else 0.0)
                     + (3.0 if clinic.consultant_team_id and p.team_id == clinic.consultant_team_id else 0.0)
+                    + (4.0 if p.grade == Grade.SENIOR_RESIDENT.value else 0.0)
                 ),
                 reverse=True,
             )
@@ -233,11 +239,14 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
         # ── 3. PM session ───────────────────────────────────────────
         pm_pool = [p for p in available if p.id not in pm_assigned]
 
-        # Supervised clinics PM
+        # Supervised clinics PM (Registrars excluded, Senior Residents preferred)
         for clinic in day.pm_clinics:
             if not clinic.is_supervised:
                 continue
-            candidates = [p for p in pm_pool if p.id not in pm_assigned]
+            candidates = [
+                p for p in pm_pool
+                if p.id not in pm_assigned and p.grade != Grade.REGISTRAR.value
+            ]
             if not candidates:
                 break
             scored = sorted(
@@ -246,6 +255,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                     fairness.clinic_score(p.id)
                     + (5.0 if clinic.consultant_id and p.supervisor_id == clinic.consultant_id else 0.0)
                     + (3.0 if clinic.consultant_team_id and p.team_id == clinic.consultant_team_id else 0.0)
+                    + (4.0 if p.grade == Grade.SENIOR_RESIDENT.value else 0.0)
                 ),
                 reverse=True,
             )

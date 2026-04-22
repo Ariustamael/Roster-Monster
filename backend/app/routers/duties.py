@@ -9,7 +9,7 @@ from ..database import get_db
 from ..models import (
     MonthlyConfig, CallAssignment, DutyAssignment, Staff, TeamAssignment,
     OTTemplate, ClinicTemplate, Leave, PublicHoliday,
-    MO_GRADES, CallType, OVERNIGHT_CALL_TYPES, DutyType, Session,
+    DUTY_GRADES, CallType, OVERNIGHT_CALL_TYPES, DutyType, Session,
 )
 from ..schemas import (
     DutyRosterResponse, DayDutyRoster, DutyAssignmentOut,
@@ -190,25 +190,25 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         ))
 
     # Load MO pool
-    mo_staff = (
+    duty_staff = (
         db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in MO_GRADES]))
+        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in DUTY_GRADES]))
         .all()
     )
     mo_pool: list[PersonInfo] = []
-    for s in mo_staff:
+    for s in duty_staff:
         ta = (
             db.query(TeamAssignment)
             .filter(
                 TeamAssignment.staff_id == s.id,
-                TeamAssignment.role == "mo",
+                TeamAssignment.role.in_(["mo", "consultant"]),
                 TeamAssignment.effective_from <= date(year, month, num_days),
             )
             .order_by(TeamAssignment.effective_from.desc())
             .first()
         )
         mo_pool.append(PersonInfo(
-            id=s.id, name=s.name,
+            id=s.id, name=s.name, grade=s.grade.value,
             team_id=ta.team_id if ta else None,
             supervisor_id=ta.supervisor_id if ta else None,
         ))

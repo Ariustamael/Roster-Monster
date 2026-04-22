@@ -36,7 +36,8 @@ export interface RosterResponse {
 }
 
 export interface FairnessStats {
-  total: number;
+  total_24h: number;
+  total_all: number;
   MO1: number;
   MO2: number;
   MO3: number;

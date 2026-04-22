@@ -39,27 +39,41 @@ def seed():
         db.flush()
         teams[name] = t
 
-    # ── Consultants ──────────────────────────────────────────────────
+    # ── Senior Consultants ───────────────────────────────────────────
     consultants_data = [
-        ("David Chua",   Grade.CONSULTANT,        "Trauma"),
         ("Andy Yeo",     Grade.SENIOR_CONSULTANT,  "Trauma"),
-        ("Justine Lee",  Grade.CONSULTANT,         "Trauma"),
-        ("Ho Chin",      Grade.CONSULTANT,         "Trauma"),
-        ("Kuo CL",       Grade.CONSULTANT,         "Shoulder & Elbow"),
-        ("Wei Sheng",    Grade.CONSULTANT,         "Shoulder & Elbow"),
-        ("James Loh",    Grade.CONSULTANT,         "Hip & Knee"),
-        ("Raghu",        Grade.CONSULTANT,         "Hip & Knee"),
-        ("Ing How",      Grade.CONSULTANT,         "Hip & Knee"),
-        ("Siti Mastura", Grade.CONSULTANT,         "Hip & Knee"),
-        ("Kinjal Mehta", Grade.CONSULTANT,         "Foot & Ankle"),
-        ("Charles Kon",  Grade.CONSULTANT,         "Foot & Ankle"),
-        ("Jonathan Gan", Grade.CONSULTANT,         "Foot & Ankle"),
+        ("David Chua",   Grade.SENIOR_CONSULTANT,  "Trauma"),
+        ("Charles Kon",  Grade.SENIOR_CONSULTANT,  "Foot & Ankle"),
+        ("James Loh",    Grade.SENIOR_CONSULTANT,  "Hip & Knee"),
+        ("Kinjal Mehta", Grade.SENIOR_CONSULTANT,  "Foot & Ankle"),
+        ("Kuo CL",       Grade.SENIOR_CONSULTANT,  "Shoulder & Elbow"),
+        ("Raghu",        Grade.SENIOR_CONSULTANT,  "Hip & Knee"),
         ("Shree Dinesh", Grade.SENIOR_CONSULTANT,  "Spine"),
-        ("Zhihong",      Grade.CONSULTANT,         "Spine"),
     ]
 
     staff = {}
     for name, grade, team_name in consultants_data:
+        s = Staff(name=name, grade=grade)
+        db.add(s)
+        db.flush()
+        staff[name] = s
+        db.add(TeamAssignment(
+            staff_id=s.id, team_id=teams[team_name].id,
+            role="consultant", effective_from=date(2025, 1, 1),
+        ))
+
+    # ── Consultants ──────────────────────────────────────────────────
+    cons_data = [
+        ("Ho Chin",      Grade.CONSULTANT,  "Trauma"),
+        ("Ing How",      Grade.CONSULTANT,  "Hip & Knee"),
+        ("Jonathan Gan", Grade.CONSULTANT,  "Foot & Ankle"),
+        ("Justine Lee",  Grade.CONSULTANT,  "Trauma"),
+        ("Siti Mastura", Grade.CONSULTANT,  "Hip & Knee"),
+        ("Wei Sheng",    Grade.CONSULTANT,  "Shoulder & Elbow"),
+        ("Zhihong",      Grade.CONSULTANT,  "Spine"),
+    ]
+
+    for name, grade, team_name in cons_data:
         s = Staff(name=name, grade=grade)
         db.add(s)
         db.flush()
@@ -84,57 +98,67 @@ def seed():
             role="consultant", effective_from=date(2025, 1, 1),
         ))
 
-    # ── Registrars ───────────────────────────────────────────────────
-    for name in ["Grace Tan", "Sagar", "Omar", "Raj", "Jia Ying"]:
+    # ── Registrars (SSRs — no team assignment, no clinic) ────────────
+    for name in ["Grace Tan", "Omar", "Raj", "Sagar"]:
         s = Staff(name=name, grade=Grade.REGISTRAR)
         db.add(s)
         db.flush()
         staff[name] = s
 
-    # ── MOs (eff 6 Apr pool) ─────────────────────────────────────────
+    # ── Senior Residents (can be tagged to consultants for clinics) ──
+    for name in ["Jia Ying", "David Mao"]:
+        s = Staff(name=name, grade=Grade.SENIOR_RESIDENT)
+        db.add(s)
+        db.flush()
+        staff[name] = s
+
+    # ── Medical Officers ─────────────────────────────────────────────
+    # (team, consultant_tag) — consultant_tag links MO to supervisor
     mo_data = [
         # Trauma
-        ("Nalaka",       Grade.MEDICAL_OFFICER,      "Trauma"),
-        ("Chester Tan",  Grade.RESIDENT_PHYSICIAN,   "Trauma"),
-        ("Samuel Ong",   Grade.RESIDENT_PHYSICIAN,   "Trauma"),
-        ("Nazir",        Grade.RESIDENT_PHYSICIAN,   "Trauma"),
-        ("Asif",         Grade.MEDICAL_OFFICER,       "Trauma"),
-        ("Shilin",       Grade.RESIDENT_PHYSICIAN,   "Trauma"),
-        ("Joshua Wong",  Grade.RESIDENT_PHYSICIAN,   "Trauma"),
+        ("Chester Tan",  Grade.MEDICAL_OFFICER, "Trauma",          "Andy Yeo"),
+        ("Nalaka",       Grade.MEDICAL_OFFICER, "Trauma",          "David Chua"),
+        ("Asif",         Grade.MEDICAL_OFFICER, "Trauma",          "Ho Chin"),
+        ("Joshua Wong",  Grade.MEDICAL_OFFICER, "Trauma",          "Ho Chin"),
+        ("Shilin",       Grade.MEDICAL_OFFICER, "Trauma",          "Junren"),
+        ("Nazir",        Grade.MEDICAL_OFFICER, "Trauma",          "Justine Lee"),
+        ("Samuel Ong",   Grade.MEDICAL_OFFICER, "Trauma",          "Justine Lee"),
         # Shoulder & Elbow
-        ("Qing Hang",    Grade.RESIDENT_PHYSICIAN,   "Shoulder & Elbow"),
-        ("Feng Yi",      Grade.RESIDENT_PHYSICIAN,   "Shoulder & Elbow"),
-        ("Amirzeb",      Grade.MEDICAL_OFFICER,       "Shoulder & Elbow"),
-        ("Chee Sian",    Grade.RESIDENT_PHYSICIAN,   "Shoulder & Elbow"),
-        ("Sandip",       Grade.RESIDENT_PHYSICIAN,   "Shoulder & Elbow"),
+        ("Feng Yi",      Grade.MEDICAL_OFFICER, "Shoulder & Elbow", "Kuo CL"),
+        ("Qing Hang",    Grade.MEDICAL_OFFICER, "Shoulder & Elbow", "Kuo CL"),
+        ("Amirzeb",      Grade.MEDICAL_OFFICER, "Shoulder & Elbow", "Wei Sheng"),
+        ("Chee Sian",    Grade.MEDICAL_OFFICER, "Shoulder & Elbow", None),
         # Hip & Knee
-        ("Raihan",       Grade.MEDICAL_OFFICER,       "Hip & Knee"),
-        ("Kevan Toh",    Grade.RESIDENT_PHYSICIAN,   "Hip & Knee"),
-        ("Jamie Lim",    Grade.RESIDENT_PHYSICIAN,   "Hip & Knee"),
-        ("Teddy Cheong", Grade.RESIDENT_PHYSICIAN,   "Hip & Knee"),
-        ("Kumara",       Grade.MEDICAL_OFFICER,       "Hip & Knee"),
-        ("Nuwan",        Grade.MEDICAL_OFFICER,       "Hip & Knee"),
+        ("Kumara",       Grade.MEDICAL_OFFICER, "Hip & Knee",      "Ing How"),
+        ("Kevan Toh",    Grade.MEDICAL_OFFICER, "Hip & Knee",      "James Loh"),
+        ("Raihan",       Grade.MEDICAL_OFFICER, "Hip & Knee",      "James Loh"),
+        ("Sandip",       Grade.MEDICAL_OFFICER, "Hip & Knee",      "James Loh"),
+        ("Jamie Lim",    Grade.MEDICAL_OFFICER, "Hip & Knee",      "Raghu"),
+        ("Teddy Cheong", Grade.MEDICAL_OFFICER, "Hip & Knee",      "Raghu"),
+        ("Nuwan",        Grade.MEDICAL_OFFICER, "Hip & Knee",      None),
         # Foot & Ankle
-        ("Angela Lim",   Grade.RESIDENT_PHYSICIAN,   "Foot & Ankle"),
-        ("Brandon Lim",  Grade.RESIDENT_PHYSICIAN,   "Foot & Ankle"),
-        ("Gennie Lim",   Grade.RESIDENT_PHYSICIAN,   "Foot & Ankle"),
-        ("Wei Xiang",    Grade.RESIDENT_PHYSICIAN,   "Foot & Ankle"),
-        ("Khoi Man",     Grade.MEDICAL_OFFICER,       "Foot & Ankle"),
+        ("Gennie Lim",   Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Charles Kon"),
+        ("Wei Xiang",    Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Charles Kon"),
+        ("Khoi Man",     Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Jonathan Gan"),
+        ("Angela Lim",   Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Kinjal Mehta"),
+        ("Brandon Lim",  Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Kinjal Mehta"),
         # Spine
-        ("Jon Yeo",      Grade.CLINICAL_ASSOCIATE,   "Spine"),
-        ("Wei Jie",      Grade.RESIDENT_PHYSICIAN,   "Spine"),
-        ("Thaya",        Grade.MEDICAL_OFFICER,       "Spine"),
-        ("Tharindu",     Grade.MEDICAL_OFFICER,       "Spine"),
+        ("Tharindu",     Grade.MEDICAL_OFFICER, "Spine",           "Dalun"),
+        ("Jon Yeo",      Grade.MEDICAL_OFFICER, "Spine",           "Shree Dinesh"),
+        ("Thaya",        Grade.MEDICAL_OFFICER, "Spine",           "Zhihong"),
+        ("Wei Jie",      Grade.MEDICAL_OFFICER, "Spine",           "Zhihong"),
     ]
 
-    for name, grade, team_name in mo_data:
+    for name, grade, team_name, supervisor_name in mo_data:
         s = Staff(name=name, grade=grade)
         db.add(s)
         db.flush()
         staff[name] = s
+        supervisor_id = staff[supervisor_name].id if supervisor_name else None
         db.add(TeamAssignment(
             staff_id=s.id, team_id=teams[team_name].id,
             role="mo", effective_from=date(2026, 4, 6),
+            supervisor_id=supervisor_id,
         ))
 
     db.flush()
@@ -147,61 +171,62 @@ def seed():
     db.add(config)
     db.flush()
 
-    # ── Consultant On-Call Schedule (from roster) ────────────────────
-    # Format: day → consultant name
-    # Entries with "/" indicate AC tagged to consultant (e.g., Dalun/JL = Dalun tagged to James Loh)
-    consultant_oncall = {
-        1: "Kuo CL",
-        2: "James Loh",       # Dalun/JL
-        3: "Kuo CL",         # PH — estimated based on pattern
-        4: "Kuo CL",
-        5: "Andy Yeo",
-        6: "Kinjal Mehta",
-        7: "Wei Sheng",
-        8: "Kuo CL",
-        9: "David Chua",      # Dalun/DC
-        10: "Ing How",
-        11: "Ho Chin",
-        12: "David Chua",     # Junren/DC
-        13: "Justine Lee",
-        14: "Kinjal Mehta",
-        15: "Raghu",
-        16: "Ing How",
-        17: "Charles Kon",
-        18: "James Loh",      # Junren/JL
-        19: "Justine Lee",
-        20: "David Chua",     # Dalun/DC
-        21: "Ho Chin",
-        22: "Jonathan Gan",
-        23: "Kinjal Mehta",
-        24: "Raghu",
-        25: "Charles Kon",
-        26: "Justine Lee",
-        27: "Jonathan Gan",
-        28: "Wei Sheng",
-        29: "Raghu",
-        30: "Charles Kon",
-    }
+    # ── Consultant On-Call Schedule ──────────────────────────────────
+    # When AC is primary call holder (e.g., "Dalun/JL"), store AC as
+    # consultant_id with supervising_consultant_id set.
+    # When AC is secondary (in AC column only), use normal consultant_oncall.
+    consultant_oncall = [
+        # (day, primary, supervising_or_None)
+        (1,  "Kuo CL",       None),
+        (2,  "Dalun",         "James Loh"),       # AC primary: Dalun / James Loh
+        (3,  "Zhihong",       None),               # Fixed: was Kuo CL
+        (4,  "Kuo CL",       None),
+        (5,  "Andy Yeo",     None),
+        (6,  "Kinjal Mehta", None),
+        (7,  "Wei Sheng",    None),
+        (8,  "Kuo CL",       None),
+        (9,  "Dalun",         "David Chua"),       # AC primary: Dalun / David Chua
+        (10, "Ing How",      None),
+        (11, "Ho Chin",      None),
+        (12, "Junren",       "David Chua"),        # AC primary: Junren / David Chua
+        (13, "Justine Lee",  None),
+        (14, "Kinjal Mehta", None),
+        (15, "Raghu",        None),
+        (16, "Ing How",      None),
+        (17, "Charles Kon",  None),
+        (18, "Junren",       "James Loh"),         # AC primary: Junren / James Loh
+        (19, "Justine Lee",  None),
+        (20, "Dalun",        "David Chua"),         # AC primary: Dalun / David Chua
+        (21, "Ho Chin",      None),
+        (22, "Jonathan Gan", None),
+        (23, "Kinjal Mehta", None),
+        (24, "Raghu",        None),
+        (25, "Charles Kon",  None),
+        (26, "Justine Lee",  None),
+        (27, "Jonathan Gan", None),
+        (28, "Wei Sheng",    None),
+        (29, "Raghu",        None),
+        (30, "Charles Kon",  None),
+    ]
 
-    for day, name in consultant_oncall.items():
+    for day, primary_name, supervising_name in consultant_oncall:
+        supervising_id = staff[supervising_name].id if supervising_name else None
         db.add(ConsultantOnCall(
             config_id=config.id,
             date=date(2026, 4, day),
-            consultant_id=staff[name].id,
+            consultant_id=staff[primary_name].id,
+            supervising_consultant_id=supervising_id,
         ))
 
-    # ── AC On-Call Schedule ──────────────────────────────────────────
+    # ── AC On-Call Schedule (secondary role only) ────────────────────
+    # Only days where AC is in the AC column (supporting the consultant).
+    # Days where AC is primary (above with supervising_consultant_id) are NOT listed here.
     ac_oncall = {
-        2: "Dalun",
-        5: "Dalun",
-        8: "Junren",
-        9: "Dalun",
-        12: "Junren",
-        18: "Junren",
-        20: "Dalun",
-        23: "Junren",
-        26: "Dalun",
-        29: "Junren",
+        5:  "Dalun",     # Andy Yeo primary, Dalun secondary
+        8:  "Junren",    # Kuo CL primary, Junren secondary
+        23: "Junren",    # Kinjal Mehta primary, Junren secondary
+        26: "Dalun",     # Justine Lee primary, Dalun secondary
+        29: "Junren",    # Raghu primary, Junren secondary
     }
 
     for day, name in ac_oncall.items():
@@ -211,16 +236,15 @@ def seed():
             ac_id=staff[name].id,
         ))
 
-    # ── Stepdown Days (from roster annotations) ──────────────────────
+    # ── Stepdown Days ────────────────────────────────────────────────
     for day in [9, 14, 28]:
         db.add(StepdownDay(config_id=config.id, date=date(2026, 4, day)))
 
-    # ── Evening OT Dates (days with MO4/MO5 assigned) ────────────────
+    # ── Evening OT Dates (days with MO4/MO5) ────────────────────────
     for day in [2, 6, 9, 13, 16, 17, 20, 23, 27, 30]:
         db.add(EveningOTDate(config_id=config.id, date=date(2026, 4, day)))
 
-    # ── Sample Leave (from roster leave list) ────────────────────────
-    # Add a few known leaves to test constraints
+    # ── Sample Leave ─────────────────────────────────────────────────
     sample_leaves = [
         ("Sandip", date(2026, 4, 1), "AL"),
         ("Sandip", date(2026, 4, 2), "AL"),
@@ -232,7 +256,15 @@ def seed():
         if name in staff:
             db.add(Leave(staff_id=staff[name].id, date=d, leave_type=ltype))
 
-    # ── Sample Call Preferences (demo data) ──────────────────────────
+    # ── Omar: Monday leaves (works Tue-Fri only) ─────────────────────
+    # Add as leaves so the solver naturally excludes him on Mondays
+    import calendar
+    for day_num in range(1, calendar.monthrange(2026, 4)[1] + 1):
+        d = date(2026, 4, day_num)
+        if d.weekday() == 0:  # Monday
+            db.add(Leave(staff_id=staff["Omar"].id, date=d, leave_type="Off"))
+
+    # ── Sample Call Preferences ──────────────────────────────────────
     db.add(CallPreference(
         staff_id=staff["Raihan"].id,
         date=date(2026, 4, 18),
@@ -247,23 +279,21 @@ def seed():
     ))
 
     # ── OT Templates (weekly recurring schedule) ───────────────────────
-    # Mon=0, Tue=1, Wed=2, Thu=3, Fri=4
     ot_template_data = [
-        # (day_of_week, room, consultant_name, assistants_needed, is_la)
-        (0, "OT3",  "Kinjal Mehta",  2, False),   # Mon OT3 = Kinjal (F&A)
-        (0, "OT4",  "Ing How",       2, False),   # Mon OT4 = Ing How (H&K)
-        (0, "OT10", "Andy Yeo",      2, False),   # Mon OT10 = Andy Yeo (Trauma)
-        (1, "OT3",  "Kuo CL",        2, False),   # Tue OT3 = Kuo CL (S&E)
-        (1, "OT4",  "James Loh",     2, False),   # Tue OT4 = James Loh (H&K)
-        (1, "OT10", "Zhihong",       2, False),   # Tue OT10 = Zhihong (Spine)
-        (2, "OT3",  "Raghu",         2, False),   # Wed OT3 = Raghu (H&K)
-        (2, "OT4",  "David Chua",    2, False),   # Wed OT4 = David Chua (Trauma)
-        (2, "OT10", "Shree Dinesh",  2, False),   # Wed OT10 = Dinesh (Spine)
-        (3, "OT3",  "Charles Kon",   2, False),   # Thu OT3 = Charles Kon (F&A)
-        (3, "OT4",  "Wei Sheng",     2, False),   # Thu OT4 = Wei Sheng (S&E)
-        (4, "OT3",  "Jonathan Gan",  2, False),   # Fri OT3 = Jon Gan (F&A)
-        (4, "OT4",  "Ho Chin",       2, False),   # Fri OT4 = Ho Chin (Trauma)
-        (4, "OT10", "Justine Lee",   2, False),   # Fri OT10 = Justine Lee (Trauma)
+        (0, "OT3",  "Kinjal Mehta",  2, False),
+        (0, "OT4",  "Ing How",       2, False),
+        (0, "OT10", "Andy Yeo",      2, False),
+        (1, "OT3",  "Kuo CL",        2, False),
+        (1, "OT4",  "James Loh",     2, False),
+        (1, "OT10", "Zhihong",       2, False),
+        (2, "OT3",  "Raghu",         2, False),
+        (2, "OT4",  "David Chua",    2, False),
+        (2, "OT10", "Shree Dinesh",  2, False),
+        (3, "OT3",  "Charles Kon",   2, False),
+        (3, "OT4",  "Wei Sheng",     2, False),
+        (4, "OT3",  "Jonathan Gan",  2, False),
+        (4, "OT4",  "Ho Chin",       2, False),
+        (4, "OT10", "Justine Lee",   2, False),
     ]
 
     for dow, room, cons_name, assists, is_la in ot_template_data:
@@ -273,22 +303,20 @@ def seed():
             assistants_needed=assists, is_la=is_la,
         ))
 
-    # ── Clinic Templates (4E supervised + MOPD rooms) ────────────────
-    # Supervised clinics: consultant + 1 MO, prefer team match
+    # ── Clinic Templates ─────────────────────────────────────────────
     supervised_clinics = [
-        # (day_of_week, session, room, consultant_name)
-        (0, Session.AM, "4E-Sup", "James Loh"),       # Mon AM
-        (0, Session.PM, "4E-Sup", "Kuo CL"),          # Mon PM
-        (1, Session.AM, "4E-Sup1", "Justine Lee"),     # Tue AM (2 clinics)
-        (1, Session.AM, "4E-Sup2", "Ing How"),         # Tue AM
-        (1, Session.PM, "4E-Sup", "Ho Chin"),          # Tue PM
-        (2, Session.AM, "4E-Sup", "Kinjal Mehta"),     # Wed AM
-        (2, Session.PM, "4E-Sup", "Andy Yeo"),         # Wed PM
-        (3, Session.AM, "4E-Sup1", "Raghu"),           # Thu AM (2 clinics)
-        (3, Session.AM, "4E-Sup2", "Jonathan Gan"),    # Thu AM
-        (3, Session.PM, "4E-Sup", "Zhihong"),          # Thu PM
-        (4, Session.AM, "4E-Sup", "Wei Sheng"),        # Fri AM
-        (4, Session.PM, "4E-Sup", "Charles Kon"),      # Fri PM
+        (0, Session.AM, "4E-Sup", "James Loh"),
+        (0, Session.PM, "4E-Sup", "Kuo CL"),
+        (1, Session.AM, "4E-Sup1", "Justine Lee"),
+        (1, Session.AM, "4E-Sup2", "Ing How"),
+        (1, Session.PM, "4E-Sup", "Ho Chin"),
+        (2, Session.AM, "4E-Sup", "Kinjal Mehta"),
+        (2, Session.PM, "4E-Sup", "Andy Yeo"),
+        (3, Session.AM, "4E-Sup1", "Raghu"),
+        (3, Session.AM, "4E-Sup2", "Jonathan Gan"),
+        (3, Session.PM, "4E-Sup", "Zhihong"),
+        (4, Session.AM, "4E-Sup", "Wei Sheng"),
+        (4, Session.PM, "4E-Sup", "Charles Kon"),
     ]
 
     for dow, session, room, cons_name in supervised_clinics:
@@ -297,23 +325,23 @@ def seed():
             is_supervised=True, consultant_id=staff[cons_name].id,
         ))
 
-    # MOPD rooms (6 rooms per session, not all need explicit template)
-    # The solver fills remaining capacity with MOPD MOs automatically.
-
     db.commit()
     db.close()
+
+    mo_count = sum(1 for _, g, _, _ in mo_data)
+    reg_count = 4  # Grace Tan, Omar, Raj, Sagar
+    sr_count = 2   # Jia Ying, David Mao
 
     print("Seeded successfully!")
     print(f"  Staff: {len(staff)}")
     print(f"  Teams: {len(teams)}")
+    print(f"  MOs: {mo_count}, Registrars: {reg_count}, Senior Residents: {sr_count}")
     print(f"  Consultant on-call days: {len(consultant_oncall)}")
-    print(f"  AC on-call days: {len(ac_oncall)}")
+    print(f"  AC on-call days (secondary): {len(ac_oncall)}")
     print(f"  Evening OT dates: 10")
     print(f"  Stepdown days: 3")
     print(f"  OT templates: {len(ot_template_data)}")
     print(f"  Supervised clinic templates: {len(supervised_clinics)}")
-    print(f"  Sample leaves: {len(sample_leaves)}")
-    print(f"  Sample preferences: 2")
 
 
 if __name__ == "__main__":

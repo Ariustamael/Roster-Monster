@@ -71,33 +71,36 @@ class SolverInput:
 
 @dataclass
 class FairnessTracker:
-    total_calls: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    total_24h: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    total_all: dict[int, int] = field(default_factory=lambda: defaultdict(int))
     type_calls: dict[int, dict[str, int]] = field(
         default_factory=lambda: defaultdict(lambda: defaultdict(int))
     )
     weekend_calls: dict[int, int] = field(default_factory=lambda: defaultdict(int))
 
-    def record(self, pid: int, call_type: CallType, is_weekend_or_ph: bool):
-        self.total_calls[pid] += 1
+    def record(self, pid: int, call_type: CallType, is_weekend_or_ph: bool, is_24h: bool):
+        self.total_all[pid] += 1
         self.type_calls[pid][call_type.value] += 1
+        if is_24h:
+            self.total_24h[pid] += 1
         if is_weekend_or_ph:
             self.weekend_calls[pid] += 1
 
     def score(self, pid: int, call_type: CallType, is_weekend_or_ph: bool) -> float:
         s = 0.0
-        total = self.total_calls[pid]
+        total_24h = self.total_24h[pid]
         type_count = self.type_calls[pid][call_type.value]
         weekend_count = self.weekend_calls[pid]
 
-        max_total = max(self.total_calls.values()) if self.total_calls else 1
+        max_24h = max(self.total_24h.values()) if self.total_24h else 1
         max_type = max(
-            (self.type_calls[p].get(call_type.value, 0) for p in self.total_calls),
+            (self.type_calls[p].get(call_type.value, 0) for p in self.total_all),
             default=1,
         ) or 1
         max_weekend = max(self.weekend_calls.values()) if self.weekend_calls else 1
 
-        s += 10.0 * (1.0 - total / max(max_total, 1))
-        s += 5.0 * (1.0 - type_count / max(max_type, 1))
+        s += 10.0 * (1.0 - total_24h / max(max_24h, 1))
+        s += 3.0 * (1.0 - type_count / max(max_type, 1))
         if is_weekend_or_ph:
             s += 8.0 * (1.0 - weekend_count / max(max_weekend, 1))
 
@@ -201,7 +204,8 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, CallType]], list[str]]
 
     fairness = FairnessTracker()
     for pid in [p.id for p in inp.mo_pool]:
-        fairness.total_calls[pid] = 0
+        fairness.total_all[pid] = 0
+        fairness.total_24h[pid] = 0
 
     for day in inp.days:
         slots = _required_slots(day)
@@ -243,7 +247,8 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, CallType]], list[str]]
 
             chosen = scored[0]
             daily[chosen.id] = call_type
-            fairness.record(chosen.id, call_type, day.is_weekend or day.is_ph)
+            call_is_24h = is_overnight(call_type, day.d, stepdown_dates)
+            fairness.record(chosen.id, call_type, day.is_weekend or day.is_ph, call_is_24h)
 
         assignments[day.d] = daily
 
@@ -267,7 +272,8 @@ def compute_fairness_stats(
     stats: dict[str, dict] = {}
     for p in mo_pool:
         stats[p.name] = {
-            "total": 0,
+            "total_24h": 0,
+            "total_all": 0,
             "MO1": 0,
             "MO2": 0,
             "MO3": 0,
@@ -283,8 +289,10 @@ def compute_fairness_stats(
             name = pid_to_name.get(pid)
             if name is None:
                 continue
-            stats[name]["total"] += 1
+            stats[name]["total_all"] += 1
             stats[name][ctype.value] += 1
+            if is_overnight(ctype, d, stepdown_dates):
+                stats[name]["total_24h"] += 1
             if is_wknd:
                 stats[name]["weekend_ph"] += 1
 

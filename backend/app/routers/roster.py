@@ -11,7 +11,7 @@ from ..models import (
     MonthlyConfig, ConsultantOnCall, ACOnCall, StepdownDay, EveningOTDate,
     Staff, TeamAssignment, Team, Leave, CallPreference, CallAssignment,
     PublicHoliday, MO_GRADES, PreferenceType, Grade,
-    OTTemplate, ClinicTemplate, CallType,
+    OTTemplate, ClinicTemplate, CallType, DUTY_GRADES,
 )
 from ..schemas import RosterResponse, DayRoster, CallAssignmentOut, ManualOverrideCreate
 from ..services.solver import (
@@ -183,12 +183,8 @@ def generate_roster(config_id: int, db: Session = Depends(get_db)):
         if r.date.year == config.year and r.date.month == config.month
     }
 
-    consultant_names = {s.id: s.name for s in db.query(Staff).filter(
-        Staff.grade.in_([Grade.CONSULTANT.value, Grade.SENIOR_CONSULTANT.value])
-    ).all()}
-    ac_names = {s.id: s.name for s in db.query(Staff).filter(
-        Staff.grade == Grade.ASSOCIATE_CONSULTANT.value
-    ).all()}
+    all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
+    cons_oncall_rows = {r.date: r for r in config.consultant_oncalls}
 
     stepdown_dates = {r.date for r in config.stepdown_days}
 
@@ -205,14 +201,22 @@ def generate_roster(config_id: int, db: Session = Depends(get_db)):
         cons_id = day_cfg.consultant_oncall_id
         ac_id = day_cfg.ac_oncall_id
 
+        cons_row = cons_oncall_rows.get(d)
+        if cons_row and cons_row.supervising_consultant_id:
+            cons_display = f"{all_staff_names.get(cons_id, '')} / {all_staff_names.get(cons_row.supervising_consultant_id, '')}"
+            ac_display = None
+        else:
+            cons_display = all_staff_names.get(cons_id) if cons_id else None
+            ac_display = all_staff_names.get(ac_id) if ac_id else None
+
         day_rosters.append(DayRoster(
             date=d,
             day_name=d.strftime("%a"),
             is_weekend=day_cfg.is_weekend,
             is_ph=d in ph_dates,
             is_stepdown=day_cfg.is_stepdown,
-            consultant_oncall=consultant_names.get(cons_id) if cons_id else None,
-            ac_oncall=ac_names.get(ac_id) if ac_id else None,
+            consultant_oncall=cons_display,
+            ac_oncall=ac_display,
             mo1=inv_map.get("MO1"),
             mo2=inv_map.get("MO2"),
             mo3=inv_map.get("MO3"),
@@ -275,19 +279,20 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
     stepdown = {r.date for r in config.stepdown_days}
     evening_ot = {r.date for r in config.evening_ot_dates}
 
-    mo_staff = (
+    duty_staff = (
         db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in MO_GRADES]))
+        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in DUTY_GRADES]))
         .all()
     )
-    total_mos = len(mo_staff)
+    total_mos = len(duty_staff)
+    duty_staff_ids = {s.id for s in duty_staff}
 
     leave_counts: dict[str, int] = defaultdict(int)
     for lv in db.query(Leave).filter(
         Leave.date >= date(year, month, 1),
         Leave.date <= date(year, month, num_days),
     ).all():
-        if lv.staff.grade.value in [g.value for g in MO_GRADES]:
+        if lv.staff_id in duty_staff_ids:
             leave_counts[lv.date.isoformat()] += 1
 
     call_assignments = (
