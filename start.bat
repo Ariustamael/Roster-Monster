@@ -1,55 +1,59 @@
 @echo off
 title Roster Monster Launcher
-cd /d "%~dp0"
+
+:: Convert to short (8.3) path to eliminate spaces
+for %%I in ("%~dp0.") do set "ROOT=%%~sI"
+cd /d "%ROOT%"
 
 echo ========================================
 echo   Roster Monster - Starting...
+echo   Path: %ROOT%
 echo ========================================
 echo.
 
 :: Check if venv exists
-if not exist "backend\venv\Scripts\activate.bat" (
+if not exist "%ROOT%\backend\venv\Scripts\activate.bat" (
     echo [!] Backend venv not found. Running first-time setup...
     echo     Creating Python 3.13 virtual environment...
-    py -3.13 -m venv backend\venv
-    call backend\venv\Scripts\activate.bat
-    pip install -r backend\requirements.txt
+    py -3.13 -m venv "%ROOT%\backend\venv"
+    call "%ROOT%\backend\venv\Scripts\activate.bat"
+    pip install -r "%ROOT%\backend\requirements.txt"
     echo.
     echo     Seeding database...
-    cd backend
+    cd /d "%ROOT%\backend"
     python seed_april.py
-    cd ..
+    cd /d "%ROOT%"
 ) else (
-    call backend\venv\Scripts\activate.bat
+    call "%ROOT%\backend\venv\Scripts\activate.bat"
 )
 
 :: Check if node_modules exists
-if not exist "frontend\node_modules" (
+if not exist "%ROOT%\frontend\node_modules" (
     echo [!] Frontend dependencies not found. Running npm install...
-    cd frontend
+    cd /d "%ROOT%\frontend"
     npm install
-    cd ..
+    cd /d "%ROOT%"
 )
 
 :: Start backend in a new window
 echo [1/3] Starting backend server...
-start "Roster Monster - Backend" cmd /k "cd /d "%~dp0backend" && ..\backend\venv\Scripts\activate.bat && uvicorn app.main:app --reload"
+start "Roster Monster - Backend" cmd /k "cd /d %ROOT%\backend && %ROOT%\backend\venv\Scripts\activate.bat && uvicorn app.main:app --host 127.0.0.1 --reload"
 
 :: Start frontend in a new window
 echo [2/3] Starting frontend server...
-start "Roster Monster - Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
+start "Roster Monster - Frontend" cmd /k "cd /d %ROOT%\frontend && npx --yes vite --host 127.0.0.1"
 
 :: Wait for servers to start, then open browser
 echo [3/3] Waiting for servers to start...
-timeout /t 4 /nobreak >nul
-start http://localhost:5173
+timeout /t 5 /nobreak >nul
+start http://127.0.0.1:5173
 
 echo.
 echo ========================================
 echo   Roster Monster is running!
-echo   Frontend: http://localhost:5173
-echo   Backend:  http://localhost:8000
-echo   API docs: http://localhost:8000/docs
+echo   Frontend: http://127.0.0.1:5173
+echo   Backend:  http://127.0.0.1:8000
+echo   API docs: http://127.0.0.1:8000/docs
 echo ========================================
 echo.
 echo Close the Backend and Frontend windows to stop.
