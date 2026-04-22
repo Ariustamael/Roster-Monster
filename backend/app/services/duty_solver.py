@@ -155,7 +155,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                     fairness.ot_score(p.id)
                     + (5.0 if p.supervisor_id == ot.consultant_id else 0.0)
                     + (3.0 if ot.consultant_team_id and p.team_id == ot.consultant_team_id else 0.0)
-                    + (-3.0 if p.grade == Grade.SENIOR_RESIDENT.value else 0.0)
+                    + (3.0 if p.grade == Grade.SENIOR_RESIDENT.value else 0.0)
                 ),
                 reverse=True,
             )
@@ -175,7 +175,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
         # ── 2. AM session ───────────────────────────────────────────
         am_pool = [p for p in available if p.id not in am_assigned]
 
-        # Supervised clinics AM (Registrars excluded, Senior Residents preferred)
+        # Supervised clinics AM (SSRs excluded)
         for clinic in day.am_clinics:
             if not clinic.is_supervised:
                 continue
@@ -191,7 +191,6 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                     fairness.clinic_score(p.id)
                     + (5.0 if clinic.consultant_id and p.supervisor_id == clinic.consultant_id else 0.0)
                     + (3.0 if clinic.consultant_team_id and p.team_id == clinic.consultant_team_id else 0.0)
-                    + (4.0 if p.grade == Grade.SENIOR_RESIDENT.value else 0.0)
                 ),
                 reverse=True,
             )
@@ -204,10 +203,12 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
             am_assigned.add(chosen.id)
             fairness.clinic_sessions[chosen.id] += 1
 
-        # MOPD AM (SSRs excluded — they do OT/Admin/R1/R2/EOT only)
+        # MOPD AM (SSRs and SRs excluded)
         mopd_am_pool = [
             p for p in am_pool
-            if p.id not in am_assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
+            if p.id not in am_assigned
+            and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
+            and p.grade != Grade.SENIOR_RESIDENT.value
         ]
         supervised_am_count = sum(1 for c in day.am_clinics if c.is_supervised)
         mopd_slots_am = day.mopd_rooms_am - supervised_am_count
@@ -242,7 +243,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
         # ── 3. PM session ───────────────────────────────────────────
         pm_pool = [p for p in available if p.id not in pm_assigned]
 
-        # Supervised clinics PM (Registrars excluded, Senior Residents preferred)
+        # Supervised clinics PM (SSRs excluded)
         for clinic in day.pm_clinics:
             if not clinic.is_supervised:
                 continue
@@ -258,7 +259,6 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                     fairness.clinic_score(p.id)
                     + (5.0 if clinic.consultant_id and p.supervisor_id == clinic.consultant_id else 0.0)
                     + (3.0 if clinic.consultant_team_id and p.team_id == clinic.consultant_team_id else 0.0)
-                    + (4.0 if p.grade == Grade.SENIOR_RESIDENT.value else 0.0)
                 ),
                 reverse=True,
             )
@@ -271,10 +271,12 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
             pm_assigned.add(chosen.id)
             fairness.clinic_sessions[chosen.id] += 1
 
-        # MOPD PM (SSRs excluded)
+        # MOPD PM (SSRs and SRs excluded)
         mopd_pm_pool = [
             p for p in pm_pool
-            if p.id not in pm_assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
+            if p.id not in pm_assigned
+            and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
+            and p.grade != Grade.SENIOR_RESIDENT.value
         ]
         supervised_pm_count = sum(1 for c in day.pm_clinics if c.is_supervised)
         mopd_slots_pm = day.mopd_rooms_pm - supervised_pm_count

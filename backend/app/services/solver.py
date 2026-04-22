@@ -138,6 +138,11 @@ def _is_eligible(
     if d in block_dates.get(pid, set()):
         return False
 
+    # Weekday MO3 (referral duty) restricted to Senior Medical Officers
+    if call_type == CallType.MO3 and not day.is_weekend and not day.is_ph and not day.is_stepdown:
+        if person.grade != Grade.SENIOR_MEDICAL_OFFICER:
+            return False
+
     if not check_not_already_assigned_today(pid, d, daily_assignments):
         return False
 

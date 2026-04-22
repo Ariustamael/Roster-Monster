@@ -2,7 +2,7 @@ import { useEffect, useState, type DragEvent } from "react";
 import { api } from "../api";
 import type { Staff, Team, TeamAssignment } from "../types";
 
-const TRAINEE_GRADES = ["Senior Staff Registrar", "Senior Resident", "Medical Officer"];
+const TRAINEE_GRADES = ["Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer"];
 const CONS_GRADES = ["Senior Consultant", "Consultant", "Associate Consultant"];
 
 export default function TeamsView() {

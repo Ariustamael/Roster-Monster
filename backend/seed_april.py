@@ -105,48 +105,59 @@ def seed():
         db.flush()
         staff[name] = s
 
-    # ── Senior Residents (can be tagged to consultants for clinics) ──
-    for name in ["Jia Ying", "David Mao"]:
+    # ── Senior Residents (prioritised for OT, tagged to supervisors) ──
+    sr_data = [
+        ("Jia Ying",  "Shoulder & Elbow", "Kuo CL"),
+        ("David Mao", "Spine",            "Zhihong"),
+    ]
+    for name, team_name, supervisor_name in sr_data:
         s = Staff(name=name, grade=Grade.SENIOR_RESIDENT)
         db.add(s)
         db.flush()
         staff[name] = s
+        db.add(TeamAssignment(
+            staff_id=s.id, team_id=teams[team_name].id,
+            role="mo", effective_from=date(2026, 4, 6),
+            supervisor_id=staff[supervisor_name].id,
+        ))
 
     # ── Medical Officers ─────────────────────────────────────────────
     # (team, consultant_tag) — consultant_tag links MO to supervisor
+    SMO = Grade.SENIOR_MEDICAL_OFFICER
+    MO = Grade.MEDICAL_OFFICER
     mo_data = [
         # Trauma
-        ("Chester Tan",  Grade.MEDICAL_OFFICER, "Trauma",          "Andy Yeo"),
-        ("Nalaka",       Grade.MEDICAL_OFFICER, "Trauma",          "David Chua"),
-        ("Asif",         Grade.MEDICAL_OFFICER, "Trauma",          "Ho Chin"),
-        ("Joshua Wong",  Grade.MEDICAL_OFFICER, "Trauma",          "Ho Chin"),
-        ("Shilin",       Grade.MEDICAL_OFFICER, "Trauma",          "Junren"),
-        ("Nazir",        Grade.MEDICAL_OFFICER, "Trauma",          "Justine Lee"),
-        ("Samuel Ong",   Grade.MEDICAL_OFFICER, "Trauma",          "Justine Lee"),
+        ("Chester Tan",  SMO, "Trauma",          "Andy Yeo"),
+        ("Nalaka",       SMO, "Trauma",          "David Chua"),
+        ("Asif",         MO,  "Trauma",          "Ho Chin"),
+        ("Joshua Wong",  MO,  "Trauma",          "Ho Chin"),
+        ("Shilin",       MO,  "Trauma",          "Junren"),
+        ("Nazir",        MO,  "Trauma",          "Justine Lee"),
+        ("Samuel Ong",   MO,  "Trauma",          "Justine Lee"),
         # Shoulder & Elbow
-        ("Feng Yi",      Grade.MEDICAL_OFFICER, "Shoulder & Elbow", "Kuo CL"),
-        ("Qing Hang",    Grade.MEDICAL_OFFICER, "Shoulder & Elbow", "Kuo CL"),
-        ("Amirzeb",      Grade.MEDICAL_OFFICER, "Shoulder & Elbow", "Wei Sheng"),
-        ("Chee Sian",    Grade.MEDICAL_OFFICER, "Shoulder & Elbow", None),
+        ("Feng Yi",      SMO, "Shoulder & Elbow", "Kuo CL"),
+        ("Qing Hang",    MO,  "Shoulder & Elbow", "Kuo CL"),
+        ("Amirzeb",      MO,  "Shoulder & Elbow", "Wei Sheng"),
+        ("Chee Sian",    MO,  "Shoulder & Elbow", None),
         # Hip & Knee
-        ("Kumara",       Grade.MEDICAL_OFFICER, "Hip & Knee",      "Ing How"),
-        ("Kevan Toh",    Grade.MEDICAL_OFFICER, "Hip & Knee",      "James Loh"),
-        ("Raihan",       Grade.MEDICAL_OFFICER, "Hip & Knee",      "James Loh"),
-        ("Sandip",       Grade.MEDICAL_OFFICER, "Hip & Knee",      "James Loh"),
-        ("Jamie Lim",    Grade.MEDICAL_OFFICER, "Hip & Knee",      "Raghu"),
-        ("Teddy Cheong", Grade.MEDICAL_OFFICER, "Hip & Knee",      "Raghu"),
-        ("Nuwan",        Grade.MEDICAL_OFFICER, "Hip & Knee",      None),
+        ("Kumara",       SMO, "Hip & Knee",      "Ing How"),
+        ("Kevan Toh",    MO,  "Hip & Knee",      "James Loh"),
+        ("Raihan",       MO,  "Hip & Knee",      "James Loh"),
+        ("Sandip",       MO,  "Hip & Knee",      "James Loh"),
+        ("Jamie Lim",    MO,  "Hip & Knee",      "Raghu"),
+        ("Teddy Cheong", MO,  "Hip & Knee",      "Raghu"),
+        ("Nuwan",        MO,  "Hip & Knee",      None),
         # Foot & Ankle
-        ("Gennie Lim",   Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Charles Kon"),
-        ("Wei Xiang",    Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Charles Kon"),
-        ("Khoi Man",     Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Jonathan Gan"),
-        ("Angela Lim",   Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Kinjal Mehta"),
-        ("Brandon Lim",  Grade.MEDICAL_OFFICER, "Foot & Ankle",    "Kinjal Mehta"),
+        ("Gennie Lim",   SMO, "Foot & Ankle",    "Charles Kon"),
+        ("Wei Xiang",    MO,  "Foot & Ankle",    "Charles Kon"),
+        ("Khoi Man",     MO,  "Foot & Ankle",    "Jonathan Gan"),
+        ("Angela Lim",   MO,  "Foot & Ankle",    "Kinjal Mehta"),
+        ("Brandon Lim",  MO,  "Foot & Ankle",    "Kinjal Mehta"),
         # Spine
-        ("Tharindu",     Grade.MEDICAL_OFFICER, "Spine",           "Dalun"),
-        ("Jon Yeo",      Grade.MEDICAL_OFFICER, "Spine",           "Shree Dinesh"),
-        ("Thaya",        Grade.MEDICAL_OFFICER, "Spine",           "Zhihong"),
-        ("Wei Jie",      Grade.MEDICAL_OFFICER, "Spine",           "Zhihong"),
+        ("Tharindu",     SMO, "Spine",           "Dalun"),
+        ("Jon Yeo",      MO,  "Spine",           "Shree Dinesh"),
+        ("Thaya",        MO,  "Spine",           "Zhihong"),
+        ("Wei Jie",      MO,  "Spine",           "Zhihong"),
     ]
 
     for name, grade, team_name, supervisor_name in mo_data:
@@ -328,14 +339,15 @@ def seed():
     db.commit()
     db.close()
 
-    mo_count = sum(1 for _, g, _, _ in mo_data)
+    smo_count = sum(1 for _, g, _, _ in mo_data if g == SMO)
+    mo_count = sum(1 for _, g, _, _ in mo_data if g == MO)
     reg_count = 4  # Grace Tan, Omar, Raj, Sagar
     sr_count = 2   # Jia Ying, David Mao
 
     print("Seeded successfully!")
     print(f"  Staff: {len(staff)}")
     print(f"  Teams: {len(teams)}")
-    print(f"  MOs: {mo_count}, Registrars: {reg_count}, Senior Residents: {sr_count}")
+    print(f"  SMOs: {smo_count}, MOs: {mo_count}, Registrars: {reg_count}, Senior Residents: {sr_count}")
     print(f"  Consultant on-call days: {len(consultant_oncall)}")
     print(f"  AC on-call days (secondary): {len(ac_oncall)}")
     print(f"  Evening OT dates: 10")

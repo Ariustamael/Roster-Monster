@@ -9,15 +9,16 @@ const GRADE_ORDER: Record<string, number> = {
   "Associate Consultant": 2,
   "Senior Staff Registrar": 3,
   "Senior Resident": 4,
-  "Medical Officer": 5,
+  "Senior Medical Officer": 5,
+  "Medical Officer": 6,
 };
 
 const ALL_GRADES = [
   "Senior Consultant", "Consultant", "Associate Consultant",
-  "Senior Staff Registrar", "Senior Resident", "Medical Officer",
+  "Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer",
 ];
 
-const ALLOCATABLE_GRADES = ["Senior Staff Registrar", "Senior Resident", "Medical Officer"];
+const ALLOCATABLE_GRADES = ["Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer"];
 
 const MONTH_NAMES = [
   "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",

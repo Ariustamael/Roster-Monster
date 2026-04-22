@@ -20,9 +20,10 @@ export default function RulesView() {
               <tr><td>Senior Consultant</td><td>SC</td><td>Senior attending surgeon. Not in the allocatable pool. Assigned as on-call consultant and supervises OT/clinics.</td></tr>
               <tr><td>Consultant</td><td>C</td><td>Attending surgeon. Same role as SC for scheduling purposes.</td></tr>
               <tr><td>Associate Consultant</td><td>AC</td><td>Junior attending. Can be the primary on-call holder (paired with a supervising SC/C) or take a secondary supporting role.</td></tr>
-              <tr><td>Senior Staff Registrar</td><td>SSR</td><td>Advanced trainee (Grace Tan, Omar, Raj, Sagar). Allocated to OT and Admin duties. Can take R1/R2/EOT registrar duties. Not assigned to clinics or MOPD.</td></tr>
-              <tr><td>Senior Resident</td><td>SR</td><td>Intermediate trainee (Jia Ying, David Mao). Same as SSR but additionally assigned to supervised clinics with their tagged consultant. Can take R1/R2/EOT registrar duties.</td></tr>
-              <tr><td>Medical Officer</td><td>MO</td><td>Junior doctor. Fully allocatable to all duty types: OT, supervised clinics, MOPD, and admin.</td></tr>
+              <tr><td>Senior Staff Registrar</td><td>SSR</td><td>Advanced trainee. Allocated to OT and Admin duties. Can take R1/R2/EOT registrar duties. Not assigned to clinics or MOPD.</td></tr>
+              <tr><td>Senior Resident</td><td>SR</td><td>Intermediate trainee. Prioritised for OT (tagged to supervisor first). Can also do supervised clinics, admin, and R1/R2/EOT registrar duties. Not assigned to MOPD or MO call.</td></tr>
+              <tr><td>Senior Medical Officer</td><td>SMO</td><td>Senior junior doctor. Eligible for MO1-MO5 call and weekday MO3 (referral duty). Can do OT, supervised clinics, MOPD, and admin.</td></tr>
+              <tr><td>Medical Officer</td><td>MO</td><td>Junior doctor. Eligible for MO1-MO5 call (except weekday MO3). Can do OT, supervised clinics, MOPD, and admin.</td></tr>
             </tbody>
           </table>
         </section>
@@ -42,8 +43,17 @@ export default function RulesView() {
           <div className="rule">
             <div className="rule-title">Eligible grades for MO call</div>
             <div className="rule-body">
-              Senior Residents and Medical Officers are eligible for MO1-MO5 call assignments.
-              SSRs are not in the MO call pool (they have separate R1/R2/EOT duties).
+              Only Senior Medical Officers and Medical Officers are eligible for MO1-MO5 call assignments.
+              Senior Residents, SSRs, and consultants are not in the MO call pool.
+            </div>
+          </div>
+
+          <div className="rule">
+            <div className="rule-title">Weekday MO3 (referral duty) restricted to Senior MOs</div>
+            <div className="rule-body">
+              On weekdays (non-stepdown), the MO3 slot is a daytime referral duty that can only be filled by Senior Medical Officers.
+              Regular Medical Officers are not eligible for weekday MO3.
+              On stepdown days, MO3 becomes a 24h overnight call and both SMOs and MOs are eligible.
             </div>
           </div>
 
@@ -234,22 +244,33 @@ export default function RulesView() {
             <div className="rule-body">
               <strong>Can do:</strong> OT, Supervised Clinics, Admin
               <br/>
-              <strong>Clinic preference:</strong> Senior Residents receive a +4.0 scoring bonus for supervised clinic assignments, making them preferred for clinics over MOs.
+              <strong>Cannot do:</strong> MOPD, MO call (MO1-MO5)
               <br/>
-              <strong>OT de-prioritised:</strong> Senior Residents receive a -3.0 scoring adjustment for OT, meaning MOs fill OT slots first. SRs only go to OT when manpower requires it.
+              <strong>OT prioritised:</strong> Senior Residents receive a +3.0 scoring bonus for OT, making them preferred for OT over MOs. They are tagged to their supervisor as first priority (+5.0 supervisor match).
               <br/>
               <strong>Also eligible for:</strong> R1, R2, and EOT registrar duties
+            </div>
+          </div>
+
+          <div className="rule">
+            <div className="rule-title">Senior Medical Officer (SMO)</div>
+            <div className="rule-body">
+              <strong>Can do:</strong> OT, Supervised Clinics, MOPD, Admin, MO1-MO5 call
               <br/>
-              SRs should ideally be in the clinic of their tagged consultant. The supervisor match bonus (+5.0) ensures this when possible.
+              <strong>Exclusive:</strong> Only SMOs can fill weekday MO3 (referral duty)
+              <br/>
+              SMOs are the senior tier of the MO call pool. They share call duties with regular MOs.
             </div>
           </div>
 
           <div className="rule">
             <div className="rule-title">Medical Officer (MO)</div>
             <div className="rule-body">
-              <strong>Can do:</strong> OT, Supervised Clinics, MOPD, Admin
+              <strong>Can do:</strong> OT, Supervised Clinics, MOPD, Admin, MO1/MO2/MO4/MO5 call
               <br/>
-              No restrictions. MOs are the general-purpose pool and fill all remaining duty slots after SSRs and SRs have been considered.
+              <strong>Cannot do:</strong> Weekday MO3 (referral duty, SMO only)
+              <br/>
+              MOs are the general-purpose pool and fill all remaining duty slots.
             </div>
           </div>
         </section>
@@ -262,11 +283,11 @@ export default function RulesView() {
             <div className="rule-body">
               <strong>Fairness (up to +10.0):</strong> People with fewer OT days are preferred.
               <br/>
-              <strong>Supervisor match (+5.0):</strong> If the MO is tagged to the OT list's consultant.
+              <strong>Supervisor match (+5.0):</strong> If the person is tagged to the OT list's consultant.
               <br/>
-              <strong>Team match (+3.0):</strong> If the MO is in the same team as the OT list's consultant.
+              <strong>Team match (+3.0):</strong> If the person is in the same team as the OT list's consultant.
               <br/>
-              <strong>SR penalty (-3.0):</strong> Senior Residents are de-prioritised for OT.
+              <strong>SR bonus (+3.0):</strong> Senior Residents are prioritised for OT assignments.
             </div>
           </div>
 
@@ -275,11 +296,11 @@ export default function RulesView() {
             <div className="rule-body">
               <strong>Fairness (up to +5.0):</strong> People with fewer clinic sessions are preferred.
               <br/>
-              <strong>Supervisor match (+5.0):</strong> If the MO/SR is tagged to the clinic's consultant.
+              <strong>Supervisor match (+5.0):</strong> If the person is tagged to the clinic's consultant.
               <br/>
-              <strong>Team match (+3.0):</strong> If the MO/SR is in the same team as the clinic's consultant.
+              <strong>Team match (+3.0):</strong> If the person is in the same team as the clinic's consultant.
               <br/>
-              <strong>SR bonus (+4.0):</strong> Senior Residents are preferred for clinics over MOs.
+              SSRs are excluded. SRs, SMOs, and MOs are all eligible with no grade-specific bonus.
             </div>
           </div>
 
@@ -288,7 +309,7 @@ export default function RulesView() {
             <div className="rule-body">
               <strong>Fairness (up to +3.0):</strong> People with fewer MOPD sessions are preferred.
               <br/>
-              Only Medical Officers are eligible for MOPD. SSRs and SRs are excluded.
+              Only Senior Medical Officers and Medical Officers are eligible for MOPD. SSRs and SRs are excluded.
             </div>
           </div>
         </section>

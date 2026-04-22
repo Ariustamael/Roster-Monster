@@ -14,17 +14,19 @@ class Grade(str, enum.Enum):
     ASSOCIATE_CONSULTANT = "Associate Consultant"
     SENIOR_STAFF_REGISTRAR = "Senior Staff Registrar"
     SENIOR_RESIDENT = "Senior Resident"
+    SENIOR_MEDICAL_OFFICER = "Senior Medical Officer"
     MEDICAL_OFFICER = "Medical Officer"
 
 
 MO_GRADES = {
-    Grade.SENIOR_RESIDENT,
+    Grade.SENIOR_MEDICAL_OFFICER,
     Grade.MEDICAL_OFFICER,
 }
 
 DUTY_GRADES = {
     Grade.SENIOR_STAFF_REGISTRAR,
     Grade.SENIOR_RESIDENT,
+    Grade.SENIOR_MEDICAL_OFFICER,
     Grade.MEDICAL_OFFICER,
 }
 
