@@ -69,6 +69,26 @@ export default function Layout() {
           <NavLink to="/teams">Teams</NavLink>
           <NavLink to="/resources">Resources</NavLink>
         </nav>
+
+        <div className="sidebar-rules">
+          <div className="rules-header">Allocation Rules</div>
+          <div className="rules-grade">
+            <span className="rules-label">SSR</span>
+            <span className="rules-tags">OT, Admin, R1/R2/EOT</span>
+          </div>
+          <div className="rules-grade">
+            <span className="rules-label">SR</span>
+            <span className="rules-tags">OT, Clinic*, Admin, R1/R2/EOT</span>
+          </div>
+          <div className="rules-grade">
+            <span className="rules-label">MO</span>
+            <span className="rules-tags">OT, Clinic, MOPD, Admin</span>
+          </div>
+          <div className="rules-note">*SR: clinic with tagged consultant</div>
+          <div className="rules-divider" />
+          <div className="rules-note">Call fairness: 24h only (MO1, MO2, wknd MO3)</div>
+          <div className="rules-note">MO1 matched to on-call consultant team</div>
+        </div>
       </aside>
       <main className="main">
         <Outlet />
