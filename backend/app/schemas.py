@@ -133,11 +133,57 @@ class MonthlyConfigOut(BaseModel):
 class ConsultantOnCallCreate(BaseModel):
     date: date
     consultant_id: int
+    supervising_consultant_id: Optional[int] = None
+
+
+class ConsultantOnCallOut(BaseModel):
+    id: int
+    date: date
+    consultant_id: int
+    consultant_name: str
+    supervising_consultant_id: Optional[int] = None
+    supervising_consultant_name: Optional[str] = None
+
+    model_config = {"from_attributes": True}
 
 
 class ACOnCallCreate(BaseModel):
     date: date
     ac_id: int
+
+
+class ACOnCallOut(BaseModel):
+    id: int
+    date: date
+    ac_id: int
+    ac_name: str
+
+    model_config = {"from_attributes": True}
+
+
+class RegistrarDutyOut(BaseModel):
+    id: int
+    date: date
+    registrar_id: int
+    registrar_name: str
+    duty_type: RegistrarDutyType
+    shift: RegistrarShift
+
+    model_config = {"from_attributes": True}
+
+
+class StepdownDayOut(BaseModel):
+    id: int
+    date: date
+
+    model_config = {"from_attributes": True}
+
+
+class EveningOTDateOut(BaseModel):
+    id: int
+    date: date
+
+    model_config = {"from_attributes": True}
 
 
 class RegistrarDutyCreate(BaseModel):

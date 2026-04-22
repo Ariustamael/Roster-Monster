@@ -1,7 +1,24 @@
 import { useState } from "react";
-import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { ResourceDay } from "../types";
+import SupplyDemandTab from "./resources/SupplyDemandTab";
+import OTTemplatesTab from "./resources/OTTemplatesTab";
+import ClinicTemplatesTab from "./resources/ClinicTemplatesTab";
+import ConsultantRosterTab from "./resources/ConsultantRosterTab";
+import RegistrarRosterTab from "./resources/RegistrarRosterTab";
+import DayFlagsTab from "./resources/DayFlagsTab";
+import PublicHolidaysTab from "./resources/PublicHolidaysTab";
+
+const TABS = [
+  { key: "supply", label: "Supply / Demand", needsConfig: true },
+  { key: "ot", label: "OT Templates", needsConfig: false },
+  { key: "clinics", label: "Clinic Templates", needsConfig: false },
+  { key: "consultant", label: "Consultant Roster", needsConfig: true },
+  { key: "registrar", label: "Registrar Roster", needsConfig: true },
+  { key: "flags", label: "Day Flags", needsConfig: true },
+  { key: "holidays", label: "Public Holidays", needsConfig: false },
+] as const;
+
+type TabKey = (typeof TABS)[number]["key"];
 
 const MONTH_NAMES = [
   "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -10,122 +27,48 @@ const MONTH_NAMES = [
 
 export default function ResourcesView() {
   const { active } = useConfig();
-  const [days, setDays] = useState<ResourceDay[] | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [tab, setTab] = useState<TabKey>("supply");
 
-  async function load() {
-    if (!active) return;
-    setLoading(true);
-    try {
-      const data = await api.getResources(active.id);
-      setDays(data.days);
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
+  const currentTab = TABS.find((t) => t.key === tab)!;
+  const needsConfig = currentTab.needsConfig && !active;
 
   return (
     <>
       <div className="page-header">
-        <h2>Resources - {MONTH_NAMES[active.month]} {active.year}</h2>
-        <button className="btn btn-primary" onClick={load} disabled={loading}>
-          {loading ? <><span className="spinner" /> Loading...</> : "Load Resources"}
-        </button>
+        <h2>Resources {active ? `- ${MONTH_NAMES[active.month]} ${active.year}` : ""}</h2>
       </div>
 
-      {days && (
+      <div className="tabs" style={{ marginBottom: 16 }}>
+        {TABS.map((t) => (
+          <button
+            key={t.key}
+            className={`tab ${tab === t.key ? "active" : ""}`}
+            onClick={() => setTab(t.key)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {needsConfig ? (
+        <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar to configure this tab.</p>
+      ) : (
         <>
-          <SummaryCards days={days} />
-          <div className="card" style={{ marginTop: 16 }}>
-            <div className="table-wrap">
-              <table className="resources-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Day</th>
-                    <th>OT Rooms</th>
-                    <th>OT Asst</th>
-                    <th>Sup Clinic</th>
-                    <th>MOPD</th>
-                    <th>Call Slots</th>
-                    <th>Total MOs</th>
-                    <th>On Leave</th>
-                    <th>On Call</th>
-                    <th>Post-Call</th>
-                    <th>Available</th>
-                    <th>Duty Need</th>
-                    <th>Surplus</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {days.map((d) => (
-                    <tr
-                      key={d.date}
-                      className={`${d.is_weekend ? "weekend" : ""} ${d.is_ph ? "ph" : ""}`}
-                    >
-                      <td>{d.date.slice(5)}</td>
-                      <td>{d.day_name}{d.is_ph ? " (PH)" : ""}</td>
-                      <td>{d.ot_rooms || "-"}</td>
-                      <td>{d.ot_assistants_needed || "-"}</td>
-                      <td>{d.supervised_clinics || "-"}</td>
-                      <td>{d.mopd_clinics || "-"}</td>
-                      <td>{d.call_slots}</td>
-                      <td>{d.total_mos}</td>
-                      <td className={d.on_leave > 0 ? "leave-cell" : ""}>{d.on_leave || "-"}</td>
-                      <td>{d.on_call || "-"}</td>
-                      <td>{d.post_call || "-"}</td>
-                      <td style={{ fontWeight: 600 }}>{d.available}</td>
-                      <td>{d.needed_for_duties || "-"}</td>
-                      <td className={d.surplus < 0 ? "deficit" : d.surplus <= 2 ? "tight" : "surplus"}>
-                        {d.is_weekend || d.is_ph ? "-" : d.surplus}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+          {tab === "supply" && active && <SupplyDemandTab configId={active.id} />}
+          {tab === "ot" && <OTTemplatesTab />}
+          {tab === "clinics" && <ClinicTemplatesTab />}
+          {tab === "consultant" && active && (
+            <ConsultantRosterTab configId={active.id} year={active.year} month={active.month} />
+          )}
+          {tab === "registrar" && active && (
+            <RegistrarRosterTab configId={active.id} year={active.year} month={active.month} />
+          )}
+          {tab === "flags" && active && (
+            <DayFlagsTab configId={active.id} year={active.year} month={active.month} />
+          )}
+          {tab === "holidays" && <PublicHolidaysTab />}
         </>
       )}
     </>
-  );
-}
-
-function SummaryCards({ days }: { days: ResourceDay[] }) {
-  const weekdays = days.filter((d) => !d.is_weekend && !d.is_ph);
-  const shortDays = weekdays.filter((d) => d.surplus < 0);
-  const tightDays = weekdays.filter((d) => d.surplus >= 0 && d.surplus <= 2);
-  const totalOTRooms = weekdays.reduce((s, d) => s + d.ot_rooms, 0);
-  const avgAvailable = weekdays.length > 0
-    ? (weekdays.reduce((s, d) => s + d.available, 0) / weekdays.length).toFixed(1)
-    : "0";
-
-  return (
-    <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-      <div className="summary-card">
-        <div className="summary-value">{weekdays.length}</div>
-        <div className="summary-label">Weekdays</div>
-      </div>
-      <div className="summary-card">
-        <div className="summary-value">{totalOTRooms}</div>
-        <div className="summary-label">OT Room-Days</div>
-      </div>
-      <div className="summary-card">
-        <div className="summary-value">{avgAvailable}</div>
-        <div className="summary-label">Avg Available MOs</div>
-      </div>
-      <div className={`summary-card ${shortDays.length > 0 ? "summary-danger" : ""}`}>
-        <div className="summary-value">{shortDays.length}</div>
-        <div className="summary-label">Short-Staffed Days</div>
-      </div>
-      <div className={`summary-card ${tightDays.length > 3 ? "summary-warn" : ""}`}>
-        <div className="summary-value">{tightDays.length}</div>
-        <div className="summary-label">Tight Days (&le;2)</div>
-      </div>
-    </div>
   );
 }

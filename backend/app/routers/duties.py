@@ -52,6 +52,22 @@ def create_ot_template(payload: OTTemplateCreate, db: DBSession = Depends(get_db
     )
 
 
+@router.put("/templates/ot/{template_id}", response_model=OTTemplateOut)
+def update_ot_template(template_id: int, payload: OTTemplateCreate, db: DBSession = Depends(get_db)):
+    t = db.query(OTTemplate).get(template_id)
+    if not t:
+        raise HTTPException(404)
+    for k, v in payload.model_dump().items():
+        setattr(t, k, v)
+    db.commit()
+    db.refresh(t)
+    return OTTemplateOut(
+        id=t.id, day_of_week=t.day_of_week, room=t.room,
+        consultant_id=t.consultant_id, consultant_name=t.consultant.name,
+        assistants_needed=t.assistants_needed, is_la=t.is_la,
+    )
+
+
 @router.delete("/templates/ot/{template_id}")
 def delete_ot_template(template_id: int, db: DBSession = Depends(get_db)):
     t = db.query(OTTemplate).get(template_id)
@@ -92,6 +108,33 @@ def create_clinic_template(payload: ClinicTemplateCreate, db: DBSession = Depend
         consultant_id=t.consultant_id,
         consultant_name=t.consultant.name if t.consultant else None,
     )
+
+
+@router.put("/templates/clinics/{template_id}", response_model=ClinicTemplateOut)
+def update_clinic_template(template_id: int, payload: ClinicTemplateCreate, db: DBSession = Depends(get_db)):
+    t = db.query(ClinicTemplate).get(template_id)
+    if not t:
+        raise HTTPException(404)
+    for k, v in payload.model_dump().items():
+        setattr(t, k, v)
+    db.commit()
+    db.refresh(t)
+    return ClinicTemplateOut(
+        id=t.id, day_of_week=t.day_of_week, session=t.session,
+        room=t.room, is_supervised=t.is_supervised,
+        consultant_id=t.consultant_id,
+        consultant_name=t.consultant.name if t.consultant else None,
+    )
+
+
+@router.delete("/templates/clinics/{template_id}")
+def delete_clinic_template(template_id: int, db: DBSession = Depends(get_db)):
+    t = db.query(ClinicTemplate).get(template_id)
+    if not t:
+        raise HTTPException(404)
+    db.delete(t)
+    db.commit()
+    return {"ok": True}
 
 
 # ── Duty Generation ─────────────────────────────────────────────────────

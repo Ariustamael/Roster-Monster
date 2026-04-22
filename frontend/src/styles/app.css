@@ -686,3 +686,32 @@ td.override {
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
+
+/* ── Config Tables (Resources) ────────────────────────── */
+
+.config-table select,
+.config-select {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.config-table input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.config-input {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+}

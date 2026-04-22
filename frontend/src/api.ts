@@ -135,4 +135,62 @@ export const api = {
   // MO staff for dropdown
   getMOStaff: () =>
     request<import("./types").Staff[]>("/staff?active_only=true"),
+
+  // OT Templates
+  getOTTemplates: () =>
+    request<import("./types").OTTemplate[]>("/templates/ot"),
+  createOTTemplate: (data: { day_of_week: number; room: string; consultant_id: number; assistants_needed?: number; is_la?: boolean }) =>
+    request<import("./types").OTTemplate>("/templates/ot", { method: "POST", body: JSON.stringify(data) }),
+  updateOTTemplate: (id: number, data: { day_of_week: number; room: string; consultant_id: number; assistants_needed?: number; is_la?: boolean }) =>
+    request<import("./types").OTTemplate>(`/templates/ot/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteOTTemplate: (id: number) =>
+    request<{ ok: boolean }>(`/templates/ot/${id}`, { method: "DELETE" }),
+
+  // Clinic Templates
+  getClinicTemplates: () =>
+    request<import("./types").ClinicTemplate[]>("/templates/clinics"),
+  createClinicTemplate: (data: { day_of_week: number; session: string; room: string; is_supervised?: boolean; consultant_id?: number | null }) =>
+    request<import("./types").ClinicTemplate>("/templates/clinics", { method: "POST", body: JSON.stringify(data) }),
+  updateClinicTemplate: (id: number, data: { day_of_week: number; session: string; room: string; is_supervised?: boolean; consultant_id?: number | null }) =>
+    request<import("./types").ClinicTemplate>(`/templates/clinics/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteClinicTemplate: (id: number) =>
+    request<{ ok: boolean }>(`/templates/clinics/${id}`, { method: "DELETE" }),
+
+  // Consultant On-Call
+  getConsultantOnCall: (configId: number) =>
+    request<import("./types").ConsultantOnCall[]>(`/config/${configId}/consultant-oncall`),
+  setConsultantOnCall: (configId: number, entries: { date: string; consultant_id: number; supervising_consultant_id?: number | null }[]) =>
+    request<{ ok: boolean }>(`/config/${configId}/consultant-oncall`, { method: "POST", body: JSON.stringify(entries) }),
+
+  // AC On-Call
+  getACOnCall: (configId: number) =>
+    request<import("./types").ACOnCall[]>(`/config/${configId}/ac-oncall`),
+  setACOnCall: (configId: number, entries: { date: string; ac_id: number }[]) =>
+    request<{ ok: boolean }>(`/config/${configId}/ac-oncall`, { method: "POST", body: JSON.stringify(entries) }),
+
+  // Registrar Duties
+  getRegistrarDuties: (configId: number) =>
+    request<import("./types").RegistrarDuty[]>(`/config/${configId}/registrar-duties`),
+  setRegistrarDuties: (configId: number, entries: { date: string; registrar_id: number; duty_type: string; shift: string }[]) =>
+    request<{ ok: boolean }>(`/config/${configId}/registrar-duties`, { method: "POST", body: JSON.stringify(entries) }),
+
+  // Public Holidays
+  getPublicHolidays: () =>
+    request<import("./types").PublicHoliday[]>("/config/public-holidays"),
+  createPublicHoliday: (date: string, name: string) =>
+    request<import("./types").PublicHoliday>("/config/public-holidays", { method: "POST", body: JSON.stringify({ date, name }) }),
+  deletePublicHoliday: (id: number) =>
+    request<{ ok: boolean }>(`/config/public-holidays/${id}`, { method: "DELETE" }),
+
+  // Stepdown Days
+  getStepdownDays: (configId: number) =>
+    request<import("./types").StepdownDay[]>(`/config/${configId}/stepdown-days`),
+  setStepdownDays: (configId: number, entries: { date: string }[]) =>
+    request<{ ok: boolean }>(`/config/${configId}/stepdown-days`, { method: "POST", body: JSON.stringify(entries) }),
+
+  // Evening OT Dates
+  getEveningOTDates: (configId: number) =>
+    request<import("./types").EveningOTDate[]>(`/config/${configId}/evening-ot-dates`),
+  setEveningOTDates: (configId: number, entries: { date: string }[]) =>
+    request<{ ok: boolean }>(`/config/${configId}/evening-ot-dates`, { method: "POST", body: JSON.stringify(entries) }),
 };

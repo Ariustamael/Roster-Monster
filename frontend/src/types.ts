@@ -131,6 +131,67 @@ export interface TeamAssignment {
   effective_to: string | null;
 }
 
+export interface OTTemplate {
+  id: number;
+  day_of_week: number;
+  room: string;
+  consultant_id: number;
+  consultant_name: string;
+  assistants_needed: number;
+  is_la: boolean;
+}
+
+export interface ClinicTemplate {
+  id: number;
+  day_of_week: number;
+  session: string;
+  room: string;
+  is_supervised: boolean;
+  consultant_id: number | null;
+  consultant_name: string | null;
+}
+
+export interface ConsultantOnCall {
+  id: number;
+  date: string;
+  consultant_id: number;
+  consultant_name: string;
+  supervising_consultant_id: number | null;
+  supervising_consultant_name: string | null;
+}
+
+export interface ACOnCall {
+  id: number;
+  date: string;
+  ac_id: number;
+  ac_name: string;
+}
+
+export interface RegistrarDuty {
+  id: number;
+  date: string;
+  registrar_id: number;
+  registrar_name: string;
+  duty_type: string;
+  shift: string;
+}
+
+export interface PublicHoliday {
+  id: number;
+  date: string;
+  name: string;
+}
+
+export interface StepdownDay {
+  id: number;
+  date: string;
+}
+
+export interface EveningOTDate {
+  id: number;
+  date: string;
+}
+
 export interface ResourceDay {
   date: string;
   day_name: string;
