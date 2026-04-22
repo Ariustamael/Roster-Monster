@@ -12,7 +12,7 @@ class Grade(str, enum.Enum):
     SENIOR_CONSULTANT = "Senior Consultant"
     CONSULTANT = "Consultant"
     ASSOCIATE_CONSULTANT = "Associate Consultant"
-    REGISTRAR = "Registrar"
+    SENIOR_STAFF_REGISTRAR = "Senior Staff Registrar"
     SENIOR_RESIDENT = "Senior Resident"
     MEDICAL_OFFICER = "Medical Officer"
 
@@ -23,7 +23,7 @@ MO_GRADES = {
 }
 
 DUTY_GRADES = {
-    Grade.REGISTRAR,
+    Grade.SENIOR_STAFF_REGISTRAR,
     Grade.SENIOR_RESIDENT,
     Grade.MEDICAL_OFFICER,
 }
@@ -68,6 +68,7 @@ class RegistrarShift(str, enum.Enum):
 class RegistrarDutyType(str, enum.Enum):
     R1 = "R1"
     R2 = "R2"
+    EOT = "EOT"
 
 
 # ── Staff ────────────────────────────────────────────────────────────────

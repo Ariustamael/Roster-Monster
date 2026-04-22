@@ -35,13 +35,13 @@ if not exist "%ROOT%\frontend\node_modules" (
     cd /d "%ROOT%"
 )
 
-:: Start backend in a new window
+:: Start backend in a hidden window
 echo [1/3] Starting backend server...
-start "Roster Monster - Backend" cmd /k "cd /d %ROOT%\backend && %ROOT%\backend\venv\Scripts\activate.bat && uvicorn app.main:app --host 127.0.0.1 --reload"
+start /min "Roster Monster - Backend" cmd /c "cd /d %ROOT%\backend && %ROOT%\backend\venv\Scripts\activate.bat && uvicorn app.main:app --host 127.0.0.1 --reload"
 
-:: Start frontend in a new window
+:: Start frontend in a hidden window
 echo [2/3] Starting frontend server...
-start "Roster Monster - Frontend" cmd /k "cd /d %ROOT%\frontend && npx --yes vite --host 127.0.0.1"
+start /min "Roster Monster - Frontend" cmd /c "cd /d %ROOT%\frontend && npx --yes vite --host 127.0.0.1"
 
 :: Wait for servers to start, then open browser
 echo [3/3] Waiting for servers to start...
@@ -56,5 +56,11 @@ echo   Backend:  http://127.0.0.1:8000
 echo   API docs: http://127.0.0.1:8000/docs
 echo ========================================
 echo.
-echo Close the Backend and Frontend windows to stop.
-pause
+echo Press any key to STOP both servers and exit.
+pause >nul
+
+:: Kill backend and frontend when user presses a key
+echo Stopping servers...
+taskkill /fi "WINDOWTITLE eq Roster Monster - Backend" /f >nul 2>&1
+taskkill /fi "WINDOWTITLE eq Roster Monster - Frontend" /f >nul 2>&1
+echo Done.

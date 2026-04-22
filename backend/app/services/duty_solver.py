@@ -181,7 +181,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 continue
             candidates = [
                 p for p in am_pool
-                if p.id not in am_assigned and p.grade != Grade.REGISTRAR.value
+                if p.id not in am_assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
             ]
             if not candidates:
                 break
@@ -204,8 +204,11 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
             am_assigned.add(chosen.id)
             fairness.clinic_sessions[chosen.id] += 1
 
-        # MOPD AM
-        mopd_am_pool = [p for p in am_pool if p.id not in am_assigned]
+        # MOPD AM (SSRs excluded — they do OT/Admin/R1/R2/EOT only)
+        mopd_am_pool = [
+            p for p in am_pool
+            if p.id not in am_assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
+        ]
         supervised_am_count = sum(1 for c in day.am_clinics if c.is_supervised)
         mopd_slots_am = day.mopd_rooms_am - supervised_am_count
         mopd_to_assign = min(mopd_slots_am, len(mopd_am_pool))
@@ -245,7 +248,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 continue
             candidates = [
                 p for p in pm_pool
-                if p.id not in pm_assigned and p.grade != Grade.REGISTRAR.value
+                if p.id not in pm_assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
             ]
             if not candidates:
                 break
@@ -268,8 +271,11 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
             pm_assigned.add(chosen.id)
             fairness.clinic_sessions[chosen.id] += 1
 
-        # MOPD PM
-        mopd_pm_pool = [p for p in pm_pool if p.id not in pm_assigned]
+        # MOPD PM (SSRs excluded)
+        mopd_pm_pool = [
+            p for p in pm_pool
+            if p.id not in pm_assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
+        ]
         supervised_pm_count = sum(1 for c in day.pm_clinics if c.is_supervised)
         mopd_slots_pm = day.mopd_rooms_pm - supervised_pm_count
         mopd_to_assign = min(mopd_slots_pm, len(mopd_pm_pool))

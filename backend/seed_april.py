@@ -100,7 +100,7 @@ def seed():
 
     # ── Registrars (SSRs — no team assignment, no clinic) ────────────
     for name in ["Grace Tan", "Omar", "Raj", "Sagar"]:
-        s = Staff(name=name, grade=Grade.REGISTRAR)
+        s = Staff(name=name, grade=Grade.SENIOR_STAFF_REGISTRAR)
         db.add(s)
         db.flush()
         staff[name] = s
