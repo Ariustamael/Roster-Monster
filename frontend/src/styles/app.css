@@ -1,0 +1,259 @@
+:root {
+  --bg: #f5f6fa;
+  --surface: #ffffff;
+  --border: #e1e4e8;
+  --text: #1a1a2e;
+  --text-muted: #6b7280;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --weekend: #fef3c7;
+  --ph: #fce7f3;
+  --success: #059669;
+  --danger: #dc2626;
+  --ot-bg: #dbeafe;
+  --clinic-bg: #d1fae5;
+  --mopd-bg: #fef9c3;
+  --admin-bg: #f3f4f6;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ── Sidebar ─────────────────────────────────────────── */
+
+.sidebar {
+  width: 220px;
+  background: var(--text);
+  color: white;
+  padding: 20px 0;
+  flex-shrink: 0;
+}
+
+.sidebar h1 {
+  font-size: 18px;
+  padding: 0 20px 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  margin-bottom: 10px;
+}
+
+.sidebar nav a {
+  display: block;
+  padding: 10px 20px;
+  color: rgba(255,255,255,0.7);
+  text-decoration: none;
+  font-size: 14px;
+  transition: all 0.15s;
+}
+
+.sidebar nav a:hover,
+.sidebar nav a.active {
+  background: rgba(255,255,255,0.1);
+  color: white;
+}
+
+/* ── Main content ────────────────────────────────────── */
+
+.main {
+  flex: 1;
+  padding: 24px;
+  overflow-x: auto;
+}
+
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.page-header h2 {
+  font-size: 22px;
+  font-weight: 600;
+}
+
+/* ── Buttons ─────────────────────────────────────────── */
+
+.btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: white;
+}
+
+.btn-primary:hover { background: var(--primary-hover); }
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-group {
+  display: flex;
+  gap: 8px;
+}
+
+/* ── Cards ───────────────────────────────────────────── */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.card h3 {
+  font-size: 15px;
+  margin-bottom: 12px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ── Tables ──────────────────────────────────────────── */
+
+.table-wrap {
+  overflow-x: auto;
+  margin-bottom: 16px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th, td {
+  padding: 6px 10px;
+  text-align: left;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th {
+  background: #f0f1f5;
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+tr.weekend { background: var(--weekend); }
+tr.ph { background: var(--ph); }
+tr.weekend.ph { background: var(--ph); }
+
+/* ── Roster-specific ─────────────────────────────────── */
+
+.roster-table td.mo1 { font-weight: 600; }
+.roster-table td.empty { color: var(--text-muted); }
+
+.duty-tag {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 500;
+  margin: 1px 2px;
+}
+
+.duty-tag.ot { background: var(--ot-bg); color: #1e40af; }
+.duty-tag.clinic { background: var(--clinic-bg); color: #065f46; }
+.duty-tag.mopd { background: var(--mopd-bg); color: #92400e; }
+.duty-tag.admin { background: var(--admin-bg); color: var(--text-muted); }
+
+/* ── Fairness table ──────────────────────────────────── */
+
+.fairness-table td.high { background: #fee2e2; }
+.fairness-table td.low { background: #d1fae5; }
+
+/* ── Violations ──────────────────────────────────────── */
+
+.violations {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.violations h4 { color: var(--danger); margin-bottom: 8px; }
+.violations li { margin-left: 20px; color: var(--danger); font-size: 13px; }
+
+.success-badge {
+  background: #d1fae5;
+  color: var(--success);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+/* ── Tabs ────────────────────────────────────────────── */
+
+.tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--border);
+}
+
+.tab {
+  padding: 10px 20px;
+  cursor: pointer;
+  border: none;
+  background: none;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all 0.15s;
+}
+
+.tab:hover { color: var(--text); }
+.tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+/* ── Loading / Status ────────────────────────────────── */
+
+.loading {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
+}
+
+.spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-top-color: var(--primary);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
