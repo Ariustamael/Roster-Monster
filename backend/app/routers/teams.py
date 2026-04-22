@@ -1,3 +1,5 @@
+from datetime import date as date_type
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,28 @@ def list_team_members(team_id: int, db: Session = Depends(get_db)):
         db.query(TeamAssignment)
         .filter(TeamAssignment.team_id == team_id)
         .order_by(TeamAssignment.effective_from.desc())
+        .all()
+    )
+    return [
+        TeamAssignmentOut(
+            id=r.id,
+            staff_id=r.staff_id,
+            staff_name=r.staff.name,
+            team_id=r.team_id,
+            team_name=r.team.name,
+            role=r.role,
+            effective_from=r.effective_from,
+            effective_to=r.effective_to,
+        )
+        for r in rows
+    ]
+
+
+@router.get("/all-assignments", response_model=list[TeamAssignmentOut])
+def list_all_assignments(db: Session = Depends(get_db)):
+    rows = (
+        db.query(TeamAssignment)
+        .order_by(TeamAssignment.team_id, TeamAssignment.role, TeamAssignment.staff_id)
         .all()
     )
     return [
@@ -58,6 +82,41 @@ def create_assignment(payload: TeamAssignmentCreate, db: Session = Depends(get_d
         role=ta.role,
         effective_from=ta.effective_from,
         effective_to=ta.effective_to,
+    )
+
+
+@router.put("/reassign/{staff_id}/{team_id}", response_model=TeamAssignmentOut)
+def reassign_staff(staff_id: int, team_id: int, db: Session = Depends(get_db)):
+    staff = db.query(Staff).get(staff_id)
+    if not staff:
+        raise HTTPException(404, "Staff not found")
+    team = db.query(Team).get(team_id)
+    if not team:
+        raise HTTPException(404, "Team not found")
+
+    db.query(TeamAssignment).filter(
+        TeamAssignment.staff_id == staff_id,
+        TeamAssignment.role == "mo",
+    ).delete()
+
+    ta = TeamAssignment(
+        staff_id=staff_id,
+        team_id=team_id,
+        role="mo",
+        effective_from=date_type.today(),
+    )
+    db.add(ta)
+    db.commit()
+    db.refresh(ta)
+    return TeamAssignmentOut(
+        id=ta.id,
+        staff_id=staff.id,
+        staff_name=staff.name,
+        team_id=team.id,
+        team_name=team.name,
+        role="mo",
+        effective_from=ta.effective_from,
+        effective_to=None,
     )
 
 

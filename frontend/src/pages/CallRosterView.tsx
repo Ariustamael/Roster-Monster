@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
+import { useConfig } from "../context/ConfigContext";
 import type { RosterResponse, Staff, CallAssignment, DayRoster } from "../types";
 
 const MO_GRADES = ["Resident Physician", "Clinical Associate", "Medical Officer"];
 const CALL_SLOTS = ["MO1", "MO2", "MO3", "MO4", "MO5"] as const;
 
 export default function CallRosterView() {
+  const { active } = useConfig();
   const [roster, setRoster] = useState<RosterResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -17,13 +19,21 @@ export default function CallRosterView() {
     api.getMOStaff().then((all) => setMoStaff(all.filter((s) => MO_GRADES.includes(s.grade))));
   }, []);
 
+  useEffect(() => {
+    setRoster(null);
+    setAssignments([]);
+  }, [active?.id]);
+
+  const configId = active?.id ?? 0;
+
   async function generate() {
+    if (!configId) return;
     setLoading(true);
     setError("");
     try {
-      const data = await api.generateCallRoster(1);
+      const data = await api.generateCallRoster(configId);
       setRoster(data);
-      const a = await api.getAssignments(1);
+      const a = await api.getAssignments(configId);
       setAssignments(a);
     } catch (e: any) {
       setError(e.message);
@@ -34,7 +44,7 @@ export default function CallRosterView() {
 
   async function exportFile(format: "original" | "clean") {
     try {
-      await api.exportRoster(1, format);
+      await api.exportRoster(configId, format);
     } catch (e: any) {
       setError(e.message);
     }
@@ -54,8 +64,8 @@ export default function CallRosterView() {
   async function handleOverride(staffId: number) {
     if (!editCell) return;
     try {
-      await api.setOverride(1, editCell.date, editCell.slot, staffId);
-      const a = await api.getAssignments(1);
+      await api.setOverride(configId, editCell.date, editCell.slot, staffId);
+      const a = await api.getAssignments(configId);
       setAssignments(a);
       if (roster) {
         const staffName = moStaff.find((s) => s.id === staffId)?.name || "";
@@ -71,6 +81,8 @@ export default function CallRosterView() {
     }
     setEditCell(null);
   }
+
+  if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
 
   return (
     <>

@@ -44,8 +44,46 @@ body {
   font-size: 18px;
   padding: 0 20px 20px;
   border-bottom: 1px solid rgba(255,255,255,0.1);
+  margin-bottom: 0;
+}
+
+.config-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px 10px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
   margin-bottom: 10px;
 }
+
+.config-picker select {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.1);
+  color: white;
+  font-size: 13px;
+}
+
+.config-picker select option {
+  background: var(--text);
+  color: white;
+}
+
+.btn-add-month {
+  background: rgba(255,255,255,0.15);
+  color: white;
+  border: none;
+  border-radius: 4px;
+  width: 28px;
+  height: 28px;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.btn-add-month:hover { background: rgba(255,255,255,0.25); }
 
 .sidebar nav a {
   display: block;
@@ -402,3 +440,107 @@ td.override {
 .chip.block { background: #fee2e2; border-color: #fecaca; }
 .chip.request { background: #dbeafe; border-color: #bfdbfe; }
 .chip.leave { background: #fef9c3; border-color: #fde68a; }
+
+/* ── Team Board (drag-and-drop) ─────────────────────── */
+
+.team-board {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.team-column {
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 10px;
+  width: 210px;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s;
+}
+
+.team-column.drop-ready {
+  border-color: var(--primary);
+  border-style: dashed;
+}
+
+.team-column.unassigned {
+  border-color: var(--danger);
+  border-style: dashed;
+}
+
+.team-header {
+  padding: 12px 14px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.team-header strong {
+  display: block;
+  font-size: 14px;
+}
+
+.team-consultant {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+.team-members {
+  flex: 1;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 80px;
+}
+
+.team-card {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: grab;
+  transition: box-shadow 0.15s, opacity 0.15s;
+}
+
+.team-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.team-card.dragging {
+  opacity: 0.4;
+}
+
+.team-card:active {
+  cursor: grabbing;
+}
+
+.card-name {
+  display: block;
+  font-weight: 500;
+  font-size: 13px;
+}
+
+.card-grade {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.team-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: center;
+  padding: 20px 0;
+}
+
+.team-count {
+  padding: 6px 14px;
+  font-size: 11px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  text-align: right;
+}

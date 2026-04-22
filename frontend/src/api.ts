@@ -34,6 +34,30 @@ export const api = {
   getTeams: () => request<import("./types").Team[]>("/teams"),
   getConfigs: () => request<import("./types").MonthlyConfig[]>("/config"),
 
+  createStaff: (name: string, grade: string, active = true) =>
+    request<import("./types").Staff>("/staff", {
+      method: "POST",
+      body: JSON.stringify({ name, grade, active, has_admin_role: false }),
+    }),
+  updateStaff: (id: number, name: string, grade: string, active: boolean) =>
+    request<import("./types").Staff>(`/staff/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, grade, active, has_admin_role: false }),
+    }),
+  createConfig: (year: number, month: number) =>
+    request<import("./types").MonthlyConfig>("/config", {
+      method: "POST",
+      body: JSON.stringify({ year, month }),
+    }),
+
+  // Team assignments
+  getAllTeamAssignments: () =>
+    request<import("./types").TeamAssignment[]>("/teams/all-assignments"),
+  reassignStaff: (staffId: number, teamId: number) =>
+    request<import("./types").TeamAssignment>(`/teams/reassign/${staffId}/${teamId}`, {
+      method: "PUT",
+    }),
+
   generateCallRoster: (configId: number) =>
     request<import("./types").RosterResponse>(`/roster/${configId}/generate`, {
       method: "POST",

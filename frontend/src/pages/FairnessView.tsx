@@ -1,19 +1,29 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { api } from "../api";
-import type { RosterResponse, DutyRosterResponse, FairnessStats, DutyStats } from "../types";
+import { useConfig } from "../context/ConfigContext";
+import type { FairnessStats, DutyStats } from "../types";
 
 export default function FairnessView() {
+  const { active } = useConfig();
   const [callFairness, setCallFairness] = useState<Record<string, FairnessStats> | null>(null);
   const [dutyStats, setDutyStats] = useState<Record<string, DutyStats> | null>(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<"calls" | "duties">("calls");
 
+  const configId = active?.id ?? 0;
+
+  useEffect(() => {
+    setCallFairness(null);
+    setDutyStats(null);
+  }, [active?.id]);
+
   async function loadAll() {
+    if (!configId) return;
     setLoading(true);
     try {
       const [callData, dutyData] = await Promise.all([
-        api.generateCallRoster(1),
-        api.generateDutyRoster(1),
+        api.generateCallRoster(configId),
+        api.generateDutyRoster(configId),
       ]);
       setCallFairness(callData.fairness);
       setDutyStats(dutyData.duty_stats);
@@ -23,6 +33,8 @@ export default function FairnessView() {
       setLoading(false);
     }
   }
+
+  if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
 
   return (
     <>

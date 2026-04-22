@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { Staff, Leave, CallPreference } from "../types";
+import { useConfig } from "../context/ConfigContext";
+import type { Staff, Leave, CallPreference, Team } from "../types";
 
 const GRADE_ORDER: Record<string, number> = {
   "Senior Consultant": 0,
@@ -12,24 +13,44 @@ const GRADE_ORDER: Record<string, number> = {
   "Medical Officer": 6,
 };
 
+const ALL_GRADES = [
+  "Senior Consultant", "Consultant", "Associate Consultant",
+  "Registrar", "Resident Physician", "Clinical Associate", "Medical Officer",
+];
+
 const MO_GRADES = ["Resident Physician", "Clinical Associate", "Medical Officer"];
 
+const MONTH_NAMES = [
+  "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
 export default function StaffView() {
+  const { active } = useConfig();
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [prefs, setPrefs] = useState<CallPreference[]>([]);
+  const [showAdd, setShowAdd] = useState(false);
+  const [editing, setEditing] = useState<number | null>(null);
 
-  const year = 2026;
-  const month = 4;
+  const year = active?.year ?? 2026;
+  const month = active?.month ?? 1;
 
   useEffect(() => {
     api.getStaff().then(setStaff).finally(() => setLoading(false));
-    api.getLeavesForMonth(year, month).then(setLeaves);
-    api.getPreferencesForMonth(year, month).then(setPrefs);
+    api.getTeams().then(setTeams);
   }, []);
+
+  useEffect(() => {
+    if (active) {
+      api.getLeavesForMonth(year, month).then(setLeaves);
+      api.getPreferencesForMonth(year, month).then(setPrefs);
+    }
+  }, [active?.id]);
 
   const filtered = staff
     .filter(
@@ -42,12 +63,20 @@ export default function StaffView() {
 
   const moCount = staff.filter((s) => MO_GRADES.includes(s.grade)).length;
 
-  function toggleExpand(id: number) {
-    setExpanded(expanded === id ? null : id);
+  async function addStaff(name: string, grade: string) {
+    const s = await api.createStaff(name, grade);
+    setStaff((prev) => [...prev, s]);
+    setShowAdd(false);
+  }
+
+  async function saveEdit(id: number, name: string, grade: string, active: boolean) {
+    const updated = await api.updateStaff(id, name, grade, active);
+    setStaff((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    setEditing(null);
   }
 
   async function addLeave(staffId: number) {
-    const dateStr = prompt("Enter leave date (YYYY-MM-DD):");
+    const dateStr = prompt(`Enter leave date (YYYY-MM-DD):`);
     if (!dateStr) return;
     try {
       const lv = await api.createLeave(staffId, dateStr);
@@ -83,19 +112,22 @@ export default function StaffView() {
     <>
       <div className="page-header">
         <h2>Staff ({staff.length} total, {moCount} MOs)</h2>
-        <input
-          type="text"
-          placeholder="Filter by name, grade, or team..."
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          style={{
-            padding: "8px 12px",
-            border: "1px solid var(--border)",
-            borderRadius: 6,
-            fontSize: 13,
-            width: 260,
-          }}
-        />
+        <div className="btn-group">
+          <input
+            type="text"
+            placeholder="Filter by name, grade, or team..."
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={{
+              padding: "8px 12px",
+              border: "1px solid var(--border)",
+              borderRadius: 6,
+              fontSize: 13,
+              width: 220,
+            }}
+          />
+          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Staff</button>
+        </div>
       </div>
 
       {loading ? (
@@ -112,7 +144,8 @@ export default function StaffView() {
                   <th>Team</th>
                   <th>Status</th>
                   <th>Leaves</th>
-                  <th>Preferences</th>
+                  <th>Prefs</th>
+                  <th style={{ width: 60 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -121,6 +154,19 @@ export default function StaffView() {
                   const staffPrefs = prefs.filter((p) => p.staff_id === s.id);
                   const isMO = MO_GRADES.includes(s.grade);
                   const isExpanded = expanded === s.id;
+                  const isEditing = editing === s.id;
+
+                  if (isEditing) {
+                    return (
+                      <EditRow
+                        key={s.id}
+                        staff={s}
+                        teams={teams}
+                        onSave={saveEdit}
+                        onCancel={() => setEditing(null)}
+                      />
+                    );
+                  }
 
                   return (
                     <StaffRow
@@ -130,7 +176,9 @@ export default function StaffView() {
                       isExpanded={isExpanded}
                       leaves={staffLeaves}
                       prefs={staffPrefs}
-                      onToggle={() => toggleExpand(s.id)}
+                      monthLabel={`${MONTH_NAMES[month]} ${year}`}
+                      onToggle={() => setExpanded(isExpanded ? null : s.id)}
+                      onEdit={() => setEditing(s.id)}
                       onAddLeave={() => addLeave(s.id)}
                       onRemoveLeave={removeLeave}
                       onAddPref={(type) => addPreference(s.id, type)}
@@ -143,6 +191,10 @@ export default function StaffView() {
           </div>
         </div>
       )}
+
+      {showAdd && (
+        <AddStaffModal onAdd={addStaff} onClose={() => setShowAdd(false)} />
+      )}
     </>
   );
 }
@@ -153,7 +205,9 @@ function StaffRow({
   isExpanded,
   leaves,
   prefs,
+  monthLabel,
   onToggle,
+  onEdit,
   onAddLeave,
   onRemoveLeave,
   onAddPref,
@@ -164,7 +218,9 @@ function StaffRow({
   isExpanded: boolean;
   leaves: Leave[];
   prefs: CallPreference[];
+  monthLabel: string;
   onToggle: () => void;
+  onEdit: () => void;
   onAddLeave: () => void;
   onRemoveLeave: (id: number) => void;
   onAddPref: (type: "request" | "block") => void;
@@ -189,13 +245,21 @@ function StaffRow({
         </td>
         <td>{leaves.length || "-"}</td>
         <td>{prefs.length || "-"}</td>
+        <td>
+          <button
+            className="btn btn-sm btn-secondary"
+            onClick={(e) => { e.stopPropagation(); onEdit(); }}
+          >
+            Edit
+          </button>
+        </td>
       </tr>
       {isExpanded && (
         <tr className="staff-detail">
-          <td colSpan={7}>
+          <td colSpan={8}>
             <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
               <div>
-                <strong style={{ fontSize: 12 }}>Leaves (Apr 2026)</strong>
+                <strong style={{ fontSize: 12 }}>Leaves ({monthLabel})</strong>
                 <div className="detail-section" style={{ marginTop: 6 }}>
                   {leaves.map((l) => (
                     <span key={l.id} className="chip leave">
@@ -209,7 +273,7 @@ function StaffRow({
                 </div>
               </div>
               <div>
-                <strong style={{ fontSize: 12 }}>Preferences (Apr 2026)</strong>
+                <strong style={{ fontSize: 12 }}>Preferences ({monthLabel})</strong>
                 <div className="detail-section" style={{ marginTop: 6 }}>
                   {prefs.map((p) => (
                     <span key={p.id} className={`chip ${p.preference_type}`}>
@@ -231,5 +295,87 @@ function StaffRow({
         </tr>
       )}
     </>
+  );
+}
+
+function EditRow({
+  staff,
+  teams,
+  onSave,
+  onCancel,
+}: {
+  staff: Staff;
+  teams: Team[];
+  onSave: (id: number, name: string, grade: string, active: boolean) => void;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(staff.name);
+  const [grade, setGrade] = useState(staff.grade);
+  const [active, setActive] = useState(staff.active);
+
+  return (
+    <tr>
+      <td></td>
+      <td>
+        <input type="text" value={name} onChange={(e) => setName(e.target.value)}
+          style={{ width: "100%", padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13 }} />
+      </td>
+      <td>
+        <select value={grade} onChange={(e) => setGrade(e.target.value)}
+          style={{ padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13 }}>
+          {ALL_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+        </select>
+      </td>
+      <td>{staff.team_name || "-"}</td>
+      <td>
+        <select value={active ? "1" : "0"} onChange={(e) => setActive(e.target.value === "1")}
+          style={{ padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13 }}>
+          <option value="1">Active</option>
+          <option value="0">Inactive</option>
+        </select>
+      </td>
+      <td colSpan={2}></td>
+      <td>
+        <div className="btn-group">
+          <button className="btn btn-sm btn-primary" onClick={() => onSave(staff.id, name, grade, active)}>Save</button>
+          <button className="btn btn-sm btn-secondary" onClick={onCancel}>Cancel</button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function AddStaffModal({
+  onAdd,
+  onClose,
+}: {
+  onAdd: (name: string, grade: string) => void;
+  onClose: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [grade, setGrade] = useState("Medical Officer");
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <h3>Add Staff</h3>
+        <div className="form-group">
+          <label>Name</label>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+        </div>
+        <div className="form-group">
+          <label>Grade</label>
+          <select value={grade} onChange={(e) => setGrade(e.target.value)}>
+            {ALL_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+        </div>
+        <div className="modal-actions">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => { if (name.trim()) onAdd(name.trim(), grade); }}>
+            Add
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }

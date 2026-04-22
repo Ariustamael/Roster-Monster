@@ -116,3 +116,14 @@ export interface CallAssignment {
   call_type: string;
   is_manual_override: boolean;
 }
+
+export interface TeamAssignment {
+  id: number;
+  staff_id: number;
+  staff_name: string;
+  team_id: number;
+  team_name: string;
+  role: string;
+  effective_from: string;
+  effective_to: string | null;
+}

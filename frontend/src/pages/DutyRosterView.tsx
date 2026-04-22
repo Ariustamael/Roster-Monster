@@ -1,17 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
+import { useConfig } from "../context/ConfigContext";
 import type { DutyRosterResponse, DayDutyRoster } from "../types";
 
 export default function DutyRosterView() {
+  const { active } = useConfig();
   const [roster, setRoster] = useState<DutyRosterResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => { setRoster(null); }, [active?.id]);
+
+  const configId = active?.id ?? 0;
+
   async function generate() {
+    if (!configId) return;
     setLoading(true);
     setError("");
     try {
-      const data = await api.generateDutyRoster(1);
+      const data = await api.generateDutyRoster(configId);
       setRoster(data);
     } catch (e: any) {
       setError(e.message);
@@ -22,11 +29,13 @@ export default function DutyRosterView() {
 
   async function exportFile(format: "original" | "clean") {
     try {
-      await api.exportRoster(1, format);
+      await api.exportRoster(configId, format);
     } catch (e: any) {
       setError(e.message);
     }
   }
+
+  if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
 
   return (
     <>
@@ -38,10 +47,10 @@ export default function DutyRosterView() {
           </button>
           {roster && (
             <>
-              <button className="btn" onClick={() => exportFile("original")}>
+              <button className="btn btn-secondary" onClick={() => exportFile("original")}>
                 Export Original
               </button>
-              <button className="btn" onClick={() => exportFile("clean")}>
+              <button className="btn btn-secondary" onClick={() => exportFile("clean")}>
                 Export Clean
               </button>
             </>
