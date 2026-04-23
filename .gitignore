@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 *.pyo
 *.sqlite3
+*.db
 .env
 node_modules/
 dist/
