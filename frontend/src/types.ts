@@ -141,6 +141,7 @@ export interface OTTemplate {
   consultant_id: number | null;
   consultant_name: string | null;
   assistants_needed: number;
+  registrar_needed: number;
   is_emergency: boolean;
   linked_call_slot: string | null;
   color: string | null;
@@ -249,6 +250,8 @@ export interface CallTypeConfig {
   difficulty_points: number;
   counts_towards_fairness: boolean;
   applicable_days: string;
+  required_conditions: string | null;
+  default_duty_type: string | null;
   is_active: boolean;
   eligible_rank_ids: number[];
 }

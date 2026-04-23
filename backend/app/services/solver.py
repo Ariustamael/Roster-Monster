@@ -48,6 +48,7 @@ class CallTypeInfo:
     counts_towards_fairness: bool
     applicable_days: str
     eligible_rank_names: set[str]
+    required_conditions: str = ""
 
 
 @dataclass
@@ -152,10 +153,29 @@ def _day_matches_applicable(day: DayConfig, applicable_days: str) -> bool:
     return matched
 
 
+def _required_conditions_met(day: DayConfig, required_conditions: str) -> bool:
+    """ALL tokens in required_conditions must be satisfied (AND logic)."""
+    if not required_conditions or not required_conditions.strip():
+        return True
+    day_label = DAY_LABELS[day.d.weekday()]
+    for token in [t.strip() for t in required_conditions.split(",")]:
+        if not token:
+            continue
+        if token == "Stepdown" and not day.is_stepdown:
+            return False
+        elif token == "PH" and not day.is_ph:
+            return False
+        elif token == "Evening OT" and not day.has_evening_ot:
+            return False
+        elif token in DAY_LABELS and token != day_label:
+            return False
+    return True
+
+
 def _required_slots(day: DayConfig, call_type_configs: list[CallTypeInfo]) -> list[CallTypeInfo]:
     slots = []
     for ct in sorted(call_type_configs, key=lambda c: c.display_order):
-        if _day_matches_applicable(day, ct.applicable_days):
+        if _day_matches_applicable(day, ct.applicable_days) and _required_conditions_met(day, ct.required_conditions):
             slots.append(ct)
     return slots
 

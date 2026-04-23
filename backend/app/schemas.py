@@ -256,6 +256,7 @@ class OTTemplateCreate(BaseModel):
     room: str
     consultant_id: Optional[int] = None
     assistants_needed: int = 2
+    registrar_needed: int = 0
     is_emergency: bool = False
     linked_call_slot: Optional[str] = None
     color: Optional[str] = None
@@ -270,6 +271,7 @@ class OTTemplateOut(BaseModel):
     consultant_id: Optional[int]
     consultant_name: Optional[str] = None
     assistants_needed: int
+    registrar_needed: int = 0
     is_emergency: bool
     linked_call_slot: Optional[str] = None
     color: Optional[str] = None
@@ -308,6 +310,16 @@ class ClinicTemplateOut(BaseModel):
 
 
 # ── Duty Assignment (output) ─────────────────────────────────────────────
+
+class DutyOverrideCreate(BaseModel):
+    date: date
+    staff_id: int
+    session: Session
+    duty_type: str
+    location: Optional[str] = None
+    consultant_id: Optional[int] = None
+    old_assignment_id: Optional[int] = None
+
 
 class DutyAssignmentOut(BaseModel):
     id: int
@@ -387,6 +399,8 @@ class CallTypeConfigCreate(BaseModel):
     difficulty_points: int = 1
     counts_towards_fairness: bool = True
     applicable_days: str = "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"
+    required_conditions: Optional[str] = None
+    default_duty_type: Optional[str] = None
     is_active: bool = True
     eligible_rank_ids: list[int] = []
 
@@ -402,6 +416,8 @@ class CallTypeConfigOut(BaseModel):
     difficulty_points: int
     counts_towards_fairness: bool
     applicable_days: str
+    required_conditions: Optional[str] = None
+    default_duty_type: Optional[str] = None
     is_active: bool
     eligible_rank_ids: list[int] = []
 

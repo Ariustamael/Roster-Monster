@@ -41,6 +41,7 @@ def _load_call_type_infos(db: Session) -> list[CallTypeInfo]:
             counts_towards_fairness=ct.counts_towards_fairness,
             applicable_days=ct.applicable_days,
             eligible_rank_names=rank_names,
+            required_conditions=ct.required_conditions or "",
         ))
     return result
 

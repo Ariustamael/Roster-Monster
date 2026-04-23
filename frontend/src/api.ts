@@ -148,6 +148,21 @@ export const api = {
   getMOStaff: () =>
     request<import("./types").Staff[]>("/staff?active_only=true"),
 
+  // Duty overrides (drag-and-drop)
+  setDutyOverride: (
+    configId: number,
+    data: {
+      date: string; staff_id: number; session: string; duty_type: string;
+      location?: string | null; consultant_id?: number | null; old_assignment_id?: number | null;
+    }
+  ) =>
+    request<import("./types").DutyAssignment>(`/roster/${configId}/duty-override`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  deleteDutyOverride: (configId: number, assignmentId: number) =>
+    request<{ ok: boolean }>(`/roster/${configId}/duty-override/${assignmentId}`, { method: "DELETE" }),
+
   // OT Templates
   getOTTemplates: () =>
     request<import("./types").OTTemplate[]>("/templates/ot"),

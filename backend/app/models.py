@@ -16,6 +16,8 @@ class DutyType(str, enum.Enum):
     ADMIN = "Admin"
     CAT_A = "CAT-A"
     SPECIAL = "Special"
+    WARD_MO = "Ward MO"
+    EOT_MO = "EOT MO"
 
 
 class Session(str, enum.Enum):
@@ -75,6 +77,8 @@ class CallTypeConfig(Base):
     difficulty_points = Column(Integer, default=1)
     counts_towards_fairness = Column(Boolean, default=True)
     applicable_days = Column(String(50), default="Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH")
+    required_conditions = Column(String(100), nullable=True)
+    default_duty_type = Column(String(20), nullable=True)
     is_active = Column(Boolean, default=True)
 
     eligible_ranks = relationship(
@@ -301,6 +305,7 @@ class OTTemplate(Base):
     room = Column(String(20), nullable=False)
     consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     assistants_needed = Column(Integer, default=2)
+    registrar_needed = Column(Integer, default=0)
     is_emergency = Column(Boolean, default=False)
     linked_call_slot = Column(String(50), nullable=True)
     color = Column(String(10), nullable=True)

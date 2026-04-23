@@ -1,13 +1,21 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
 import type { DutyRosterResponse, DayDutyRoster, DutyAssignment } from "../types";
+
+interface DragState {
+  assignmentId: number;
+  staffId: number;
+  staffName: string;
+  date: string;
+}
 
 export default function DutyRosterView() {
   const { active } = useConfig();
   const [roster, setRoster] = useState<DutyRosterResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const dragRef = useRef<DragState | null>(null);
 
   const configId = active?.id ?? 0;
 
@@ -36,6 +44,44 @@ export default function DutyRosterView() {
   async function exportFile(format: "original" | "clean") {
     try {
       await api.exportRoster(configId, format);
+    } catch (e: any) {
+      setError(e.message);
+    }
+  }
+
+  async function handleDrop(
+    targetDutyType: string,
+    targetSession: string,
+    targetLocation: string | null,
+    targetConsultantId: number | null,
+    targetDate: string,
+  ) {
+    const drag = dragRef.current;
+    if (!drag || drag.date !== targetDate) return;
+
+    try {
+      await api.setDutyOverride(configId, {
+        date: targetDate,
+        staff_id: drag.staffId,
+        session: targetSession,
+        duty_type: targetDutyType,
+        location: targetLocation,
+        consultant_id: targetConsultantId,
+        old_assignment_id: drag.assignmentId,
+      });
+      const data = await api.viewDutyRoster(configId);
+      setRoster(data);
+    } catch (e: any) {
+      setError(e.message);
+    }
+    dragRef.current = null;
+  }
+
+  async function handleDelete(assignmentId: number) {
+    try {
+      await api.deleteDutyOverride(configId, assignmentId);
+      const data = await api.viewDutyRoster(configId);
+      setRoster(data);
     } catch (e: any) {
       setError(e.message);
     }
@@ -70,10 +116,22 @@ export default function DutyRosterView() {
 
       {roster && (
         <>
+          <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "8px 0" }}>
+            Drag any name tag to reassign. Drop onto a slot header to move there.
+            Right-click (or long-press) a name to remove the assignment.
+          </p>
+
           {roster.days
             .filter((d) => !d.is_weekend && !d.is_ph)
             .map((day) => (
-              <DayCard key={day.date} day={day} callColumns={callColumns} />
+              <DayCard
+                key={day.date}
+                day={day}
+                callColumns={callColumns}
+                dragRef={dragRef}
+                onDrop={handleDrop}
+                onDelete={handleDelete}
+              />
             ))}
 
           <div className="card" style={{ marginTop: 20 }}>
@@ -85,6 +143,8 @@ export default function DutyRosterView() {
                     <th>Name</th>
                     <th>OT Days</th>
                     <th>EOT Days</th>
+                    <th>Ward MO</th>
+                    <th>EOT MO</th>
                     <th>Supervised</th>
                     <th>MOPD</th>
                     <th>Admin</th>
@@ -98,6 +158,8 @@ export default function DutyRosterView() {
                         <td>{name}</td>
                         <td>{s.ot_days}</td>
                         <td>{s.eot_days}</td>
+                        <td>{(s as any).ward_mo_sessions ?? 0}</td>
+                        <td>{(s as any).eot_mo_sessions ?? 0}</td>
                         <td>{s.supervised_sessions}</td>
                         <td>{s.mopd_sessions}</td>
                         <td>{s.admin_sessions}</td>
@@ -113,31 +175,35 @@ export default function DutyRosterView() {
   );
 }
 
-function clinicRoomHeader(room: string, assignment: DutyAssignment): string {
-  const parts: string[] = [];
-  if (assignment.clinic_type) parts.push(assignment.clinic_type);
-  parts.push(room);
-  const label = parts.join(": ");
-  return assignment.consultant_name ? `${label} (${assignment.consultant_name})` : label;
-}
+function DayCard({
+  day, callColumns, dragRef, onDrop, onDelete,
+}: {
+  day: DayDutyRoster;
+  callColumns: string[];
+  dragRef: React.MutableRefObject<DragState | null>;
+  onDrop: (dutyType: string, session: string, location: string | null, consultantId: number | null, date: string) => void;
+  onDelete: (assignmentId: number) => void;
+}) {
+  const [dragOver, setDragOver] = useState<string | null>(null);
 
-function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string[] }) {
-  const otGroups: Record<string, { consultant: string | null; staff: DutyAssignment[] }> = {};
+  const otGroups: Record<string, { consultant: string | null; consultantId: number | null; staff: DutyAssignment[] }> = {};
   for (const a of day.ot_assignments) {
     const key = a.location || "OT";
-    if (!otGroups[key]) otGroups[key] = { consultant: a.consultant_name, staff: [] };
+    if (!otGroups[key]) otGroups[key] = { consultant: a.consultant_name, consultantId: a.consultant_id, staff: [] };
     otGroups[key].staff.push(a);
   }
 
-  const eotGroups: Record<string, { staff: DutyAssignment[] }> = {};
+  const eotGroups: Record<string, { consultantId: number | null; staff: DutyAssignment[] }> = {};
   for (const a of day.eot_assignments) {
     const key = a.location || "EOT";
-    if (!eotGroups[key]) eotGroups[key] = { staff: [] };
+    if (!eotGroups[key]) eotGroups[key] = { consultantId: a.consultant_id, staff: [] };
     eotGroups[key].staff.push(a);
   }
 
-  const clinicAm = day.am_clinics.filter((a) => a.duty_type !== "MOPD");
+  const clinicAm = day.am_clinics.filter((a) => a.duty_type !== "MOPD" && a.duty_type !== "Ward MO" && a.duty_type !== "EOT MO");
   const mopdAm = day.am_clinics.filter((a) => a.duty_type === "MOPD");
+  const wardMo = day.am_clinics.filter((a) => a.duty_type === "Ward MO");
+  const eotMo = [...day.ot_assignments, ...day.eot_assignments].filter((a) => a.duty_type === "EOT MO");
   const clinicPm = day.pm_clinics.filter((a) => a.duty_type !== "MOPD");
   const mopdPm = day.pm_clinics.filter((a) => a.duty_type === "MOPD");
 
@@ -154,9 +220,26 @@ function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string
     clinicPmByRoom[key].push(a);
   }
 
-  const moList: Array<{ label: string; name: string }> = callColumns
+  const moList = callColumns
     .map((col) => ({ label: col, name: day.call_slots[col] ?? "" }))
     .filter((m) => m.name);
+
+  function dropProps(zoneKey: string, dutyType: string, session: string, location: string | null, consultantId: number | null) {
+    return {
+      onDragOver: (e: React.DragEvent) => { e.preventDefault(); setDragOver(zoneKey); },
+      onDragLeave: () => setDragOver(null),
+      onDrop: (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(null);
+        onDrop(dutyType, session, location, consultantId, day.date);
+      },
+      style: {
+        outline: dragOver === zoneKey ? "2px dashed #6366f1" : undefined,
+        borderRadius: 4,
+        minHeight: 24,
+      },
+    };
+  }
 
   return (
     <div className="card" style={{ marginBottom: 12 }}>
@@ -194,7 +277,29 @@ function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string
               <span className="duty-tag" style={{ background: "#f3e8ff", color: "#7e22ce" }}>{m.name}</span>
             </div>
           ))}
-          {!day.consultant_oncall && !day.ac_oncall && moList.length === 0 && <EmptyNote />}
+          {wardMo.length > 0 && (
+            <div style={{ marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>Ward MO </span>
+              <div {...dropProps("ward_mo", "Ward MO", "AM", null, null)} style={{ display: "inline-flex", flexWrap: "wrap", gap: 4 }}>
+                {wardMo.map((a) => (
+                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                    color={{ bg: "#fef3c7", fg: "#92400e" }} />
+                ))}
+              </div>
+            </div>
+          )}
+          {eotMo.length > 0 && (
+            <div style={{ marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>EOT MO </span>
+              <div {...dropProps("eot_mo", "EOT MO", "Full Day", null, null)} style={{ display: "inline-flex", flexWrap: "wrap", gap: 4 }}>
+                {eotMo.map((a) => (
+                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                    color={{ bg: "#fed7aa", fg: "#c2410c" }} />
+                ))}
+              </div>
+            </div>
+          )}
+          {!day.consultant_oncall && !day.ac_oncall && moList.length === 0 && wardMo.length === 0 && eotMo.length === 0 && <EmptyNote />}
         </div>
 
         {/* Column 2: OT / EOT */}
@@ -203,22 +308,32 @@ function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string
           {Object.keys(otGroups).length === 0 && Object.keys(eotGroups).length === 0 && <EmptyNote />}
           {Object.entries(otGroups).map(([room, g]) => (
             <div key={room} style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#1e40af" }}>
+              <div
+                style={{ fontSize: 11, fontWeight: 700, color: "#1e40af", cursor: "default" }}
+                {...dropProps(`ot_${room}`, "OT", "Full Day", room, g.consultantId)}
+              >
                 {room} {g.consultant && <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>({g.consultant})</span>}
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {g.staff.map((a) => (
-                  <span key={a.staff_id} className="duty-tag ot">{a.staff_name}</span>
+                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                    color={{ bg: undefined, fg: undefined }} className="duty-tag ot" />
                 ))}
               </div>
             </div>
           ))}
           {Object.entries(eotGroups).map(([room, g]) => (
             <div key={room} style={{ marginBottom: 6 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e" }}>⚡{room}</div>
+              <div
+                style={{ fontSize: 11, fontWeight: 700, color: "#92400e", cursor: "default" }}
+                {...dropProps(`eot_${room}`, "EOT", "Full Day", room, g.consultantId)}
+              >
+                ⚡{room}
+              </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {g.staff.map((a) => (
-                  <span key={a.staff_id} className="duty-tag" style={{ background: "#fef3c7", color: "#92400e" }}>{a.staff_name}</span>
+                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                    color={{ bg: "#fef3c7", fg: "#92400e" }} />
                 ))}
               </div>
             </div>
@@ -233,12 +348,16 @@ function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string
               <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>CLINICS</div>
               {Object.entries(clinicAmByRoom).map(([room, staff]) => (
                 <div key={room} style={{ marginBottom: 4 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#065f46" }}>
+                  <div
+                    style={{ fontSize: 11, fontWeight: 600, color: "#065f46" }}
+                    {...dropProps(`am_clinic_${room}`, staff[0]?.duty_type || "Clinic", "AM", room, staff[0]?.consultant_id ?? null)}
+                  >
                     {clinicRoomHeader(room, staff[0])}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {staff.map((a) => (
-                      <span key={a.staff_id} className="duty-tag clinic">{a.staff_name}</span>
+                      <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                        color={{ bg: undefined, fg: undefined }} className="duty-tag clinic" />
                     ))}
                   </div>
                 </div>
@@ -247,14 +366,25 @@ function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string
           )}
           {mopdAm.length > 0 && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>MOPD</div>
+              <div
+                style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}
+                {...dropProps("am_mopd", "MOPD", "AM", "MOPD", null)}
+              >
+                MOPD
+              </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {mopdAm.map((a) => <span key={a.staff_id} className="duty-tag mopd">{a.staff_name}</span>)}
+                {mopdAm.map((a) => <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                  color={{ bg: undefined, fg: undefined }} className="duty-tag mopd" />)}
               </div>
             </div>
           )}
           <div style={{ marginBottom: 4 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>ADMIN</div>
+            <div
+              style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}
+              {...dropProps("am_admin", "Admin", "AM", null, null)}
+            >
+              ADMIN
+            </div>
             {day.am_admin.length === 0 && <EmptyNote />}
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {day.am_admin.map((n) => <span key={n} className="duty-tag admin">{n}</span>)}
@@ -270,12 +400,16 @@ function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string
               <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>CLINICS</div>
               {Object.entries(clinicPmByRoom).map(([room, staff]) => (
                 <div key={room} style={{ marginBottom: 4 }}>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: "#065f46" }}>
+                  <div
+                    style={{ fontSize: 11, fontWeight: 600, color: "#065f46" }}
+                    {...dropProps(`pm_clinic_${room}`, staff[0]?.duty_type || "Clinic", "PM", room, staff[0]?.consultant_id ?? null)}
+                  >
                     {clinicRoomHeader(room, staff[0])}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {staff.map((a) => (
-                      <span key={a.staff_id} className="duty-tag clinic">{a.staff_name}</span>
+                      <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                        color={{ bg: undefined, fg: undefined }} className="duty-tag clinic" />
                     ))}
                   </div>
                 </div>
@@ -284,14 +418,25 @@ function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string
           )}
           {mopdPm.length > 0 && (
             <div style={{ marginBottom: 8 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>MOPD</div>
+              <div
+                style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}
+                {...dropProps("pm_mopd", "MOPD", "PM", "MOPD", null)}
+              >
+                MOPD
+              </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {mopdPm.map((a) => <span key={a.staff_id} className="duty-tag mopd">{a.staff_name}</span>)}
+                {mopdPm.map((a) => <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                  color={{ bg: undefined, fg: undefined }} className="duty-tag mopd" />)}
               </div>
             </div>
           )}
           <div style={{ marginBottom: 4 }}>
-            <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>ADMIN</div>
+            <div
+              style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}
+              {...dropProps("pm_admin", "Admin", "PM", null, null)}
+            >
+              ADMIN
+            </div>
             {day.pm_admin.length === 0 && <EmptyNote />}
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {day.pm_admin.map((n) => <span key={n} className="duty-tag admin">{n}</span>)}
@@ -301,6 +446,56 @@ function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string
       </div>
     </div>
   );
+}
+
+function DragTag({
+  a, date, dragRef, onDelete, color, className,
+}: {
+  a: DutyAssignment;
+  date: string;
+  dragRef: React.MutableRefObject<DragState | null>;
+  onDelete: (id: number) => void;
+  color: { bg?: string; fg?: string };
+  className?: string;
+}) {
+  return (
+    <span
+      draggable
+      className={className || "duty-tag"}
+      style={{
+        background: color.bg,
+        color: color.fg,
+        cursor: "grab",
+        userSelect: "none",
+      }}
+      onDragStart={() => {
+        dragRef.current = {
+          assignmentId: a.id,
+          staffId: a.staff_id,
+          staffName: a.staff_name,
+          date,
+        };
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        if (window.confirm(`Remove ${a.staff_name} from this slot?`)) {
+          onDelete(a.id);
+        }
+      }}
+      title="Drag to move · Right-click to remove"
+    >
+      {a.staff_name}
+      {a.is_manual_override && <sup style={{ fontSize: 8, color: "#6366f1" }}>✎</sup>}
+    </span>
+  );
+}
+
+function clinicRoomHeader(room: string, assignment: DutyAssignment): string {
+  const parts: string[] = [];
+  if (assignment.clinic_type) parts.push(assignment.clinic_type);
+  parts.push(room);
+  const label = parts.join(": ");
+  return assignment.consultant_name ? `${label} (${assignment.consultant_name})` : label;
 }
 
 function SectionLabel({ label, color }: { label: string; color: string }) {

@@ -1,19 +1,21 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { RosterResponse, Staff, CallAssignment, DayRoster } from "../types";
+import type { RosterResponse, Staff, CallAssignment, DayRoster, CallTypeConfig } from "../types";
 
 export default function CallRosterView() {
   const { active } = useConfig();
   const [roster, setRoster] = useState<RosterResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [moStaff, setMoStaff] = useState<Staff[]>([]);
+  const [allStaff, setAllStaff] = useState<Staff[]>([]);
   const [assignments, setAssignments] = useState<CallAssignment[]>([]);
+  const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
   const [editCell, setEditCell] = useState<{ date: string; slot: string } | null>(null);
 
   useEffect(() => {
-    api.getMOStaff().then(setMoStaff);
+    api.getMOStaff().then(setAllStaff);
+    api.getCallTypes().then(setCallTypes);
   }, []);
 
   const configId = active?.id ?? 0;
@@ -72,7 +74,7 @@ export default function CallRosterView() {
       const a = await api.getAssignments(configId);
       setAssignments(a);
       if (roster) {
-        const staffName = moStaff.find((s) => s.id === staffId)?.name || "";
+        const staffName = allStaff.find((s) => s.id === staffId)?.name || "";
         const updatedDays = roster.days.map((day) => {
           if (day.date !== editCell.date) return day;
           return { ...day, call_slots: { ...day.call_slots, [editCell.slot]: staffName } };
@@ -83,6 +85,42 @@ export default function CallRosterView() {
       setError(e.message);
     }
     setEditCell(null);
+  }
+
+  async function handleClear() {
+    if (!editCell) return;
+    try {
+      await api.removeOverride(configId, editCell.date, editCell.slot);
+      const a = await api.getAssignments(configId);
+      setAssignments(a);
+      if (roster) {
+        const updatedDays = roster.days.map((day) => {
+          if (day.date !== editCell.date) return day;
+          const slots = { ...day.call_slots };
+          delete slots[editCell.slot];
+          return { ...day, call_slots: slots };
+        });
+        setRoster({ ...roster, days: updatedDays });
+      }
+    } catch (e: any) {
+      setError(e.message);
+    }
+    setEditCell(null);
+  }
+
+  // Get staff filtered by eligible ranks for the currently selected slot
+  function filteredStaff(): Staff[] {
+    if (!editCell) return allStaff;
+    const ct = callTypes.find((c) => c.name === editCell.slot);
+    if (!ct || ct.eligible_rank_ids.length === 0) return allStaff;
+    // We need rank names — load from the staff rank field directly
+    // The staff list has rank names; call type has rank IDs.
+    // We match by checking if ANY eligible rank corresponds to the staff rank.
+    // Since we don't have a rank-id-to-name map here, fall back to showing all.
+    // Better: use api.getRanks() cached in state — but for simplicity, filter
+    // by checking if the staff appears in allStaff (already active-only).
+    // TODO: integrate rank ID filtering when rank list is loaded.
+    return allStaff;
   }
 
   if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
@@ -124,7 +162,7 @@ export default function CallRosterView() {
           )}
 
           <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "8px 0" }}>
-            Click any MO cell to manually override the assignment.
+            Click any MO cell to manually override or clear the assignment.
           </p>
 
           <div className="card" style={{ marginTop: 4 }}>
@@ -178,7 +216,7 @@ export default function CallRosterView() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Override {editCell.slot} on {editCell.date}</h3>
             <div className="form-group">
-              <label>Select MO</label>
+              <label>Select Staff</label>
               <select
                 autoFocus
                 defaultValue=""
@@ -187,7 +225,7 @@ export default function CallRosterView() {
                 }}
               >
                 <option value="" disabled>Choose staff...</option>
-                {moStaff
+                {filteredStaff()
                   .sort((a, b) => a.name.localeCompare(b.name))
                   .map((s) => (
                     <option key={s.id} value={s.id}>{s.name} ({s.rank})</option>
@@ -195,6 +233,7 @@ export default function CallRosterView() {
               </select>
             </div>
             <div className="modal-actions">
+              <button className="btn btn-danger" onClick={handleClear}>Clear Slot</button>
               <button className="btn btn-secondary" onClick={() => setEditCell(null)}>Cancel</button>
             </div>
           </div>

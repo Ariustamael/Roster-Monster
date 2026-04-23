@@ -534,10 +534,10 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                         )}
                         <span style={{ flex: 1 }} />
                         {cell.isStepdown && (
-                          <span title="Stepdown" style={{ fontSize: 9, color: "#7c3aed", fontWeight: 700 }}>SD</span>
+                          <span title="Stepdown" style={{ fontSize: 9, color: "#7c3aed", fontWeight: 700 }}>Stepdown</span>
                         )}
                         {cell.isEveningOT && (
-                          <span title="Evening OT" style={{ fontSize: 9, color: "#dc2626", fontWeight: 700 }}>EOT</span>
+                          <span title="Extended OT" style={{ fontSize: 9, color: "#dc2626", fontWeight: 700 }}>Extended OT</span>
                         )}
                       </div>
 
@@ -591,16 +591,16 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                             onChange={() => toggleStepdown(idx)}
                             style={{ width: 11, height: 11, margin: 0 }}
                           />
-                          SD
+                          Stepdown
                         </label>
-                        <label style={{ display: "flex", alignItems: "center", gap: 2, cursor: "pointer" }} title="Evening OT">
+                        <label style={{ display: "flex", alignItems: "center", gap: 2, cursor: "pointer" }} title="Extended OT">
                           <input
                             type="checkbox"
                             checked={cell.isEveningOT}
                             onChange={() => toggleEveningOT(idx)}
                             style={{ width: 11, height: 11, margin: 0 }}
                           />
-                          EOT
+                          Extended OT
                         </label>
                       </div>
                     </td>

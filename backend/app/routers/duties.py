@@ -15,6 +15,7 @@ from ..models import (
 from ..schemas import (
     DutyRosterResponse, DayDutyRoster, DutyAssignmentOut,
     OTTemplateCreate, OTTemplateOut, ClinicTemplateCreate, ClinicTemplateOut,
+    DutyOverrideCreate,
 )
 from ..services.duty_solver import (
     DutySolverInput, DayDutyConfig, OTSlot, ClinicSlot,
@@ -33,6 +34,7 @@ def _ot_out(r: OTTemplate) -> OTTemplateOut:
         consultant_id=r.consultant_id,
         consultant_name=r.consultant.name if r.consultant else None,
         assistants_needed=r.assistants_needed,
+        registrar_needed=r.registrar_needed or 0,
         is_emergency=r.is_emergency or False,
         linked_call_slot=r.linked_call_slot,
         color=r.color,
@@ -248,6 +250,7 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                     consultant_id=t.consultant_id,
                     consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
                     assistants_needed=t.assistants_needed,
+                    registrar_needed=t.registrar_needed or 0,
                     is_emergency=True,
                     linked_call_slot=t.linked_call_slot,
                 ))
@@ -257,6 +260,7 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                     consultant_id=t.consultant_id,
                     consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
                     assistants_needed=t.assistants_needed,
+                    registrar_needed=t.registrar_needed or 0,
                 ))
 
         am_clinics = []
@@ -317,6 +321,17 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     ).all():
         leave_dates[lv.staff_id].add(lv.date)
 
+    # Build call_by_type: {date: {call_type: staff_id}}
+    call_by_type: dict[date, dict[str, int]] = defaultdict(dict)
+    for r in call_rows:
+        call_by_type[r.date][r.call_type] = r.staff_id
+
+    # Build default_duty_by_call_type from CallTypeConfig.default_duty_type
+    default_duty_by_call_type: dict[str, str] = {}
+    for ct in db.query(CallTypeConfig).filter(CallTypeConfig.is_active.is_(True)).all():
+        if ct.default_duty_type:
+            default_duty_by_call_type[ct.name] = ct.default_duty_type
+
     return DutySolverInput(
         year=year, month=month, days=days,
         mo_pool=mo_pool, leave_dates=dict(leave_dates),
@@ -325,6 +340,8 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         postcall_12pm_dates=dict(postcall_12pm_dates),
         postcall_5pm_dates=dict(postcall_5pm_dates),
         call_only_dates=dict(call_only_dates),
+        call_by_type=dict(call_by_type),
+        default_duty_by_call_type=default_duty_by_call_type,
     )
 
 
@@ -489,6 +506,63 @@ def generate_duties(config_id: int, db: DBSession = Depends(get_db)):
         days=day_rosters, duty_stats=duty_stats,
         call_type_columns=ct_columns,
     )
+
+
+# ── Duty Overrides (manual drag-and-drop) ───────────────────────────────
+
+@router.post("/roster/{config_id}/duty-override", response_model=DutyAssignmentOut)
+def create_duty_override(config_id: int, payload: DutyOverrideCreate, db: DBSession = Depends(get_db)):
+    config = db.query(MonthlyConfig).get(config_id)
+    if not config:
+        raise HTTPException(404, "Config not found")
+    staff = db.query(Staff).get(payload.staff_id)
+    if not staff:
+        raise HTTPException(404, "Staff not found")
+
+    if payload.old_assignment_id is not None:
+        old = db.query(DutyAssignment).get(payload.old_assignment_id)
+        if old and old.config_id == config_id:
+            db.delete(old)
+
+    from ..models import DutyType as DutyTypeEnum
+    try:
+        duty_type_val = DutyTypeEnum(payload.duty_type)
+    except ValueError:
+        raise HTTPException(400, f"Invalid duty_type: {payload.duty_type}")
+
+    cons_names = {s.id: s.name for s in db.query(Staff).all()}
+    new_da = DutyAssignment(
+        config_id=config_id,
+        date=payload.date,
+        staff_id=payload.staff_id,
+        session=payload.session,
+        duty_type=duty_type_val,
+        location=payload.location,
+        consultant_id=payload.consultant_id,
+        is_manual_override=True,
+    )
+    db.add(new_da)
+    db.commit()
+    db.refresh(new_da)
+
+    return DutyAssignmentOut(
+        id=new_da.id, date=new_da.date, staff_id=new_da.staff_id,
+        staff_name=staff.name, session=new_da.session,
+        duty_type=new_da.duty_type, location=new_da.location,
+        consultant_id=new_da.consultant_id,
+        consultant_name=cons_names.get(new_da.consultant_id) if new_da.consultant_id else None,
+        is_manual_override=True,
+    )
+
+
+@router.delete("/roster/{config_id}/duty-override/{assignment_id}")
+def delete_duty_override(config_id: int, assignment_id: int, db: DBSession = Depends(get_db)):
+    da = db.query(DutyAssignment).get(assignment_id)
+    if not da or da.config_id != config_id:
+        raise HTTPException(404, "Assignment not found")
+    db.delete(da)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/roster/{config_id}/duties", response_model=list[DutyAssignmentOut])

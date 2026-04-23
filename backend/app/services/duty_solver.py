@@ -2,13 +2,16 @@
 Daytime duty solver — assigns MOs to OT, clinics, MOPD, and admin pool.
 
 Runs AFTER call roster generation. For each weekday:
-1. Determine available MO pool (exclude on-call, post-call, leave)
-2. Assign OT assistants (full day, team match preferred)
-3. Assign supervised clinic MOs (AM/PM, team match preferred)
-4. Fill MOPD rooms (AM/PM, min 3 per session)
-5. Remaining MOs go to admin pool (AM/PM)
+1. Consultant affinity pull: if an on-call MO's supervisor is operating today,
+   pull that MO to the supervisor's OT and mark their anchor role (WARD_MO /
+   EOT_MO) as vacated.
+2. Assign remaining OT assistant slots (team match preferred, fairness scored).
+3. Backfill vacated anchor roles from the remaining available pool.
+4. Assign supervised clinic MOs (AM/PM, team match preferred).
+5. Fill MOPD rooms (AM/PM).
+6. Remaining MOs go to admin pool (AM/PM).
 
-Weekends/PH have no OT or clinics — only call team works.
+Weekends/PH have no OT or clinics — only the call team works.
 """
 
 from datetime import date
@@ -24,6 +27,7 @@ class OTSlot:
     consultant_id: int | None
     consultant_team_id: int | None
     assistants_needed: int
+    registrar_needed: int = 0
     is_emergency: bool = False
     linked_call_slot: str | None = None
 
@@ -79,6 +83,10 @@ class DutySolverInput:
     postcall_12pm_dates: dict[date, set[int]] = field(default_factory=dict)
     postcall_5pm_dates: dict[date, set[int]] = field(default_factory=dict)
     call_only_dates: dict[date, set[int]] = field(default_factory=dict)
+    # New: maps {date: {call_type_name: staff_id}} for affinity pull
+    call_by_type: dict[date, dict[str, int]] = field(default_factory=dict)
+    # New: maps call_type_name → anchor duty type ("MO1" → "Ward MO", "MO2" → "EOT MO")
+    default_duty_by_call_type: dict[str, str] = field(default_factory=dict)
     ssr_rank_name: str = "Senior Staff Registrar"
     sr_rank_name: str = "Senior Resident"
 
@@ -224,6 +232,8 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
     ssr_rank = inp.ssr_rank_name
     sr_rank = inp.sr_rank_name
 
+    person_by_id: dict[int, PersonInfo] = {p.id: p for p in inp.mo_pool}
+
     for pid in [p.id for p in inp.mo_pool]:
         fairness.ot_days[pid] = 0
         fairness.clinic_sessions[pid] = 0
@@ -239,16 +249,50 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
             inp.call_assigned, inp.postcall_dates,
             inp.call_only_dates,
         )
-        if not available_am:
+        if not available_am and not inp.default_duty_by_call_type:
             continue
 
         am_assigned: set[int] = set()
         pm_assigned: set[int] = set()
         full_day_assigned: set[int] = set()
 
+        # ── Consultant affinity pull ────────────────────────────────
+        # Find which consultants are operating today
+        ot_cons_today: set[int] = {
+            slot.consultant_id for slot in day.ot_slots if slot.consultant_id
+        }
+        vacated_anchor_roles: set[str] = set()
+
+        if ot_cons_today and inp.default_duty_by_call_type:
+            for call_type_name, anchor_duty in inp.default_duty_by_call_type.items():
+                mo_id = inp.call_by_type.get(day.d, {}).get(call_type_name)
+                if mo_id is None:
+                    continue
+                mo_person = person_by_id.get(mo_id)
+                if mo_person is None or mo_person.supervisor_id is None:
+                    continue
+                if mo_person.supervisor_id not in ot_cons_today:
+                    continue
+                # Find the supervisor's OT slot and assign the MO there
+                for ot in day.ot_slots:
+                    if ot.consultant_id == mo_person.supervisor_id and ot.assistants_needed > 0:
+                        dt = DutyType.EOT if ot.is_emergency else DutyType.OT
+                        results.append(DutyResult(
+                            date=day.d, staff_id=mo_id,
+                            session=Session.FULL_DAY, duty_type=dt,
+                            location=ot.room, consultant_id=ot.consultant_id,
+                        ))
+                        ot.assistants_needed -= 1
+                        full_day_assigned.add(mo_id)
+                        am_assigned.add(mo_id)
+                        pm_assigned.add(mo_id)
+                        fairness.ot_days[mo_id] += 1
+                        vacated_anchor_roles.add(anchor_duty)
+                        break
+
         # ── 1. OT assignments (full day) ────────────────────────────
         for ot in day.ot_slots:
-            if ot.assistants_needed <= 0:
+            if ot.assistants_needed <= 0 and ot.registrar_needed <= 0:
                 continue
             pool = [p for p in available_am if p.id not in full_day_assigned]
             if not pool:
@@ -256,8 +300,34 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
 
             duty_type = DutyType.EOT if ot.is_emergency else DutyType.OT
 
+            # Registrar slots first (SSR/SR ranks)
+            if ot.registrar_needed > 0:
+                reg_pool = [p for p in pool if p.rank in (ssr_rank, sr_rank)]
+                reg_scored = sorted(
+                    reg_pool,
+                    key=lambda p: (
+                        fairness.ot_score(p.id)
+                        + (5.0 if ot.consultant_id and p.supervisor_id == ot.consultant_id else 0.0)
+                        + (3.0 if ot.consultant_team_id and p.team_id == ot.consultant_team_id else 0.0)
+                    ),
+                    reverse=True,
+                )
+                for i in range(min(ot.registrar_needed, len(reg_scored))):
+                    chosen = reg_scored[i]
+                    results.append(DutyResult(
+                        date=day.d, staff_id=chosen.id,
+                        session=Session.FULL_DAY, duty_type=duty_type,
+                        location=ot.room, consultant_id=ot.consultant_id,
+                    ))
+                    full_day_assigned.add(chosen.id)
+                    am_assigned.add(chosen.id)
+                    pm_assigned.add(chosen.id)
+                    fairness.ot_days[chosen.id] += 1
+                pool = [p for p in available_am if p.id not in full_day_assigned]
+
+            # Assistant slots
             scored = sorted(
-                pool,
+                [p for p in pool],
                 key=lambda p: (
                     fairness.ot_score(p.id)
                     + (5.0 if ot.consultant_id and p.supervisor_id == ot.consultant_id else 0.0)
@@ -273,6 +343,41 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                     date=day.d, staff_id=chosen.id,
                     session=Session.FULL_DAY, duty_type=duty_type,
                     location=ot.room, consultant_id=ot.consultant_id,
+                ))
+                full_day_assigned.add(chosen.id)
+                am_assigned.add(chosen.id)
+                pm_assigned.add(chosen.id)
+                fairness.ot_days[chosen.id] += 1
+
+        # ── Backfill vacated anchor roles ───────────────────────────
+        if "Ward MO" in vacated_anchor_roles:
+            # WARD_MO: AM only (covers 0800-1730 until MO1 returns from OT)
+            ward_candidates = sorted(
+                [p for p in available_am if p.id not in am_assigned],
+                key=lambda p: fairness.clinic_score(p.id),
+                reverse=True,
+            )
+            if ward_candidates:
+                chosen = ward_candidates[0]
+                results.append(DutyResult(
+                    date=day.d, staff_id=chosen.id,
+                    session=Session.AM, duty_type=DutyType.WARD_MO,
+                ))
+                am_assigned.add(chosen.id)
+                fairness.clinic_sessions[chosen.id] += 1
+
+        if "EOT MO" in vacated_anchor_roles:
+            # EOT_MO: Full day (covers MO2's daytime EOT duty)
+            eot_candidates = sorted(
+                [p for p in available_am if p.id not in full_day_assigned],
+                key=lambda p: fairness.ot_score(p.id),
+                reverse=True,
+            )
+            if eot_candidates:
+                chosen = eot_candidates[0]
+                results.append(DutyResult(
+                    date=day.d, staff_id=chosen.id,
+                    session=Session.FULL_DAY, duty_type=DutyType.EOT_MO,
                 ))
                 full_day_assigned.add(chosen.id)
                 am_assigned.add(chosen.id)
@@ -333,6 +438,8 @@ def compute_duty_stats(
             "supervised_sessions": 0,
             "mopd_sessions": 0,
             "admin_sessions": 0,
+            "ward_mo_sessions": 0,
+            "eot_mo_sessions": 0,
         }
 
     for r in results:
@@ -349,5 +456,9 @@ def compute_duty_stats(
             stats[name]["mopd_sessions"] += 1
         elif r.duty_type == DutyType.ADMIN:
             stats[name]["admin_sessions"] += 1
+        elif r.duty_type == DutyType.WARD_MO:
+            stats[name]["ward_mo_sessions"] += 1
+        elif r.duty_type == DutyType.EOT_MO:
+            stats[name]["eot_mo_sessions"] += 1
 
     return stats

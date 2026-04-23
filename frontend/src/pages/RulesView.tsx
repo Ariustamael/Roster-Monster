@@ -378,14 +378,104 @@ export default function RulesView() {
         </section>
 
         <section className="rules-section">
+          <h3>Call Slot Conditions (required_conditions AND logic)</h3>
+
+          <div className="rule">
+            <div className="rule-title">applicable_days vs required_conditions</div>
+            <div className="rule-body">
+              Each call type has two day-matching fields:
+              <br/>
+              <strong>applicable_days:</strong> The slot fires if ANY listed token matches (OR logic). E.g. "Sat,Sun,PH" fires on any weekend or PH day.
+              <br/>
+              <strong>required_conditions:</strong> ALL listed tokens must ALSO be true (AND logic). E.g. "Stepdown" means the day must be a stepdown day in addition to matching applicable_days.
+              <br/>
+              <strong>Example — MO3 (Weekend/Stepdown):</strong> applicable_days = "Sat,Sun,PH", required_conditions = "Stepdown". This slot only fires on days that are both (weekend or PH) AND stepdown.
+            </div>
+          </div>
+
+          <div className="rule">
+            <div className="rule-title">Valid tokens for required_conditions</div>
+            <div className="rule-body">
+              Tokens are comma-separated and case-sensitive:
+              <br/>- <strong>Stepdown</strong> — day is a stepdown day
+              <br/>- <strong>PH</strong> — day is a public holiday
+              <br/>- <strong>Evening OT</strong> — day has evening OT scheduled
+              <br/>- <strong>Mon, Tue, Wed, Thu, Fri, Sat, Sun</strong> — specific day of week
+            </div>
+          </div>
+        </section>
+
+        <section className="rules-section">
+          <h3>Anchor Duties: Ward MO &amp; EOT MO</h3>
+
+          <div className="rule">
+            <div className="rule-title">Default daytime roles for on-call MOs</div>
+            <div className="rule-body">
+              The call type configuration has an optional <strong>default_duty_type</strong> field linking a call slot to an anchor daytime role:
+              <br/>
+              <strong>MO1 → Ward MO:</strong> On weekdays, the MO1 holder covers ward admissions from 0800–1730 before taking over the overnight call at 1730.
+              <br/>
+              <strong>MO2 → EOT MO:</strong> The MO2 holder covers the Emergency OT from 0800 as the daytime EOT MO.
+            </div>
+          </div>
+
+          <div className="rule">
+            <div className="rule-title">Consultant affinity pull</div>
+            <div className="rule-body">
+              If an on-call MO's tagged consultant (supervisor) is operating in OT on the same day, the solver pulls that MO into the consultant's OT list instead of their anchor role.
+              <br/>
+              The vacated anchor role (Ward MO or EOT MO) is then backfilled by the next best available MO from the regular duty pool.
+              <br/>
+              <strong>Example:</strong> Jamie is MO1 (tagged to Raghu). Raghu has OT3 today → Jamie is assigned to OT3. Kumara (next available) takes Ward MO duty 0800–1730. Jamie resumes her MO1 call from 1730.
+            </div>
+          </div>
+
+          <div className="rule">
+            <div className="rule-title">Backfill scoring for vacated anchor roles</div>
+            <div className="rule-body">
+              <strong>Ward MO backfill:</strong> Picked from remaining AM-available MOs, scored by clinic fairness (fewest clinic sessions get priority).
+              <br/>
+              <strong>EOT MO backfill:</strong> Picked from remaining available MOs, scored by OT fairness (fewest OT days get priority). Assigned as Full Day.
+            </div>
+          </div>
+        </section>
+
+        <section className="rules-section">
+          <h3>EOT: Registrar + MO Composition</h3>
+
+          <div className="rule">
+            <div className="rule-title">registrar_needed field on OT templates</div>
+            <div className="rule-body">
+              Each OT template (including EOT) has a <strong>registrar_needed</strong> integer field (default 0).
+              When &gt; 0, the solver fills those slots first with SSR or SR rank staff (scored by OT fairness + supervisor match) before filling the regular assistant slots with MOs.
+              <br/>
+              <strong>Example:</strong> EOT with registrar_needed=1, assistants_needed=2 → solver assigns 1 SSR/SR to the registrar slot first, then 2 MOs to the assistant slots.
+            </div>
+          </div>
+        </section>
+
+        <section className="rules-section">
           <h3>Manual Overrides</h3>
 
           <div className="rule">
             <div className="rule-title">Call roster overrides</div>
             <div className="rule-body">
               Any MO call slot can be manually overridden by clicking the cell in the Call Roster view.
-              Overrides are preserved when the roster is regenerated (auto-generated assignments are cleared, manual overrides are kept).
+              A "Clear Slot" button removes the assignment entirely, leaving it unassigned.
+              Overrides are preserved when the roster is regenerated.
               Override cells are highlighted with a blue outline.
+            </div>
+          </div>
+
+          <div className="rule">
+            <div className="rule-title">Duty roster overrides (drag-and-drop)</div>
+            <div className="rule-body">
+              Any duty assignment tag in the Duty Roster view can be dragged to a different slot.
+              Drop a tag onto a slot header (OT room name, CLINICS, MOPD, ADMIN) to reassign that person there.
+              Right-click (or long-press) a tag to remove the assignment.
+              Overridden assignments are marked with a ✎ superscript and preserved on regeneration.
+              <br/>
+              Only same-day reassignment is supported — you cannot drag across days.
             </div>
           </div>
         </section>
