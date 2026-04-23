@@ -8,40 +8,6 @@ import enum
 from .database import Base
 
 
-class Grade(str, enum.Enum):
-    SENIOR_CONSULTANT = "Senior Consultant"
-    CONSULTANT = "Consultant"
-    ASSOCIATE_CONSULTANT = "Associate Consultant"
-    SENIOR_STAFF_REGISTRAR = "Senior Staff Registrar"
-    SENIOR_RESIDENT = "Senior Resident"
-    SENIOR_MEDICAL_OFFICER = "Senior Medical Officer"
-    MEDICAL_OFFICER = "Medical Officer"
-
-
-MO_GRADES = {
-    Grade.SENIOR_MEDICAL_OFFICER,
-    Grade.MEDICAL_OFFICER,
-}
-
-DUTY_GRADES = {
-    Grade.SENIOR_STAFF_REGISTRAR,
-    Grade.SENIOR_RESIDENT,
-    Grade.SENIOR_MEDICAL_OFFICER,
-    Grade.MEDICAL_OFFICER,
-}
-
-
-class CallType(str, enum.Enum):
-    MO1 = "MO1"
-    MO2 = "MO2"
-    MO3 = "MO3"
-    MO4 = "MO4"
-    MO5 = "MO5"
-
-
-OVERNIGHT_CALL_TYPES = {CallType.MO1, CallType.MO2}
-
-
 class DutyType(str, enum.Enum):
     OT = "OT"
     EOT = "EOT"
@@ -75,6 +41,60 @@ class RegistrarDutyType(str, enum.Enum):
     EOT = "EOT"
 
 
+# ── Rank Configuration ──────────────────────────────────────────────────
+
+class RankConfig(Base):
+    __tablename__ = "rank_config"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(60), nullable=False, unique=True)
+    abbreviation = Column(String(10), nullable=False)
+    display_order = Column(Integer, nullable=False, server_default="0")
+    is_call_eligible = Column(Boolean, default=False)
+    is_duty_eligible = Column(Boolean, default=False)
+    is_consultant_tier = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+
+    eligible_call_types = relationship(
+        "CallTypeEligibleRank", back_populates="rank", cascade="all, delete-orphan",
+    )
+
+
+# ── Call Type Configuration ─────────────────────────────────────────────
+
+class CallTypeConfig(Base):
+    __tablename__ = "call_type_config"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(20), nullable=False, unique=True)
+    display_order = Column(Integer, nullable=False, server_default="0")
+    is_overnight = Column(Boolean, default=False)
+    post_call_type = Column(String(10), default="none")
+    max_consecutive_days = Column(Integer, default=1)
+    min_gap_days = Column(Integer, default=2)
+    difficulty_points = Column(Integer, default=1)
+    counts_towards_fairness = Column(Boolean, default=True)
+    applicable_days = Column(String(50), default="Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH")
+    is_active = Column(Boolean, default=True)
+
+    eligible_ranks = relationship(
+        "CallTypeEligibleRank", back_populates="call_type", cascade="all, delete-orphan",
+    )
+
+
+class CallTypeEligibleRank(Base):
+    __tablename__ = "call_type_eligible_rank"
+
+    id = Column(Integer, primary_key=True)
+    call_type_id = Column(Integer, ForeignKey("call_type_config.id"), nullable=False)
+    rank_id = Column(Integer, ForeignKey("rank_config.id"), nullable=False)
+
+    call_type = relationship("CallTypeConfig", back_populates="eligible_ranks")
+    rank = relationship("RankConfig", back_populates="eligible_call_types")
+
+    __table_args__ = (UniqueConstraint("call_type_id", "rank_id"),)
+
+
 # ── Staff ────────────────────────────────────────────────────────────────
 
 class Staff(Base):
@@ -82,7 +102,7 @@ class Staff(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(120), nullable=False)
-    grade = Column(SAEnum(Grade), nullable=False)
+    rank = Column(String(60), nullable=False)
     active = Column(Boolean, default=True)
     has_admin_role = Column(Boolean, default=False)
 
@@ -262,7 +282,7 @@ class CallAssignment(Base):
     config_id = Column(Integer, ForeignKey("monthly_config.id"), nullable=False)
     date = Column(Date, nullable=False)
     staff_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
-    call_type = Column(SAEnum(CallType), nullable=False)
+    call_type = Column(String(20), nullable=False)
     is_manual_override = Column(Boolean, default=False)
 
     config = relationship("MonthlyConfig", back_populates="call_assignments")

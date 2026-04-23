@@ -43,6 +43,8 @@ export default function DutyRosterView() {
 
   if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
 
+  const callColumns = roster?.call_type_columns ?? [];
+
   return (
     <>
       <div className="page-header">
@@ -71,7 +73,7 @@ export default function DutyRosterView() {
           {roster.days
             .filter((d) => !d.is_weekend && !d.is_ph)
             .map((day) => (
-              <DayCard key={day.date} day={day} />
+              <DayCard key={day.date} day={day} callColumns={callColumns} />
             ))}
 
           <div className="card" style={{ marginTop: 20 }}>
@@ -119,8 +121,7 @@ function clinicRoomHeader(room: string, assignment: DutyAssignment): string {
   return assignment.consultant_name ? `${label} (${assignment.consultant_name})` : label;
 }
 
-function DayCard({ day }: { day: DayDutyRoster }) {
-  // OT groups (regular)
+function DayCard({ day, callColumns }: { day: DayDutyRoster; callColumns: string[] }) {
   const otGroups: Record<string, { consultant: string | null; staff: DutyAssignment[] }> = {};
   for (const a of day.ot_assignments) {
     const key = a.location || "OT";
@@ -128,7 +129,6 @@ function DayCard({ day }: { day: DayDutyRoster }) {
     otGroups[key].staff.push(a);
   }
 
-  // EOT groups — merged into the OT column
   const eotGroups: Record<string, { staff: DutyAssignment[] }> = {};
   for (const a of day.eot_assignments) {
     const key = a.location || "EOT";
@@ -154,14 +154,9 @@ function DayCard({ day }: { day: DayDutyRoster }) {
     clinicPmByRoom[key].push(a);
   }
 
-  // MO list for the call team column
-  const moList: Array<{ label: string; name: string }> = [
-    { label: "MO1", name: day.mo1 ?? "" },
-    { label: "MO2", name: day.mo2 ?? "" },
-    { label: "MO3", name: day.mo3 ?? "" },
-    { label: "MO4", name: day.mo4 ?? "" },
-    { label: "MO5", name: day.mo5 ?? "" },
-  ].filter((m) => m.name);
+  const moList: Array<{ label: string; name: string }> = callColumns
+    .map((col) => ({ label: col, name: day.call_slots[col] ?? "" }))
+    .filter((m) => m.name);
 
   return (
     <div className="card" style={{ marginBottom: 12 }}>

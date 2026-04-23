@@ -9,16 +9,50 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import (
     MonthlyConfig, Staff, TeamAssignment, Leave, CallPreference, CallAssignment,
-    PublicHoliday, MO_GRADES, PreferenceType,
-    OTTemplate, ClinicTemplate, CallType, DUTY_GRADES,
+    PublicHoliday, PreferenceType,
+    OTTemplate, ClinicTemplate, CallTypeConfig, RankConfig,
 )
 from ..schemas import RosterResponse, DayRoster, CallAssignmentOut, ManualOverrideCreate
 from ..services.solver import (
-    SolverInput, DayConfig, PersonInfo, solve, compute_fairness_stats,
+    SolverInput, DayConfig, PersonInfo, CallTypeInfo, solve, compute_fairness_stats,
 )
 from ..services.exporter import export_original, export_clean
 
 router = APIRouter(prefix="/api/roster", tags=["roster"])
+
+
+def _load_call_type_infos(db: Session) -> list[CallTypeInfo]:
+    configs = db.query(CallTypeConfig).filter(CallTypeConfig.is_active.is_(True)).order_by(CallTypeConfig.display_order).all()
+    result = []
+    for ct in configs:
+        rank_ids = [er.rank_id for er in ct.eligible_ranks]
+        rank_names = set()
+        if rank_ids:
+            ranks = db.query(RankConfig).filter(RankConfig.id.in_(rank_ids)).all()
+            rank_names = {r.name for r in ranks}
+        result.append(CallTypeInfo(
+            name=ct.name,
+            display_order=ct.display_order,
+            is_overnight=ct.is_overnight,
+            post_call_type=ct.post_call_type,
+            max_consecutive_days=ct.max_consecutive_days,
+            min_gap_days=ct.min_gap_days,
+            difficulty_points=ct.difficulty_points,
+            counts_towards_fairness=ct.counts_towards_fairness,
+            applicable_days=ct.applicable_days,
+            eligible_rank_names=rank_names,
+        ))
+    return result
+
+
+def _get_call_eligible_ranks(db: Session) -> set[str]:
+    ranks = db.query(RankConfig).filter(RankConfig.is_call_eligible.is_(True)).all()
+    return {r.name for r in ranks}
+
+
+def _get_duty_eligible_ranks(db: Session) -> set[str]:
+    ranks = db.query(RankConfig).filter(RankConfig.is_duty_eligible.is_(True)).all()
+    return {r.name for r in ranks}
 
 
 def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
@@ -63,9 +97,10 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
             ac_oncall_id=ac_oncall_map.get(d),
         ))
 
+    call_eligible_ranks = _get_call_eligible_ranks(db)
     mo_staff = (
         db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in MO_GRADES]))
+        .filter(Staff.active.is_(True), Staff.rank.in_(list(call_eligible_ranks)))
         .all()
     )
 
@@ -84,7 +119,7 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
         mo_pool.append(PersonInfo(
             id=s.id,
             name=s.name,
-            grade=s.grade,
+            rank=s.rank,
             team_id=ta.team_id if ta else None,
             supervisor_id=ta.supervisor_id if ta else None,
         ))
@@ -107,7 +142,7 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
         else:
             request_dates[cp.staff_id].add(cp.date)
 
-    prior_assignments: dict[date, dict[int, CallType]] = {}
+    prior_assignments: dict[date, dict[int, str]] = {}
     prev_month = month - 1
     prev_year = year
     if prev_month == 0:
@@ -134,6 +169,8 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
                 prior_assignments[c.date] = {}
             prior_assignments[c.date][c.staff_id] = c.call_type
 
+    call_type_configs = _load_call_type_infos(db)
+
     return SolverInput(
         year=year,
         month=month,
@@ -143,6 +180,7 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
         block_dates=dict(block_dates),
         request_dates=dict(request_dates),
         prior_assignments=prior_assignments,
+        call_type_configs=call_type_configs,
     )
 
 
@@ -185,16 +223,17 @@ def generate_roster(config_id: int, db: Session = Depends(get_db)):
     cons_oncall_rows = {r.date: r for r in config.consultant_oncalls}
 
     stepdown_dates = {r.date for r in config.stepdown_days}
+    ct_columns = [ct.name for ct in sorted(inp.call_type_configs, key=lambda c: c.display_order)]
 
     day_rosters: list[DayRoster] = []
     for day_cfg in inp.days:
         d = day_cfg.d
         day_map = assignments.get(d, {})
 
-        inv_map: dict[str, str | None] = {}
+        call_slots: dict[str, str | None] = {}
         for pid, ctype in day_map.items():
             if pid != -1:
-                inv_map[ctype.value] = pid_to_name.get(pid, f"ID:{pid}")
+                call_slots[ctype] = pid_to_name.get(pid, f"ID:{pid}")
 
         cons_id = day_cfg.consultant_oncall_id
         ac_id = day_cfg.ac_oncall_id
@@ -215,14 +254,10 @@ def generate_roster(config_id: int, db: Session = Depends(get_db)):
             is_stepdown=day_cfg.is_stepdown,
             consultant_oncall=cons_display,
             ac_oncall=ac_display,
-            mo1=inv_map.get("MO1"),
-            mo2=inv_map.get("MO2"),
-            mo3=inv_map.get("MO3"),
-            mo4=inv_map.get("MO4"),
-            mo5=inv_map.get("MO5"),
+            call_slots=call_slots,
         ))
 
-    fairness = compute_fairness_stats(assignments, inp.mo_pool, stepdown_dates)
+    fairness = compute_fairness_stats(assignments, inp.mo_pool, stepdown_dates, inp.call_type_configs)
 
     return RosterResponse(
         year=config.year,
@@ -230,6 +265,7 @@ def generate_roster(config_id: int, db: Session = Depends(get_db)):
         days=day_rosters,
         violations=violations,
         fairness=fairness,
+        call_type_columns=ct_columns,
     )
 
 
@@ -267,7 +303,10 @@ def view_roster(config_id: int, db: Session = Depends(get_db)):
 
     assignments_by_date: dict[date, dict[str, str]] = defaultdict(dict)
     for r in call_rows:
-        assignments_by_date[r.date][r.call_type.value] = all_staff_names.get(r.staff_id, f"ID:{r.staff_id}")
+        assignments_by_date[r.date][r.call_type] = all_staff_names.get(r.staff_id, f"ID:{r.staff_id}")
+
+    call_type_configs = _load_call_type_infos(db)
+    ct_columns = [ct.name for ct in sorted(call_type_configs, key=lambda c: c.display_order)]
 
     day_rosters: list[DayRoster] = []
     for day_num in range(1, num_days + 1):
@@ -275,7 +314,7 @@ def view_roster(config_id: int, db: Session = Depends(get_db)):
         is_wknd = d.weekday() >= 5
         is_ph = d in ph_dates
 
-        inv_map = assignments_by_date.get(d, {})
+        call_slots = dict(assignments_by_date.get(d, {}))
         cons_id = consultant_oncall_map.get(d)
         ac_id = ac_oncall_map.get(d)
 
@@ -295,30 +334,27 @@ def view_roster(config_id: int, db: Session = Depends(get_db)):
             is_stepdown=d in stepdown_dates,
             consultant_oncall=cons_display,
             ac_oncall=ac_display,
-            mo1=inv_map.get("MO1"),
-            mo2=inv_map.get("MO2"),
-            mo3=inv_map.get("MO3"),
-            mo4=inv_map.get("MO4"),
-            mo5=inv_map.get("MO5"),
+            call_slots=call_slots,
         ))
 
+    call_eligible_ranks = _get_call_eligible_ranks(db)
     mo_pool_staff = (
         db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in MO_GRADES]))
+        .filter(Staff.active.is_(True), Staff.rank.in_(list(call_eligible_ranks)))
         .all()
     )
-    from ..services.solver import PersonInfo as SolverPersonInfo
-    mo_pool_persons = [SolverPersonInfo(id=s.id, name=s.name, grade=s.grade) for s in mo_pool_staff]
+    mo_pool_persons = [PersonInfo(id=s.id, name=s.name, rank=s.rank) for s in mo_pool_staff]
 
-    call_map: dict[date, dict[int, CallType]] = defaultdict(dict)
+    call_map: dict[date, dict[int, str]] = defaultdict(dict)
     for r in call_rows:
         call_map[r.date][r.staff_id] = r.call_type
 
-    fairness = compute_fairness_stats(dict(call_map), mo_pool_persons, stepdown_dates)
+    fairness = compute_fairness_stats(dict(call_map), mo_pool_persons, stepdown_dates, call_type_configs)
 
     return RosterResponse(
         year=year, month=month, days=day_rosters,
         violations=[], fairness=fairness,
+        call_type_columns=ct_columns,
     )
 
 
@@ -363,16 +399,16 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
         r.date for r in db.query(PublicHoliday).all()
         if r.date.year == year and r.date.month == month
     }
-    stepdown = {r.date for r in config.stepdown_days}
-    evening_ot = {r.date for r in config.evening_ot_dates}
-
+    duty_eligible_ranks = _get_duty_eligible_ranks(db)
     duty_staff = (
         db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in DUTY_GRADES]))
+        .filter(Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks)))
         .all()
     )
     total_mos = len(duty_staff)
     duty_staff_ids = {s.id for s in duty_staff}
+
+    call_type_configs = _load_call_type_infos(db)
 
     leave_counts: dict[str, int] = defaultdict(int)
     for lv in db.query(Leave).filter(
@@ -389,12 +425,17 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
     )
     oncall_counts: dict[str, int] = defaultdict(int)
     postcall_dates: set[str] = set()
+
+    from ..services.validators import get_post_call_type
+    ct_config_dict = {
+        ct.name: {"is_overnight": ct.is_overnight, "post_call_type": ct.post_call_type}
+        for ct in call_type_configs
+    }
+
     for ca in call_assignments:
         oncall_counts[ca.date.isoformat()] += 1
-        if ca.call_type in {CallType.MO1, CallType.MO2}:
-            next_day = ca.date + timedelta(days=1)
-            postcall_dates.add(next_day.isoformat())
-        if ca.call_type == CallType.MO3 and ca.date in stepdown:
+        pct = get_post_call_type(ca.call_type, ct_config_dict)
+        if pct in ("8am", "12pm", "5pm"):
             next_day = ca.date + timedelta(days=1)
             postcall_dates.add(next_day.isoformat())
 
@@ -423,13 +464,15 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
                     elif (cl.mos_required or 0) > 0:
                         clinic_sup += 1
 
-        call_slots = 2
-        if not is_wknd and not is_ph:
-            call_slots = 3
-            if d in evening_ot:
-                call_slots = 5
-        elif d in stepdown:
-            call_slots = 3
+        # Count required call slots from config
+        day_label = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dow]
+        call_slots = 0
+        for ct in call_type_configs:
+            applicable = [ad.strip() for ad in ct.applicable_days.split(",")]
+            if day_label in applicable:
+                call_slots += 1
+            elif "PH" in applicable and is_ph:
+                call_slots += 1
 
         on_leave = leave_counts.get(ds, 0)
         on_call = oncall_counts.get(ds, 0)

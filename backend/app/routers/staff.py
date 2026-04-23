@@ -36,7 +36,7 @@ def list_staff(active_only: bool = True, db: Session = Depends(get_db)):
             StaffOut(
                 id=s.id,
                 name=s.name,
-                grade=s.grade,
+                rank=s.rank,
                 active=s.active,
                 has_admin_role=s.has_admin_role,
                 team_name=team_name,
@@ -52,7 +52,7 @@ def create_staff(payload: StaffCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(s)
     return StaffOut(
-        id=s.id, name=s.name, grade=s.grade,
+        id=s.id, name=s.name, rank=s.rank,
         active=s.active, has_admin_role=s.has_admin_role,
     )
 
@@ -67,7 +67,7 @@ def update_staff(staff_id: int, payload: StaffCreate, db: Session = Depends(get_
     db.commit()
     db.refresh(s)
     return StaffOut(
-        id=s.id, name=s.name, grade=s.grade,
+        id=s.id, name=s.name, rank=s.rank,
         active=s.active, has_admin_role=s.has_admin_role,
     )
 

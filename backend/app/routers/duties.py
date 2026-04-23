@@ -10,7 +10,7 @@ from ..models import (
     MonthlyConfig, CallAssignment, DutyAssignment, Staff, TeamAssignment,
     OTTemplate, ClinicTemplate, Leave, PublicHoliday,
     ConsultantOnCall, ACOnCall,
-    DUTY_GRADES, CallType, DutyType, Session,
+    DutyType, Session, CallTypeConfig, RankConfig,
 )
 from ..schemas import (
     DutyRosterResponse, DayDutyRoster, DutyAssignmentOut,
@@ -20,7 +20,7 @@ from ..services.duty_solver import (
     DutySolverInput, DayDutyConfig, OTSlot, ClinicSlot,
     PersonInfo, solve_duties, compute_duty_stats,
 )
-from ..services.validators import is_overnight
+from ..services.validators import is_overnight, get_post_call_type
 
 router = APIRouter(prefix="/api", tags=["duties"])
 
@@ -136,6 +136,25 @@ def delete_clinic_template(template_id: int, db: DBSession = Depends(get_db)):
     return {"ok": True}
 
 
+# ── Helpers ─────────────────────────────────────────────────────────────
+
+def _get_duty_eligible_ranks(db: DBSession) -> set[str]:
+    ranks = db.query(RankConfig).filter(RankConfig.is_duty_eligible.is_(True)).all()
+    return {r.name for r in ranks}
+
+
+def _load_ct_config_dict(db: DBSession) -> dict:
+    configs = db.query(CallTypeConfig).filter(CallTypeConfig.is_active.is_(True)).all()
+    return {
+        ct.name: {
+            "is_overnight": ct.is_overnight,
+            "post_call_type": ct.post_call_type,
+            "min_gap_days": ct.min_gap_days,
+        }
+        for ct in configs
+    }
+
+
 # ── Duty Generation ─────────────────────────────────────────────────────
 
 def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
@@ -147,12 +166,10 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         if r.date.year == year and r.date.month == month
     }
 
-    # Build consultant team map
     consultant_team: dict[int, int] = {}
     for ta in db.query(TeamAssignment).filter(TeamAssignment.role == "consultant").all():
         consultant_team[ta.staff_id] = ta.team_id
 
-    # Load OT and clinic templates
     ot_templates = db.query(OTTemplate).all()
     clinic_templates = db.query(ClinicTemplate).all()
 
@@ -164,7 +181,6 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     for t in clinic_templates:
         clinic_by_dow_session[(t.day_of_week, t.session.value)].append(t)
 
-    # Load call assignments to know who's on call / post-call
     call_rows = db.query(CallAssignment).filter(
         CallAssignment.config_id == config.id,
     ).all()
@@ -173,21 +189,35 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     for r in call_rows:
         call_assigned[r.date].add(r.staff_id)
 
-    # Build stepdown dates set for is_overnight checks
+    ct_config_dict = _load_ct_config_dict(db)
     stepdown_dates = {sd.date for sd in config.stepdown_days}
 
     postcall_dates: dict[date, set[int]] = defaultdict(set)
+    postcall_12pm_dates: dict[date, set[int]] = defaultdict(set)
+    postcall_5pm_dates: dict[date, set[int]] = defaultdict(set)
+    call_only_dates: dict[date, set[int]] = defaultdict(set)
+
     for r in call_rows:
-        if is_overnight(r.call_type, r.date, stepdown_dates):
-            next_day = r.date + timedelta(days=1)
+        pct = get_post_call_type(r.call_type, ct_config_dict)
+        next_day = r.date + timedelta(days=1)
+        if pct == "8am":
             postcall_dates[next_day].add(r.staff_id)
+        elif pct == "12pm":
+            postcall_12pm_dates[next_day].add(r.staff_id)
+        elif pct == "5pm":
+            postcall_5pm_dates[next_day].add(r.staff_id)
+        elif pct == "call_only":
+            call_only_dates[next_day].add(r.staff_id)
 
-    # Also exclude MO3 from daytime pool (they handle referrals all day)
+    # Call-only types (e.g. MO3 weekday referral) exclude from daytime pool
     for r in call_rows:
-        if r.call_type == CallType.MO3:
-            call_assigned[r.date].add(r.staff_id)
+        pct = get_post_call_type(r.call_type, ct_config_dict)
+        if pct == "none" and not is_overnight(r.call_type, r.date, stepdown_dates, ct_config_dict):
+            # Daytime call-only duties (like MO3 referral) — exclude from daytime pool
+            cfg = ct_config_dict.get(r.call_type, {})
+            if not cfg.get("is_overnight", False):
+                call_assigned[r.date].add(r.staff_id)
 
-    # Build day configs
     days: list[DayDutyConfig] = []
     for day_num in range(1, num_days + 1):
         d = date(year, month, day_num)
@@ -241,10 +271,10 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
             pm_clinics=pm_clinics,
         ))
 
-    # Load MO pool
+    duty_eligible_ranks = _get_duty_eligible_ranks(db)
     duty_staff = (
         db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in DUTY_GRADES]))
+        .filter(Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks)))
         .all()
     )
     mo_pool: list[PersonInfo] = []
@@ -260,7 +290,7 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
             .first()
         )
         mo_pool.append(PersonInfo(
-            id=s.id, name=s.name, grade=s.grade.value,
+            id=s.id, name=s.name, rank=s.rank,
             team_id=ta.team_id if ta else None,
             supervisor_id=ta.supervisor_id if ta else None,
         ))
@@ -277,6 +307,9 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         mo_pool=mo_pool, leave_dates=dict(leave_dates),
         call_assigned=dict(call_assigned),
         postcall_dates=dict(postcall_dates),
+        postcall_12pm_dates=dict(postcall_12pm_dates),
+        postcall_5pm_dates=dict(postcall_5pm_dates),
+        call_only_dates=dict(call_only_dates),
     )
 
 
@@ -287,7 +320,7 @@ def _build_day_rosters(
     pid_to_name: dict[int, str],
     cons_names: dict[int, str],
     postcall_dates: dict[date, set[int]],
-) -> list[DayDutyRoster]:
+) -> tuple[list[DayDutyRoster], list[str]]:
     from ..services.duty_solver import DutyResult as DR
 
     ph_dates = {
@@ -302,15 +335,13 @@ def _build_day_rosters(
 
     all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
 
-    # Build call team lookup (MO1-MO5)
     call_rows = db.query(CallAssignment).filter(
         CallAssignment.config_id == config.id,
     ).all()
     call_by_date: dict[date, dict[str, str]] = defaultdict(dict)
     for r in call_rows:
-        call_by_date[r.date][r.call_type.value] = all_staff_names.get(r.staff_id, f"ID:{r.staff_id}")
+        call_by_date[r.date][r.call_type] = all_staff_names.get(r.staff_id, f"ID:{r.staff_id}")
 
-    # Build consultant/AC on-call lookup
     cons_oncall_by_date: dict[date, str] = {}
     for r in db.query(ConsultantOnCall).filter(ConsultantOnCall.config_id == config.id).all():
         cons_oncall_by_date[r.date] = all_staff_names.get(r.consultant_id, f"ID:{r.consultant_id}")
@@ -318,10 +349,12 @@ def _build_day_rosters(
     for r in db.query(ACOnCall).filter(ACOnCall.config_id == config.id).all():
         ac_oncall_by_date[r.date] = all_staff_names.get(r.ac_id, f"ID:{r.ac_id}")
 
-    # Build clinic_type lookup from DutyAssignment location
     clinic_type_lookup: dict[tuple[str, str], str] = {}
     for ct in db.query(ClinicTemplate).all():
         clinic_type_lookup[(ct.room, ct.session.value)] = ct.clinic_type or "Sup"
+
+    ct_configs = db.query(CallTypeConfig).filter(CallTypeConfig.is_active.is_(True)).order_by(CallTypeConfig.display_order).all()
+    ct_columns = [ct.name for ct in ct_configs]
 
     day_rosters: list[DayDutyRoster] = []
     num_days = calendar.monthrange(config.year, config.month)[1]
@@ -334,6 +367,9 @@ def _build_day_rosters(
         post_call_names = sorted([all_staff_names.get(pid, f"ID:{pid}") for pid in pc_ids])
 
         call_team = call_by_date.get(d, {})
+        call_slots: dict[str, str | None] = {}
+        for ctype, name in call_team.items():
+            call_slots[ctype] = name
 
         day_results = results_by_date.get(d, [])
         ot_out = []
@@ -381,11 +417,7 @@ def _build_day_rosters(
             is_weekend=is_wknd, is_ph=is_ph,
             consultant_oncall=cons_oncall_by_date.get(d),
             ac_oncall=ac_oncall_by_date.get(d),
-            mo1=call_team.get("MO1"),
-            mo2=call_team.get("MO2"),
-            mo3=call_team.get("MO3"),
-            mo4=call_team.get("MO4"),
-            mo5=call_team.get("MO5"),
+            call_slots=call_slots,
             post_call=post_call_names,
             ot_assignments=ot_out,
             eot_assignments=eot_out,
@@ -395,7 +427,7 @@ def _build_day_rosters(
             pm_admin=pm_admin,
         ))
 
-    return day_rosters
+    return day_rosters, ct_columns
 
 
 @router.post("/roster/{config_id}/generate-duties", response_model=DutyRosterResponse)
@@ -413,7 +445,6 @@ def generate_duties(config_id: int, db: DBSession = Depends(get_db)):
     inp = _build_duty_input(config, db)
     duty_results = solve_duties(inp)
 
-    # Clear previous auto-generated duty assignments
     db.query(DutyAssignment).filter(
         DutyAssignment.config_id == config_id,
         DutyAssignment.is_manual_override.is_(False),
@@ -435,12 +466,13 @@ def generate_duties(config_id: int, db: DBSession = Depends(get_db)):
         ))
     db.commit()
 
-    day_rosters = _build_day_rosters(config, db, duty_results, pid_to_name, cons_names, inp.postcall_dates)
+    day_rosters, ct_columns = _build_day_rosters(config, db, duty_results, pid_to_name, cons_names, inp.postcall_dates)
     duty_stats = compute_duty_stats(duty_results, inp.mo_pool)
 
     return DutyRosterResponse(
         year=config.year, month=config.month,
         days=day_rosters, duty_stats=duty_stats,
+        call_type_columns=ct_columns,
     )
 
 
@@ -485,22 +517,24 @@ def view_duties(config_id: int, db: DBSession = Depends(get_db)):
     cons_names = all_staff_names
     pid_to_name = {r.staff_id: r.staff.name for r in rows}
 
-    stepdown_dates = {sd.date for sd in config.stepdown_days}
+    ct_config_dict = _load_ct_config_dict(db)
     call_rows = db.query(CallAssignment).filter(CallAssignment.config_id == config_id).all()
     postcall_dates: dict[date, set[int]] = defaultdict(set)
     for r in call_rows:
-        if is_overnight(r.call_type, r.date, stepdown_dates):
+        pct = get_post_call_type(r.call_type, ct_config_dict)
+        if pct in ("8am", "12pm", "5pm"):
             next_day = r.date + timedelta(days=1)
             postcall_dates[next_day].add(r.staff_id)
 
-    day_rosters = _build_day_rosters(config, db, rows, pid_to_name, cons_names, dict(postcall_dates))
+    day_rosters, ct_columns = _build_day_rosters(config, db, rows, pid_to_name, cons_names, dict(postcall_dates))
 
+    duty_eligible_ranks = _get_duty_eligible_ranks(db)
     duty_staff = (
         db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in DUTY_GRADES]))
+        .filter(Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks)))
         .all()
     )
-    mo_pool = [PersonInfo(id=s.id, name=s.name, grade=s.grade.value) for s in duty_staff]
+    mo_pool = [PersonInfo(id=s.id, name=s.name, rank=s.rank) for s in duty_staff]
     from ..services.duty_solver import DutyResult
     duty_results = [
         DutyResult(date=r.date, staff_id=r.staff_id, session=r.session,
@@ -512,4 +546,5 @@ def view_duties(config_id: int, db: DBSession = Depends(get_db)):
     return DutyRosterResponse(
         year=config.year, month=config.month,
         days=day_rosters, duty_stats=duty_stats,
+        call_type_columns=ct_columns,
     )

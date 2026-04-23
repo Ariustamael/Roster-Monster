@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "../../api";
 import type { RegistrarDuty, Staff } from "../../types";
-import { REG_GRADES } from "./constants";
+import { REG_RANKS } from "./constants";
 
 const DUTY_TYPES = ["R1", "R2", "EOT"] as const;
 const SHIFTS = ["day", "night", "combined"] as const;
@@ -45,7 +45,7 @@ export default function RegistrarRosterTab({ configId, year, month }: { configId
 
   useEffect(() => { load(); }, [load]);
 
-  const registrars = staff.filter((s) => REG_GRADES.includes(s.grade));
+  const registrars = staff.filter((s) => REG_RANKS.includes(s.rank));
 
   function addEntry() {
     const firstDate = `${year}-${String(month).padStart(2, "0")}-01`;

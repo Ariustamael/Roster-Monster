@@ -8,6 +8,7 @@ import StaffView from "./pages/StaffView";
 import TeamsView from "./pages/TeamsView";
 import ResourcesView from "./pages/ResourcesView";
 import RulesView from "./pages/RulesView";
+import ConfigView from "./pages/ConfigView";
 import "./styles/app.css";
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/teams" element={<TeamsView />} />
             <Route path="/resources" element={<ResourcesView />} />
             <Route path="/rules" element={<RulesView />} />
+            <Route path="/config" element={<ConfigView />} />
           </Route>
         </Routes>
       </BrowserRouter>

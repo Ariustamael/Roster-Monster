@@ -1,13 +1,12 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { api } from "../../api";
-import type { OTTemplate, Staff } from "../../types";
-import { DAY_NAMES, CONS_GRADES, COLOR_PRESETS } from "./constants";
-
-const CALL_SLOTS = ["MO1", "MO2", "MO3", "MO4", "MO5"];
+import type { OTTemplate, Staff, CallTypeConfig } from "../../types";
+import { DAY_NAMES, CONS_RANKS, COLOR_PRESETS } from "./constants";
 
 export default function OTTemplatesTab() {
   const [templates, setTemplates] = useState<OTTemplate[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
@@ -15,14 +14,15 @@ export default function OTTemplatesTab() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([api.getOTTemplates(), api.getStaff()]).then(([t, s]) => {
+    Promise.all([api.getOTTemplates(), api.getStaff(), api.getCallTypes()]).then(([t, s, ct]) => {
       setTemplates(t);
       setStaff(s);
+      setCallTypes(ct);
       setLoading(false);
     });
   }, []);
 
-  const consultants = staff.filter((s) => CONS_GRADES.includes(s.grade));
+  const consultants = staff.filter((s) => CONS_RANKS.includes(s.rank));
 
   async function handleAdd(data: any) {
     try {
@@ -167,6 +167,7 @@ export default function OTTemplatesTab() {
         <OTFormModal
           title="Add OT Template"
           consultants={consultants}
+          callSlotNames={callTypes.filter((c) => c.is_active).map((c) => c.name)}
           onSave={handleAdd}
           onClose={() => setShowAdd(false)}
         />
@@ -175,6 +176,7 @@ export default function OTTemplatesTab() {
         <OTFormModal
           title="Edit OT Template"
           consultants={consultants}
+          callSlotNames={callTypes.filter((c) => c.is_active).map((c) => c.name)}
           initial={editTemplate}
           onSave={(data) => handleUpdate(editTemplate.id, data)}
           onClose={() => setEditId(null)}
@@ -186,10 +188,11 @@ export default function OTTemplatesTab() {
 }
 
 function OTFormModal({
-  title, consultants, initial, onSave, onClose, onDelete,
+  title, consultants, callSlotNames, initial, onSave, onClose, onDelete,
 }: {
   title: string;
   consultants: Staff[];
+  callSlotNames: string[];
   initial?: OTTemplate;
   onSave: (data: any) => void;
   onClose: () => void;
@@ -251,7 +254,7 @@ function OTFormModal({
           <div className="form-group">
             <label>Linked Call Slots (auto-assign from call roster)</label>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
-              {CALL_SLOTS.map((slot) => (
+              {callSlotNames.map((slot) => (
                 <label key={slot} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
                   <input
                     type="checkbox"

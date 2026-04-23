@@ -1,7 +1,7 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { api } from "../../api";
 import type { ClinicTemplate, Staff } from "../../types";
-import { DAY_NAMES, CONS_GRADES, COLOR_PRESETS } from "./constants";
+import { DAY_NAMES, CONS_RANKS, COLOR_PRESETS } from "./constants";
 
 const SESSIONS = ["AM", "PM"] as const;
 const CLINIC_TYPES = ["NC", "Sup", "MOPD", "Hand VC", "CAT-A", "Lump", "NES", "MSK", "3E", "WMC"] as const;
@@ -32,7 +32,7 @@ export default function ClinicTemplatesTab() {
     });
   }, []);
 
-  const consultants = staff.filter((s) => CONS_GRADES.includes(s.grade));
+  const consultants = staff.filter((s) => CONS_RANKS.includes(s.rank));
 
   async function handleAdd(data: any) {
     try {

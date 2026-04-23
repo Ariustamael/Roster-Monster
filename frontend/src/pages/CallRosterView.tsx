@@ -3,9 +3,6 @@ import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
 import type { RosterResponse, Staff, CallAssignment, DayRoster } from "../types";
 
-const MO_GRADES = ["Senior Medical Officer", "Medical Officer"];
-const CALL_SLOTS = ["MO1", "MO2", "MO3", "MO4", "MO5"] as const;
-
 export default function CallRosterView() {
   const { active } = useConfig();
   const [roster, setRoster] = useState<RosterResponse | null>(null);
@@ -16,7 +13,7 @@ export default function CallRosterView() {
   const [editCell, setEditCell] = useState<{ date: string; slot: string } | null>(null);
 
   useEffect(() => {
-    api.getMOStaff().then((all) => setMoStaff(all.filter((s) => MO_GRADES.includes(s.grade))));
+    api.getMOStaff().then(setMoStaff);
   }, []);
 
   const configId = active?.id ?? 0;
@@ -65,8 +62,7 @@ export default function CallRosterView() {
   }
 
   function getSlotValue(day: DayRoster, slot: string): string | null {
-    const key = slot.toLowerCase() as keyof DayRoster;
-    return (day[key] as string | null) ?? null;
+    return day.call_slots[slot] ?? null;
   }
 
   async function handleOverride(staffId: number) {
@@ -79,8 +75,7 @@ export default function CallRosterView() {
         const staffName = moStaff.find((s) => s.id === staffId)?.name || "";
         const updatedDays = roster.days.map((day) => {
           if (day.date !== editCell.date) return day;
-          const key = editCell.slot.toLowerCase() as keyof DayRoster;
-          return { ...day, [key]: staffName };
+          return { ...day, call_slots: { ...day.call_slots, [editCell.slot]: staffName } };
         });
         setRoster({ ...roster, days: updatedDays });
       }
@@ -91,6 +86,8 @@ export default function CallRosterView() {
   }
 
   if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
+
+  const callColumns = roster?.call_type_columns ?? [];
 
   return (
     <>
@@ -139,11 +136,9 @@ export default function CallRosterView() {
                     <th>Day</th>
                     <th>Consultant</th>
                     <th>AC</th>
-                    <th>MO1</th>
-                    <th>MO2</th>
-                    <th>MO3</th>
-                    <th>MO4</th>
-                    <th>MO5</th>
+                    {callColumns.map((col) => (
+                      <th key={col}>{col}</th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
@@ -156,13 +151,13 @@ export default function CallRosterView() {
                       <td>{day.day_name}</td>
                       <td>{day.consultant_oncall || "-"}</td>
                       <td>{day.ac_oncall || "-"}</td>
-                      {CALL_SLOTS.map((slot) => {
+                      {callColumns.map((slot) => {
                         const val = getSlotValue(day, slot);
                         const over = isOverride(day.date, slot);
                         return (
                           <td
                             key={slot}
-                            className={`editable ${slot === "MO1" ? "mo1" : ""} ${over ? "override" : ""} ${!val ? "empty" : ""}`}
+                            className={`editable ${slot === callColumns[0] ? "mo1" : ""} ${over ? "override" : ""} ${!val ? "empty" : ""}`}
                             onClick={() => setEditCell({ date: day.date, slot })}
                           >
                             {val || "-"}
@@ -195,7 +190,7 @@ export default function CallRosterView() {
                 {moStaff
                   .sort((a, b) => a.name.localeCompare(b.name))
                   .map((s) => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.grade})</option>
+                    <option key={s.id} value={s.id}>{s.name} ({s.rank})</option>
                   ))}
               </select>
             </div>

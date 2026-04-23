@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "../../api";
 import type { ConsultantOnCall, ACOnCall, Staff } from "../../types";
-import { CONS_GRADES, AC_GRADES } from "./constants";
+import { CONS_RANKS, AC_RANKS } from "./constants";
 
 interface DayRow {
   date: string;
@@ -35,11 +35,11 @@ function StaffCard({
       className="team-card"
       draggable
       onDragStart={() => onDragStart({ staffId: staff.id, staffType })}
-      title={staff.grade}
+      title={staff.rank}
       style={{ marginBottom: 4, cursor: "grab" }}
     >
       <span className="card-name">{staff.name}</span>
-      <span className="card-grade">{staff.grade}</span>
+      <span className="card-grade">{staff.rank}</span>
     </div>
   );
 }
@@ -168,10 +168,9 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
 
   useEffect(() => { load(); }, [load]);
 
-  // Consultants sidebar: grades in CONS_GRADES but NOT in AC_GRADES (i.e. Senior Consultant, Consultant)
-  const consultants = staff.filter((s) => CONS_GRADES.includes(s.grade) && !AC_GRADES.includes(s.grade));
-  // ACs sidebar: grades in AC_GRADES (Associate Consultant)
-  const acs = staff.filter((s) => AC_GRADES.includes(s.grade));
+  const consultants = staff.filter((s) => CONS_RANKS.includes(s.rank) && !AC_RANKS.includes(s.rank));
+
+  const acs = staff.filter((s) => AC_RANKS.includes(s.rank));
 
   // Build lookup maps for names
   const staffById = new Map<number, Staff>(staff.map((s) => [s.id, s]));

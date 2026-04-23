@@ -1,30 +1,31 @@
 """
 Greedy priority-based call roster solver.
 
-For each day, fills call slots in order: MO1 → MO2 → MO3 → MO4 → MO5.
+For each day, fills call slots based on call_type_config.
 For each slot, scores all eligible MOs and picks the best candidate.
 
 Hard constraints (must pass):
   - Not on leave
   - Not blocked (call preference)
   - Post-call: no assignment day after overnight call
-  - Minimum 2-day gap between overnight calls
+  - Minimum gap between overnight calls (configurable per call type)
   - No switching overnight call types within 5-day window
   - Not already assigned to another call slot today
+  - Rank must be in the call type's eligible ranks
 
 Soft scoring (higher = more likely picked):
   - Fewer total calls this month
   - Fewer of this specific call type
   - Fewer weekend/PH calls (if applicable)
-  - Team match bonus for MO1 (MO's team matches on-call consultant's team)
+  - Team match bonus for first call slot
   - Call preference request bonus
+  - Difficulty-weighted fairness
 """
 
 from datetime import date, timedelta
 from dataclasses import dataclass, field
 from collections import defaultdict
 
-from ..models import CallType, Grade
 from .validators import (
     is_overnight,
     check_post_call,
@@ -36,10 +37,24 @@ from .validators import (
 
 
 @dataclass
+class CallTypeInfo:
+    name: str
+    display_order: int
+    is_overnight: bool
+    post_call_type: str
+    max_consecutive_days: int
+    min_gap_days: int
+    difficulty_points: int
+    counts_towards_fairness: bool
+    applicable_days: str
+    eligible_rank_names: set[str]
+
+
+@dataclass
 class PersonInfo:
     id: int
     name: str
-    grade: Grade
+    rank: str
     team_id: int | None = None
     supervisor_id: int | None = None
 
@@ -62,11 +77,11 @@ class SolverInput:
     month: int
     days: list[DayConfig]
     mo_pool: list[PersonInfo]
-    leave_dates: dict[int, set[date]]  # person_id → dates
-    block_dates: dict[int, set[date]]  # person_id → blocked dates
-    request_dates: dict[int, set[date]]  # person_id → requested dates
-    # Carryover from previous month: recent overnight calls
-    prior_assignments: dict[date, dict[int, CallType]] = field(default_factory=dict)
+    leave_dates: dict[int, set[date]]
+    block_dates: dict[int, set[date]]
+    request_dates: dict[int, set[date]]
+    prior_assignments: dict[date, dict[int, str]] = field(default_factory=dict)
+    call_type_configs: list[CallTypeInfo] = field(default_factory=list)
 
 
 @dataclass
@@ -77,57 +92,77 @@ class FairnessTracker:
         default_factory=lambda: defaultdict(lambda: defaultdict(int))
     )
     weekend_calls: dict[int, int] = field(default_factory=lambda: defaultdict(int))
+    difficulty_points: dict[int, int] = field(default_factory=lambda: defaultdict(int))
 
-    def record(self, pid: int, call_type: CallType, is_weekend_or_ph: bool, is_24h: bool):
+    def record(self, pid: int, call_type: str, is_weekend_or_ph: bool, is_24h: bool, diff_points: int = 1):
         self.total_all[pid] += 1
-        self.type_calls[pid][call_type.value] += 1
+        self.type_calls[pid][call_type] += 1
+        self.difficulty_points[pid] += diff_points
         if is_24h:
             self.total_24h[pid] += 1
         if is_weekend_or_ph:
             self.weekend_calls[pid] += 1
 
-    def score(self, pid: int, call_type: CallType, is_weekend_or_ph: bool) -> float:
+    def score(self, pid: int, call_type: str, is_weekend_or_ph: bool, diff_points: int = 1) -> float:
         s = 0.0
         total_24h = self.total_24h[pid]
-        type_count = self.type_calls[pid][call_type.value]
+        type_count = self.type_calls[pid][call_type]
         weekend_count = self.weekend_calls[pid]
+        total_diff = self.difficulty_points[pid]
 
         max_24h = max(self.total_24h.values()) if self.total_24h else 1
         max_type = max(
-            (self.type_calls[p].get(call_type.value, 0) for p in self.total_all),
+            (self.type_calls[p].get(call_type, 0) for p in self.total_all),
             default=1,
         ) or 1
         max_weekend = max(self.weekend_calls.values()) if self.weekend_calls else 1
+        max_diff = max(self.difficulty_points.values()) if self.difficulty_points else 1
 
         s += 10.0 * (1.0 - total_24h / max(max_24h, 1))
         s += 3.0 * (1.0 - type_count / max(max_type, 1))
+        s += 2.0 * (1.0 - total_diff / max(max_diff, 1))
         if is_weekend_or_ph:
             s += 8.0 * (1.0 - weekend_count / max(max_weekend, 1))
 
         return s
 
 
-def _required_slots(day: DayConfig) -> list[CallType]:
-    slots = [CallType.MO1, CallType.MO2]
-    if day.is_weekend or day.is_ph:
-        if day.is_stepdown:
-            slots.append(CallType.MO3)
-    else:
-        slots.append(CallType.MO3)
-    if day.has_evening_ot and not day.is_weekend and not day.is_ph:
-        slots.extend([CallType.MO4, CallType.MO5])
+DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+
+def _required_slots(day: DayConfig, call_type_configs: list[CallTypeInfo]) -> list[CallTypeInfo]:
+    day_label = DAY_LABELS[day.d.weekday()]
+    slots = []
+    for ct in sorted(call_type_configs, key=lambda c: c.display_order):
+        applicable = [d.strip() for d in ct.applicable_days.split(",")]
+        if day_label in applicable:
+            slots.append(ct)
+        elif "PH" in applicable and day.is_ph:
+            slots.append(ct)
     return slots
+
+
+def _build_ct_config_dict(call_type_configs: list[CallTypeInfo]) -> dict:
+    return {
+        ct.name: {
+            "is_overnight": ct.is_overnight,
+            "post_call_type": ct.post_call_type,
+            "min_gap_days": ct.min_gap_days,
+        }
+        for ct in call_type_configs
+    }
 
 
 def _is_eligible(
     person: PersonInfo,
     day: DayConfig,
-    call_type: CallType,
-    assignments: dict[date, dict[int, CallType]],
-    daily_assignments: dict[int, CallType],
+    ct: CallTypeInfo,
+    assignments: dict[date, dict[int, str]],
+    daily_assignments: dict[int, str],
     leave_dates: dict[int, set[date]],
     block_dates: dict[int, set[date]],
     stepdown_dates: set[date],
+    ct_config_dict: dict,
 ) -> bool:
     pid = person.id
     d = day.d
@@ -138,22 +173,20 @@ def _is_eligible(
     if d in block_dates.get(pid, set()):
         return False
 
-    # Weekday MO3 (referral duty) restricted to Senior Medical Officers
-    if call_type == CallType.MO3 and not day.is_weekend and not day.is_ph and not day.is_stepdown:
-        if person.grade != Grade.SENIOR_MEDICAL_OFFICER:
-            return False
+    if person.rank not in ct.eligible_rank_names:
+        return False
 
     if not check_not_already_assigned_today(pid, d, daily_assignments):
         return False
 
-    if not check_post_call(pid, d, assignments, stepdown_dates):
+    if not check_post_call(pid, d, assignments, stepdown_dates, ct_config_dict):
         return False
 
-    if is_overnight(call_type, d, stepdown_dates):
-        if not check_call_gap(pid, d, call_type, assignments, stepdown_dates):
+    if is_overnight(ct.name, d, stepdown_dates, ct_config_dict):
+        if not check_call_gap(pid, d, ct.name, assignments, stepdown_dates, ct_config_dict, ct.min_gap_days):
             return False
         if not check_no_consecutive_different_types(
-            pid, d, call_type, assignments, stepdown_dates
+            pid, d, ct.name, assignments, stepdown_dates, ct_config_dict
         ):
             return False
 
@@ -163,18 +196,18 @@ def _is_eligible(
 def _score_candidate(
     person: PersonInfo,
     day: DayConfig,
-    call_type: CallType,
+    ct: CallTypeInfo,
     fairness: FairnessTracker,
     request_dates: dict[int, set[date]],
-    assignments: dict[date, dict[int, CallType]],
+    assignments: dict[date, dict[int, str]],
     stepdown_dates: set[date],
 ) -> float:
     score = 0.0
     is_wknd_ph = day.is_weekend or day.is_ph
 
-    score += fairness.score(person.id, call_type, is_wknd_ph)
+    score += fairness.score(person.id, ct.name, is_wknd_ph, ct.difficulty_points)
 
-    if call_type == CallType.MO1 and day.consultant_oncall_id is not None:
+    if ct.display_order == 0 and day.consultant_oncall_id is not None:
         if person.supervisor_id == day.consultant_oncall_id:
             score += 5.0
         elif day.consultant_oncall_team_id is not None and person.team_id == day.consultant_oncall_team_id:
@@ -196,8 +229,8 @@ def _score_candidate(
     return score
 
 
-def solve(inp: SolverInput) -> tuple[dict[date, dict[int, CallType]], list[str]]:
-    assignments: dict[date, dict[int, CallType]] = {}
+def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
+    assignments: dict[date, dict[int, str]] = {}
 
     for d, mapping in inp.prior_assignments.items():
         assignments[d] = dict(mapping)
@@ -207,33 +240,36 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, CallType]], list[str]]
         if day.is_stepdown:
             stepdown_dates.add(day.d)
 
+    ct_config_dict = _build_ct_config_dict(inp.call_type_configs)
+
     fairness = FairnessTracker()
     for pid in [p.id for p in inp.mo_pool]:
         fairness.total_all[pid] = 0
         fairness.total_24h[pid] = 0
 
     for day in inp.days:
-        slots = _required_slots(day)
-        daily: dict[int, CallType] = {}
+        slots = _required_slots(day, inp.call_type_configs)
+        daily: dict[int, str] = {}
 
-        for call_type in slots:
+        for ct in slots:
             eligible = [
                 p
                 for p in inp.mo_pool
                 if _is_eligible(
                     p,
                     day,
-                    call_type,
+                    ct,
                     assignments,
                     daily,
                     inp.leave_dates,
                     inp.block_dates,
                     stepdown_dates,
+                    ct_config_dict,
                 )
             ]
 
             if not eligible:
-                daily[-1] = call_type
+                daily[-1] = ct.name
                 continue
 
             scored = sorted(
@@ -241,7 +277,7 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, CallType]], list[str]]
                 key=lambda p: _score_candidate(
                     p,
                     day,
-                    call_type,
+                    ct,
                     fairness,
                     inp.request_dates,
                     assignments,
@@ -251,9 +287,9 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, CallType]], list[str]]
             )
 
             chosen = scored[0]
-            daily[chosen.id] = call_type
-            call_is_24h = is_overnight(call_type, day.d, stepdown_dates)
-            fairness.record(chosen.id, call_type, day.is_weekend or day.is_ph, call_is_24h)
+            daily[chosen.id] = ct.name
+            call_is_24h = is_overnight(ct.name, day.d, stepdown_dates, ct_config_dict)
+            fairness.record(chosen.id, ct.name, day.is_weekend or day.is_ph, call_is_24h, ct.difficulty_points)
 
         assignments[day.d] = daily
 
@@ -264,27 +300,31 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, CallType]], list[str]]
     }
 
     staff_names = {p.id: p.name for p in inp.mo_pool}
-    violations = validate_full_roster(month_assignments, stepdown_dates, staff_names)
+    violations = validate_full_roster(month_assignments, stepdown_dates, staff_names, ct_config_dict)
 
     return month_assignments, violations
 
 
 def compute_fairness_stats(
-    assignments: dict[date, dict[int, CallType]],
+    assignments: dict[date, dict[int, str]],
     mo_pool: list[PersonInfo],
     stepdown_dates: set[date],
+    call_type_configs: list[CallTypeInfo] | None = None,
 ) -> dict[str, dict]:
+    ct_config_dict = _build_ct_config_dict(call_type_configs) if call_type_configs else None
+    diff_by_type = {ct.name: ct.difficulty_points for ct in call_type_configs} if call_type_configs else {}
+
+    ct_names = sorted(ct.name for ct in call_type_configs) if call_type_configs else ["MO1", "MO2", "MO3", "MO4", "MO5"]
+
     stats: dict[str, dict] = {}
     for p in mo_pool:
+        per_type = {name: 0 for name in ct_names}
         stats[p.name] = {
             "total_24h": 0,
             "total_all": 0,
-            "MO1": 0,
-            "MO2": 0,
-            "MO3": 0,
-            "MO4": 0,
-            "MO5": 0,
+            "per_type": per_type,
             "weekend_ph": 0,
+            "difficulty_points": 0,
         }
 
     pid_to_name = {p.id: p.name for p in mo_pool}
@@ -295,10 +335,12 @@ def compute_fairness_stats(
             if name is None:
                 continue
             stats[name]["total_all"] += 1
-            stats[name][ctype.value] += 1
-            if is_overnight(ctype, d, stepdown_dates):
+            if ctype in stats[name]["per_type"]:
+                stats[name]["per_type"][ctype] += 1
+            if is_overnight(ctype, d, stepdown_dates, ct_config_dict):
                 stats[name]["total_24h"] += 1
             if is_wknd:
                 stats[name]["weekend_ph"] += 1
+            stats[name]["difficulty_points"] += diff_by_type.get(ctype, 1)
 
     return stats

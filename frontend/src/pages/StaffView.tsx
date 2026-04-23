@@ -3,7 +3,7 @@ import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
 import type { Staff, Leave, CallPreference } from "../types";
 
-const GRADE_ORDER: Record<string, number> = {
+const RANK_ORDER: Record<string, number> = {
   "Senior Consultant": 0,
   "Consultant": 1,
   "Associate Consultant": 2,
@@ -13,12 +13,12 @@ const GRADE_ORDER: Record<string, number> = {
   "Medical Officer": 6,
 };
 
-const ALL_GRADES = [
+const ALL_RANKS = [
   "Senior Consultant", "Consultant", "Associate Consultant",
   "Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer",
 ];
 
-const ALLOCATABLE_GRADES = ["Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer"];
+const ALLOCATABLE_RANKS = ["Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer"];
 
 const MONTH_NAMES = [
   "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -54,12 +54,12 @@ export default function StaffView() {
     .filter(
       (s) =>
         s.name.toLowerCase().includes(filter.toLowerCase()) ||
-        s.grade.toLowerCase().includes(filter.toLowerCase()) ||
+        s.rank.toLowerCase().includes(filter.toLowerCase()) ||
         (s.team_name || "").toLowerCase().includes(filter.toLowerCase())
     )
-    .sort((a, b) => (GRADE_ORDER[a.grade] ?? 9) - (GRADE_ORDER[b.grade] ?? 9) || a.name.localeCompare(b.name));
+    .sort((a, b) => (RANK_ORDER[a.rank] ?? 9) - (RANK_ORDER[b.rank] ?? 9) || a.name.localeCompare(b.name));
 
-  const moCount = staff.filter((s) => ALLOCATABLE_GRADES.includes(s.grade)).length;
+  const moCount = staff.filter((s) => ALLOCATABLE_RANKS.includes(s.rank)).length;
 
   async function addStaff(name: string, grade: string) {
     const s = await api.createStaff(name, grade);
@@ -125,7 +125,7 @@ export default function StaffView() {
         <div className="btn-group">
           <input
             type="text"
-            placeholder="Filter by name, grade, or team..."
+            placeholder="Filter by name, rank, or team..."
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             style={{
@@ -150,7 +150,7 @@ export default function StaffView() {
                 <tr>
                   <th style={{ width: 20 }}></th>
                   <th>Name</th>
-                  <th>Grade</th>
+                  <th>Rank</th>
                   <th>Team</th>
                   <th>Leaves</th>
                   <th>Prefs</th>
@@ -161,7 +161,7 @@ export default function StaffView() {
                 {filtered.map((s) => {
                   const staffLeaves = leaves.filter((l) => l.staff_id === s.id);
                   const staffPrefs = prefs.filter((p) => p.staff_id === s.id);
-                  const isMO = ALLOCATABLE_GRADES.includes(s.grade);
+                  const isMO = ALLOCATABLE_RANKS.includes(s.rank);
                   const isExpanded = expanded === s.id;
                   const isEditing = editing === s.id;
 
@@ -244,7 +244,7 @@ function StaffRow({
           {isMO ? (isExpanded ? "▼" : "▶") : ""}
         </td>
         <td style={{ fontWeight: 500 }}>{s.name}</td>
-        <td>{s.grade}</td>
+        <td>{s.rank}</td>
         <td>{s.team_name || "-"}</td>
         <td>{leaves.length || "-"}</td>
         <td>{prefs.length || "-"}</td>
@@ -309,7 +309,7 @@ function EditRow({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(staff.name);
-  const [grade, setGrade] = useState(staff.grade);
+  const [rank, setRank] = useState(staff.rank);
 
   return (
     <tr>
@@ -319,16 +319,16 @@ function EditRow({
           style={{ width: "100%", padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13 }} />
       </td>
       <td>
-        <select value={grade} onChange={(e) => setGrade(e.target.value)}
+        <select value={rank} onChange={(e) => setRank(e.target.value)}
           style={{ padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13 }}>
-          {ALL_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+          {ALL_RANKS.map((g) => <option key={g} value={g}>{g}</option>)}
         </select>
       </td>
       <td>{staff.team_name || "-"}</td>
       <td colSpan={2}></td>
       <td>
         <div className="btn-group">
-          <button className="btn btn-sm btn-primary" onClick={() => onSave(staff.id, name, grade)}>Save</button>
+          <button className="btn btn-sm btn-primary" onClick={() => onSave(staff.id, name, rank)}>Save</button>
           <button className="btn btn-sm btn-secondary" onClick={onCancel}>Cancel</button>
         </div>
       </td>
@@ -344,7 +344,7 @@ function AddStaffModal({
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
-  const [grade, setGrade] = useState("Medical Officer");
+  const [rank, setRank] = useState("Medical Officer");
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -355,14 +355,14 @@ function AddStaffModal({
           <input type="text" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </div>
         <div className="form-group">
-          <label>Grade</label>
-          <select value={grade} onChange={(e) => setGrade(e.target.value)}>
-            {ALL_GRADES.map((g) => <option key={g} value={g}>{g}</option>)}
+          <label>Rank</label>
+          <select value={rank} onChange={(e) => setRank(e.target.value)}>
+            {ALL_RANKS.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => { if (name.trim()) onAdd(name.trim(), grade); }}>
+          <button className="btn btn-primary" onClick={() => { if (name.trim()) onAdd(name.trim(), rank); }}>
             Add
           </button>
         </div>

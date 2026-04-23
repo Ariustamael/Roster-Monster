@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
-from .routers import staff, teams, monthly_config, roster, duties
+from .routers import staff, teams, monthly_config, roster, duties, config
 
 app = FastAPI(title="Roster Monster", version="0.1.0")
 
@@ -19,6 +19,7 @@ app.include_router(teams.router)
 app.include_router(monthly_config.router)
 app.include_router(roster.router)
 app.include_router(duties.router)
+app.include_router(config.router)
 
 
 @app.on_event("startup")

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..models import Team, TeamAssignment, Staff
+from ..models import Team, TeamAssignment, Staff, RankConfig
 from ..schemas import TeamOut, TeamCreate, TeamAssignmentCreate, TeamAssignmentOut
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
@@ -130,8 +130,10 @@ def reassign_staff(
         raise HTTPException(404, "Team not found")
 
     role = "mo"
-    cons_grades = {"Senior Consultant", "Consultant", "Associate Consultant"}
-    if staff.grade.value in cons_grades:
+    rank_val = staff.rank if isinstance(staff.rank, str) else staff.rank.value
+    cons_ranks = db.query(RankConfig).filter(RankConfig.is_consultant_tier.is_(True)).all()
+    cons_rank_names = {r.name for r in cons_ranks}
+    if rank_val in cons_rank_names:
         role = "consultant"
 
     db.query(TeamAssignment).filter(

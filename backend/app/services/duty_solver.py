@@ -15,9 +15,7 @@ from datetime import date
 from dataclasses import dataclass, field
 from collections import defaultdict
 
-from ..models import (
-    DutyType, Session, Grade,
-)
+from ..models import DutyType, Session
 
 
 @dataclass
@@ -44,7 +42,7 @@ class ClinicSlot:
 class PersonInfo:
     id: int
     name: str
-    grade: str = ""
+    rank: str = ""
     team_id: int | None = None
     supervisor_id: int | None = None
 
@@ -78,6 +76,11 @@ class DutySolverInput:
     leave_dates: dict[int, set[date]]
     call_assigned: dict[date, set[int]]
     postcall_dates: dict[date, set[int]]
+    postcall_12pm_dates: dict[date, set[int]] = field(default_factory=dict)
+    postcall_5pm_dates: dict[date, set[int]] = field(default_factory=dict)
+    call_only_dates: dict[date, set[int]] = field(default_factory=dict)
+    ssr_rank_name: str = "Senior Staff Registrar"
+    sr_rank_name: str = "Senior Resident"
 
 
 @dataclass
@@ -100,19 +103,45 @@ class FairnessTracker:
         return 3.0 * (1.0 - self.mopd_sessions[pid] / max(max_m, 1))
 
 
-def _available_mos(
+def _available_mos_am(
     day: DayDutyConfig,
     mo_pool: list[PersonInfo],
     leave_dates: dict[int, set[date]],
     call_assigned: dict[date, set[int]],
     postcall_dates: dict[date, set[int]],
+    call_only_dates: dict[date, set[int]],
 ) -> list[PersonInfo]:
     on_call = call_assigned.get(day.d, set())
     post_call = postcall_dates.get(day.d, set())
+    call_only = call_only_dates.get(day.d, set())
     return [
         p for p in mo_pool
         if p.id not in on_call
         and p.id not in post_call
+        and p.id not in call_only
+        and day.d not in leave_dates.get(p.id, set())
+    ]
+
+
+def _available_mos_pm(
+    day: DayDutyConfig,
+    mo_pool: list[PersonInfo],
+    leave_dates: dict[int, set[date]],
+    call_assigned: dict[date, set[int]],
+    postcall_dates: dict[date, set[int]],
+    postcall_12pm_dates: dict[date, set[int]],
+    call_only_dates: dict[date, set[int]],
+) -> list[PersonInfo]:
+    on_call = call_assigned.get(day.d, set())
+    post_call = postcall_dates.get(day.d, set())
+    post_call_12 = postcall_12pm_dates.get(day.d, set())
+    call_only = call_only_dates.get(day.d, set())
+    return [
+        p for p in mo_pool
+        if p.id not in on_call
+        and p.id not in post_call
+        and p.id not in post_call_12
+        and p.id not in call_only
         and day.d not in leave_dates.get(p.id, set())
     ]
 
@@ -125,9 +154,10 @@ def _assign_session(
     assigned: set[int],
     fairness: FairnessTracker,
     results: list[DutyResult],
+    ssr_rank: str,
+    sr_rank: str,
 ) -> None:
     """Assign clinics (NC/Sup/MOPD/CAT-A) for one session."""
-    # Consultant clinics first (NC needs multiple MOs, Sup needs 1)
     for clinic in clinics:
         if clinic.mos_required <= 0:
             continue
@@ -136,7 +166,7 @@ def _assign_session(
 
         candidates = [
             p for p in pool
-            if p.id not in assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
+            if p.id not in assigned and p.rank != ssr_rank
         ]
         if not candidates:
             continue
@@ -162,15 +192,14 @@ def _assign_session(
             assigned.add(chosen.id)
             fairness.clinic_sessions[chosen.id] += 1
 
-    # MOPD slots (SSRs and SRs excluded)
     mopd_clinics = [c for c in clinics if c.clinic_type == "MOPD" and c.mos_required > 0]
     mopd_total = sum(c.mos_required for c in mopd_clinics)
     if mopd_total > 0:
         mopd_pool = [
             p for p in pool
             if p.id not in assigned
-            and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
-            and p.grade != Grade.SENIOR_RESIDENT.value
+            and p.rank != ssr_rank
+            and p.rank != sr_rank
         ]
         mopd_scored = sorted(
             mopd_pool,
@@ -192,6 +221,9 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
     results: list[DutyResult] = []
     fairness = FairnessTracker()
 
+    ssr_rank = inp.ssr_rank_name
+    sr_rank = inp.sr_rank_name
+
     for pid in [p.id for p in inp.mo_pool]:
         fairness.ot_days[pid] = 0
         fairness.clinic_sessions[pid] = 0
@@ -202,11 +234,12 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
         if day.is_weekend or day.is_ph:
             continue
 
-        available = _available_mos(
+        available_am = _available_mos_am(
             day, inp.mo_pool, inp.leave_dates,
             inp.call_assigned, inp.postcall_dates,
+            inp.call_only_dates,
         )
-        if not available:
+        if not available_am:
             continue
 
         am_assigned: set[int] = set()
@@ -217,7 +250,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
         for ot in day.ot_slots:
             if ot.assistants_needed <= 0:
                 continue
-            pool = [p for p in available if p.id not in full_day_assigned]
+            pool = [p for p in available_am if p.id not in full_day_assigned]
             if not pool:
                 break
 
@@ -229,7 +262,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                     fairness.ot_score(p.id)
                     + (5.0 if ot.consultant_id and p.supervisor_id == ot.consultant_id else 0.0)
                     + (3.0 if ot.consultant_team_id and p.team_id == ot.consultant_team_id else 0.0)
-                    + (3.0 if p.grade == Grade.SENIOR_RESIDENT.value else 0.0)
+                    + (3.0 if p.rank == sr_rank else 0.0)
                 ),
                 reverse=True,
             )
@@ -247,13 +280,12 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 fairness.ot_days[chosen.id] += 1
 
         # ── 2. AM session ───────────────────────────────────────────
-        am_pool = [p for p in available if p.id not in am_assigned]
+        am_pool = [p for p in available_am if p.id not in am_assigned]
         _assign_session(
             day, Session.AM, day.am_clinics, am_pool,
-            am_assigned, fairness, results,
+            am_assigned, fairness, results, ssr_rank, sr_rank,
         )
 
-        # Admin AM
         for p in am_pool:
             if p.id not in am_assigned:
                 results.append(DutyResult(
@@ -264,13 +296,17 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 fairness.admin_sessions[p.id] += 1
 
         # ── 3. PM session ───────────────────────────────────────────
-        pm_pool = [p for p in available if p.id not in pm_assigned]
+        available_pm = _available_mos_pm(
+            day, inp.mo_pool, inp.leave_dates,
+            inp.call_assigned, inp.postcall_dates,
+            inp.postcall_12pm_dates, inp.call_only_dates,
+        )
+        pm_pool = [p for p in available_pm if p.id not in pm_assigned]
         _assign_session(
             day, Session.PM, day.pm_clinics, pm_pool,
-            pm_assigned, fairness, results,
+            pm_assigned, fairness, results, ssr_rank, sr_rank,
         )
 
-        # Admin PM
         for p in pm_pool:
             if p.id not in pm_assigned:
                 results.append(DutyResult(

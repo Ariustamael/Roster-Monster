@@ -69,6 +69,7 @@ export default function Layout() {
           <NavLink to="/teams">Teams</NavLink>
           <NavLink to="/resources">Resources</NavLink>
           <NavLink to="/rules">Rules</NavLink>
+          <NavLink to="/config">Config</NavLink>
         </nav>
       </aside>
       <main className="main">

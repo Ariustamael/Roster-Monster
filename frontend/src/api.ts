@@ -34,15 +34,15 @@ export const api = {
   getTeams: () => request<import("./types").Team[]>("/teams"),
   getConfigs: () => request<import("./types").MonthlyConfig[]>("/config"),
 
-  createStaff: (name: string, grade: string, active = true) =>
+  createStaff: (name: string, rank: string, active = true) =>
     request<import("./types").Staff>("/staff", {
       method: "POST",
-      body: JSON.stringify({ name, grade, active, has_admin_role: false }),
+      body: JSON.stringify({ name, rank, active, has_admin_role: false }),
     }),
-  updateStaff: (id: number, name: string, grade: string, active: boolean) =>
+  updateStaff: (id: number, name: string, rank: string, active: boolean) =>
     request<import("./types").Staff>(`/staff/${id}`, {
       method: "PUT",
-      body: JSON.stringify({ name, grade, active, has_admin_role: false }),
+      body: JSON.stringify({ name, rank, active, has_admin_role: false }),
     }),
   createConfig: (year: number, month: number) =>
     request<import("./types").MonthlyConfig>("/config", {
@@ -205,4 +205,24 @@ export const api = {
     request<import("./types").EveningOTDate[]>(`/config/${configId}/evening-ot-dates`),
   setEveningOTDates: (configId: number, entries: { date: string }[]) =>
     request<{ ok: boolean }>(`/config/${configId}/evening-ot-dates`, { method: "POST", body: JSON.stringify(entries) }),
+
+  // Rank Config
+  getRanks: () =>
+    request<import("./types").RankConfig[]>("/config/ranks"),
+  createRank: (data: Omit<import("./types").RankConfig, "id">) =>
+    request<import("./types").RankConfig>("/config/ranks", { method: "POST", body: JSON.stringify(data) }),
+  updateRank: (id: number, data: Omit<import("./types").RankConfig, "id">) =>
+    request<import("./types").RankConfig>(`/config/ranks/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteRank: (id: number) =>
+    request<{ ok: boolean }>(`/config/ranks/${id}`, { method: "DELETE" }),
+
+  // Call Type Config
+  getCallTypes: () =>
+    request<import("./types").CallTypeConfig[]>("/config/call-types"),
+  createCallType: (data: Omit<import("./types").CallTypeConfig, "id">) =>
+    request<import("./types").CallTypeConfig>("/config/call-types", { method: "POST", body: JSON.stringify(data) }),
+  updateCallType: (id: number, data: Omit<import("./types").CallTypeConfig, "id">) =>
+    request<import("./types").CallTypeConfig>(`/config/call-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteCallType: (id: number) =>
+    request<{ ok: boolean }>(`/config/call-types/${id}`, { method: "DELETE" }),
 };

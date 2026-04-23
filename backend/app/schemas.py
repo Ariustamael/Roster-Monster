@@ -1,14 +1,14 @@
 from pydantic import BaseModel
 from datetime import date
 from typing import Optional
-from .models import Grade, CallType, PreferenceType, RegistrarShift, RegistrarDutyType, DutyType, Session
+from .models import PreferenceType, RegistrarShift, RegistrarDutyType, DutyType, Session
 
 
 # ── Staff ────────────────────────────────────────────────────────────────
 
 class StaffCreate(BaseModel):
     name: str
-    grade: Grade
+    rank: str
     active: bool = True
     has_admin_role: bool = False
 
@@ -16,7 +16,7 @@ class StaffCreate(BaseModel):
 class StaffOut(BaseModel):
     id: int
     name: str
-    grade: Grade
+    rank: str
     active: bool
     has_admin_role: bool
     team_name: Optional[str] = None
@@ -209,7 +209,7 @@ class CallAssignmentOut(BaseModel):
     date: date
     staff_id: int
     staff_name: str
-    call_type: CallType
+    call_type: str
     is_manual_override: bool
 
     model_config = {"from_attributes": True}
@@ -217,7 +217,7 @@ class CallAssignmentOut(BaseModel):
 
 class ManualOverrideCreate(BaseModel):
     date: date
-    call_type: CallType
+    call_type: str
     staff_id: int
 
 
@@ -229,11 +229,15 @@ class DayRoster(BaseModel):
     is_stepdown: bool
     consultant_oncall: Optional[str] = None
     ac_oncall: Optional[str] = None
-    mo1: Optional[str] = None
-    mo2: Optional[str] = None
-    mo3: Optional[str] = None
-    mo4: Optional[str] = None
-    mo5: Optional[str] = None
+    call_slots: dict[str, Optional[str]] = {}
+
+
+class FairnessStats(BaseModel):
+    total_24h: int = 0
+    total_all: int = 0
+    per_type: dict[str, int] = {}
+    weekend_ph: int = 0
+    difficulty_points: int = 0
 
 
 class RosterResponse(BaseModel):
@@ -242,6 +246,7 @@ class RosterResponse(BaseModel):
     days: list[DayRoster]
     violations: list[str]
     fairness: dict[str, dict]
+    call_type_columns: list[str] = []
 
 
 # ── OT Template ──────────────────────────────────────────────────────────
@@ -321,11 +326,7 @@ class DayDutyRoster(BaseModel):
     is_ph: bool
     consultant_oncall: Optional[str] = None
     ac_oncall: Optional[str] = None
-    mo1: Optional[str] = None
-    mo2: Optional[str] = None
-    mo3: Optional[str] = None
-    mo4: Optional[str] = None
-    mo5: Optional[str] = None
+    call_slots: dict[str, Optional[str]] = {}
     post_call: list[str]
     ot_assignments: list[DutyAssignmentOut]
     eot_assignments: list[DutyAssignmentOut]
@@ -340,3 +341,62 @@ class DutyRosterResponse(BaseModel):
     month: int
     days: list[DayDutyRoster]
     duty_stats: dict[str, dict]
+    call_type_columns: list[str] = []
+
+
+# ── Rank Config ──────────────────────────────────────────────────────────
+
+class RankConfigCreate(BaseModel):
+    name: str
+    abbreviation: str
+    display_order: int = 0
+    is_call_eligible: bool = False
+    is_duty_eligible: bool = False
+    is_consultant_tier: bool = False
+    is_active: bool = True
+
+
+class RankConfigOut(BaseModel):
+    id: int
+    name: str
+    abbreviation: str
+    display_order: int
+    is_call_eligible: bool
+    is_duty_eligible: bool
+    is_consultant_tier: bool
+    is_active: bool
+
+    model_config = {"from_attributes": True}
+
+
+# ── Call Type Config ─────────────────────────────────────────────────────
+
+class CallTypeConfigCreate(BaseModel):
+    name: str
+    display_order: int = 0
+    is_overnight: bool = False
+    post_call_type: str = "none"
+    max_consecutive_days: int = 1
+    min_gap_days: int = 2
+    difficulty_points: int = 1
+    counts_towards_fairness: bool = True
+    applicable_days: str = "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"
+    is_active: bool = True
+    eligible_rank_ids: list[int] = []
+
+
+class CallTypeConfigOut(BaseModel):
+    id: int
+    name: str
+    display_order: int
+    is_overnight: bool
+    post_call_type: str
+    max_consecutive_days: int
+    min_gap_days: int
+    difficulty_points: int
+    counts_towards_fairness: bool
+    applicable_days: str
+    is_active: bool
+    eligible_rank_ids: list[int] = []
+
+    model_config = {"from_attributes": True}

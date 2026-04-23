@@ -7,11 +7,11 @@ export default function RulesView() {
 
       <div className="rules-page">
         <section className="rules-section">
-          <h3>Staff Grades</h3>
+          <h3>Staff Ranks</h3>
           <table className="rules-table">
             <thead>
               <tr>
-                <th>Grade</th>
+                <th>Rank</th>
                 <th>Abbreviation</th>
                 <th>Description</th>
               </tr>
@@ -41,7 +41,7 @@ export default function RulesView() {
           </div>
 
           <div className="rule">
-            <div className="rule-title">Eligible grades for MO call</div>
+            <div className="rule-title">Eligible ranks for MO call</div>
             <div className="rule-body">
               Only Senior Medical Officers and Medical Officers are eligible for MO1-MO5 call assignments.
               Senior Residents, SSRs, and consultants are not in the MO call pool.
@@ -182,7 +182,7 @@ export default function RulesView() {
           <h3>Daytime Duty Roster</h3>
 
           <div className="rule">
-            <div className="rule-title">Eligible grades</div>
+            <div className="rule-title">Eligible ranks</div>
             <div className="rule-body">
               Senior Staff Registrars, Senior Residents, and Medical Officers are in the daytime duty pool.
               Consultants, Senior Consultants, and Associate Consultants are not allocated daytime duties (they run OT lists and clinics as supervisors).
@@ -224,7 +224,7 @@ export default function RulesView() {
         </section>
 
         <section className="rules-section">
-          <h3>Grade-Specific Duty Constraints</h3>
+          <h3>Rank-Specific Duty Constraints</h3>
 
           <div className="rule">
             <div className="rule-title">Senior Staff Registrar (SSR)</div>
@@ -339,7 +339,7 @@ export default function RulesView() {
           <h3>Registrar Duties (R1 / R2 / EOT)</h3>
 
           <div className="rule">
-            <div className="rule-title">Eligible grades</div>
+            <div className="rule-title">Eligible ranks</div>
             <div className="rule-body">
               Both Senior Staff Registrars and Senior Residents can be assigned to R1, R2, and EOT registrar duties.
               These are managed separately from the MO call roster and daytime duty roster.

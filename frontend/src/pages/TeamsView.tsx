@@ -2,8 +2,8 @@ import { useEffect, useState, type DragEvent } from "react";
 import { api } from "../api";
 import type { Staff, Team, TeamAssignment } from "../types";
 
-const TRAINEE_GRADES = ["Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer"];
-const CONS_GRADES = ["Senior Consultant", "Consultant", "Associate Consultant"];
+const TRAINEE_RANKS = ["Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer"];
+const CONS_RANKS = ["Senior Consultant", "Consultant", "Associate Consultant"];
 
 export default function TeamsView() {
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -29,8 +29,8 @@ export default function TeamsView() {
 
   useEffect(() => { reload(); }, []);
 
-  const moStaff = staff.filter((s) => TRAINEE_GRADES.includes(s.grade));
-  const consStaff = staff.filter((s) => CONS_GRADES.includes(s.grade));
+  const moStaff = staff.filter((s) => TRAINEE_RANKS.includes(s.rank));
+  const consStaff = staff.filter((s) => CONS_RANKS.includes(s.rank));
 
   function getTeamConsultants(teamId: number): Staff[] {
     const consIds = assignments
@@ -60,10 +60,10 @@ export default function TeamsView() {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  function onDragStart(e: DragEvent, staffId: number, grade: string) {
+  function onDragStart(e: DragEvent, staffId: number, rank: string) {
     e.dataTransfer.setData("text/plain", String(staffId));
     setDragId(staffId);
-    setDragGrade(grade);
+    setDragGrade(rank);
   }
 
   function onDragEnd() {
@@ -96,7 +96,7 @@ export default function TeamsView() {
     const staffId = Number(e.dataTransfer.getData("text/plain"));
     if (!staffId) return;
     const droppedStaff = staff.find((s) => s.id === staffId);
-    if (!droppedStaff || !TRAINEE_GRADES.includes(droppedStaff.grade)) return;
+    if (!droppedStaff || !TRAINEE_RANKS.includes(droppedStaff.rank)) return;
     setDragId(null);
     try {
       await api.reassignStaff(staffId, teamId, consultantId);
@@ -238,26 +238,26 @@ export default function TeamsView() {
                   return (
                     <div key={cons.id} className="consultant-section">
                       <div
-                        className={`team-card consultant-card ${dragId !== null && dragGrade !== "" && TRAINEE_GRADES.includes(dragGrade) ? "drop-target" : ""}`}
+                        className={`team-card consultant-card ${dragId !== null && dragGrade !== "" && TRAINEE_RANKS.includes(dragGrade) ? "drop-target" : ""}`}
                         draggable
-                        onDragStart={(e) => onDragStart(e, cons.id, cons.grade)}
+                        onDragStart={(e) => onDragStart(e, cons.id, cons.rank)}
                         onDragEnd={onDragEnd}
                         onDragOver={onDragOver}
                         onDrop={(e) => onDropConsultant(e, cons.id, team.id)}
                       >
                         <span className="card-name">{cons.name}</span>
-                        <span className="card-grade">{cons.grade}</span>
+                        <span className="card-grade">{cons.rank}</span>
                       </div>
                       {taggedMOs.map((mo) => (
                         <div
                           key={mo.id}
                           className={`team-card tagged-mo ${dragId === mo.id ? "dragging" : ""}`}
                           draggable
-                          onDragStart={(e) => onDragStart(e, mo.id, mo.grade)}
+                          onDragStart={(e) => onDragStart(e, mo.id, mo.rank)}
                           onDragEnd={onDragEnd}
                         >
                           <span className="card-name">{mo.name}</span>
-                          <span className="card-grade">{mo.grade}</span>
+                          <span className="card-grade">{mo.rank}</span>
                         </div>
                       ))}
                     </div>
@@ -276,11 +276,11 @@ export default function TeamsView() {
                         key={mo.id}
                         className={`team-card ${dragId === mo.id ? "dragging" : ""}`}
                         draggable
-                        onDragStart={(e) => onDragStart(e, mo.id, mo.grade)}
+                        onDragStart={(e) => onDragStart(e, mo.id, mo.rank)}
                         onDragEnd={onDragEnd}
                       >
                         <span className="card-name">{mo.name}</span>
-                        <span className="card-grade">{mo.grade}</span>
+                        <span className="card-grade">{mo.rank}</span>
                       </div>
                     ))}
                   </div>
@@ -308,11 +308,11 @@ export default function TeamsView() {
                   key={s.id}
                   className={`team-card ${dragId === s.id ? "dragging" : ""}`}
                   draggable
-                  onDragStart={(e) => onDragStart(e, s.id, s.grade)}
+                  onDragStart={(e) => onDragStart(e, s.id, s.rank)}
                   onDragEnd={onDragEnd}
                 >
                   <span className="card-name">{s.name}</span>
-                  <span className="card-grade">{s.grade}</span>
+                  <span className="card-grade">{s.rank}</span>
                 </div>
               ))}
             </div>

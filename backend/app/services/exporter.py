@@ -15,6 +15,7 @@ from openpyxl.utils import get_column_letter
 from ..models import (
     CallAssignment, DutyAssignment, Staff,
     ConsultantOnCall, ACOnCall, DutyType,
+    CallTypeConfig, RankConfig,
 )
 
 
@@ -25,7 +26,6 @@ TITLE_FONT = Font(bold=True, size=14)
 HEADER_FILL = PatternFill("solid", fgColor="D9E1F2")
 WEEKEND_FILL = PatternFill("solid", fgColor="FFF2CC")
 PH_FILL = PatternFill("solid", fgColor="FCE4EC")
-OT_FILL = PatternFill("solid", fgColor="DBEAFE")
 CLINIC_FILL = PatternFill("solid", fgColor="D1FAE5")
 MOPD_FILL = PatternFill("solid", fgColor="FEF9C3")
 THIN_BORDER = Border(
@@ -56,6 +56,21 @@ def _style_data_cell(ws, row, col, is_weekend=False, is_ph=False):
         cell.fill = WEEKEND_FILL
 
 
+def _get_call_type_columns(db) -> list[str]:
+    configs = (
+        db.query(CallTypeConfig)
+        .filter(CallTypeConfig.is_active.is_(True))
+        .order_by(CallTypeConfig.display_order)
+        .all()
+    )
+    return [ct.name for ct in configs]
+
+
+def _get_call_eligible_rank_names(db) -> set[str]:
+    ranks = db.query(RankConfig).filter(RankConfig.is_call_eligible.is_(True)).all()
+    return {r.name for r in ranks}
+
+
 # ── Original Format ──────────────────────────────────────────────────────
 
 def export_original(config, db) -> BytesIO:
@@ -78,12 +93,15 @@ def _build_call_sheet(wb, config, db, year, month, num_days, month_name):
     ws = wb.active
     ws.title = "Call Roster"
 
-    ws.merge_cells("A1:I1")
+    ct_columns = _get_call_type_columns(db)
+    total_cols = 4 + len(ct_columns)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
     ws["A1"] = f"Department of Orthopaedic Surgery - {month_name}'{str(year)[2:]}"
     ws["A1"].font = TITLE_FONT
     ws["A1"].alignment = CENTER
 
-    headers = ["Date", "Day", "Consultant", "AC", "MO1", "MO2", "MO3", "MO4", "MO5"]
+    headers = ["Date", "Day", "Consultant", "AC"] + ct_columns
     for col, h in enumerate(headers, 1):
         ws.cell(row=3, column=col, value=h)
     _style_header_row(ws, 3, len(headers))
@@ -98,7 +116,7 @@ def _build_call_sheet(wb, config, db, year, month, num_days, month_name):
         ds = c.date.isoformat()
         if ds not in call_map:
             call_map[ds] = {}
-        call_map[ds][c.call_type.value] = c.staff.name
+        call_map[ds][c.call_type] = c.staff.name
 
     cons_oncall = {
         r.date.isoformat(): r.consultant.name
@@ -132,17 +150,12 @@ def _build_call_sheet(wb, config, db, year, month, num_days, month_name):
             d.strftime("%a"),
             cons_oncall.get(ds, ""),
             ac_oncall.get(ds, ""),
-            day_calls.get("MO1", ""),
-            day_calls.get("MO2", ""),
-            day_calls.get("MO3", ""),
-            day_calls.get("MO4", ""),
-            day_calls.get("MO5", ""),
-        ]
+        ] + [day_calls.get(ct, "") for ct in ct_columns]
         for col, val in enumerate(values, 1):
             ws.cell(row=row, column=col, value=val)
             _style_data_cell(ws, row, col, is_wknd, is_ph)
 
-    for col in range(1, 10):
+    for col in range(1, total_cols + 1):
         ws.column_dimensions[get_column_letter(col)].width = 14
 
 
@@ -236,7 +249,7 @@ def _build_clinic_sheet(wb, config, db, year, month, num_days, month_name):
         db.query(DutyAssignment)
         .filter(
             DutyAssignment.config_id == config.id,
-            DutyAssignment.duty_type.in_([DutyType.SUPERVISED_CLINIC, DutyType.MOPD]),
+            DutyAssignment.duty_type.in_([DutyType.CLINIC, DutyType.MOPD]),
         )
         .order_by(DutyAssignment.date, DutyAssignment.session, DutyAssignment.duty_type)
         .all()
@@ -266,7 +279,7 @@ def _build_clinic_sheet(wb, config, db, year, month, num_days, month_name):
         for col, val in enumerate(values, 1):
             ws.cell(row=row, column=col, value=val)
             _style_data_cell(ws, row, col, is_wknd, is_ph)
-            if d.duty_type == DutyType.SUPERVISED_CLINIC:
+            if d.duty_type == DutyType.CLINIC:
                 ws.cell(row=row, column=col).fill = CLINIC_FILL
             elif d.duty_type == DutyType.MOPD:
                 ws.cell(row=row, column=col).fill = MOPD_FILL
@@ -298,19 +311,20 @@ def _build_daily_overview(wb, config, db, year, month, num_days, month_name):
     ws = wb.active
     ws.title = "Daily Overview"
 
-    ws.merge_cells("A1:L1")
+    ct_columns = _get_call_type_columns(db)
+    fixed_cols = ["Date", "Day", "Cons On-Call", "AC"]
+    extra_cols = ["OT Staff", "Sup Clinic", "MOPD"]
+    all_headers = fixed_cols + ct_columns + extra_cols
+    total_cols = len(all_headers)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
     ws["A1"] = f"Roster Overview - {month_name} {year}"
     ws["A1"].font = TITLE_FONT
     ws["A1"].alignment = CENTER
 
-    headers = [
-        "Date", "Day", "Cons On-Call", "AC",
-        "MO1", "MO2", "MO3", "MO4", "MO5",
-        "OT Staff", "Sup Clinic", "MOPD",
-    ]
-    for col, h in enumerate(headers, 1):
+    for col, h in enumerate(all_headers, 1):
         ws.cell(row=3, column=col, value=h)
-    _style_header_row(ws, 3, len(headers))
+    _style_header_row(ws, 3, total_cols)
 
     calls = db.query(CallAssignment).filter(CallAssignment.config_id == config.id).all()
     call_map: dict[str, dict[str, str]] = {}
@@ -318,7 +332,7 @@ def _build_daily_overview(wb, config, db, year, month, num_days, month_name):
         ds = c.date.isoformat()
         if ds not in call_map:
             call_map[ds] = {}
-        call_map[ds][c.call_type.value] = c.staff.name
+        call_map[ds][c.call_type] = c.staff.name
 
     duties = db.query(DutyAssignment).filter(DutyAssignment.config_id == config.id).all()
     ot_map: dict[str, list[str]] = {}
@@ -328,7 +342,7 @@ def _build_daily_overview(wb, config, db, year, month, num_days, month_name):
         ds = d.date.isoformat()
         if d.duty_type == DutyType.OT:
             ot_map.setdefault(ds, []).append(d.staff.name)
-        elif d.duty_type == DutyType.SUPERVISED_CLINIC:
+        elif d.duty_type == DutyType.CLINIC:
             sup_map.setdefault(ds, []).append(d.staff.name)
         elif d.duty_type == DutyType.MOPD:
             mopd_map.setdefault(ds, []).append(d.staff.name)
@@ -361,11 +375,7 @@ def _build_daily_overview(wb, config, db, year, month, num_days, month_name):
             d.strftime("%a") + (" (PH)" if is_ph else ""),
             cons_oncall.get(ds, ""),
             ac_oncall.get(ds, ""),
-            day_calls.get("MO1", ""),
-            day_calls.get("MO2", ""),
-            day_calls.get("MO3", ""),
-            day_calls.get("MO4", ""),
-            day_calls.get("MO5", ""),
+        ] + [day_calls.get(ct, "") for ct in ct_columns] + [
             ", ".join(ot_map.get(ds, [])),
             ", ".join(sup_map.get(ds, [])),
             ", ".join(mopd_map.get(ds, [])),
@@ -373,12 +383,13 @@ def _build_daily_overview(wb, config, db, year, month, num_days, month_name):
         for col, val in enumerate(values, 1):
             cell = ws.cell(row=row, column=col, value=val)
             _style_data_cell(ws, row, col, is_wknd, is_ph)
-            if col >= 10:
+            if col > len(fixed_cols) + len(ct_columns):
                 cell.alignment = WRAP
 
-    widths = [5, 8, 14, 10, 14, 14, 14, 12, 12, 30, 20, 30]
-    for col, w in enumerate(widths, 1):
-        ws.column_dimensions[get_column_letter(col)].width = w
+    for col in range(1, total_cols + 1):
+        ws.column_dimensions[get_column_letter(col)].width = 14
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 8
 
 
 def _build_person_summary(wb, config, db, year, month, num_days, month_name):
@@ -388,15 +399,16 @@ def _build_person_summary(wb, config, db, year, month, num_days, month_name):
     ws["A1"] = f"Per-Person Summary - {month_name} {year}"
     ws["A1"].font = TITLE_FONT
 
-    headers = ["Name", "Grade", "Team", "Call Dates", "OT Dates", "Clinic Dates", "MOPD Dates", "Admin Dates"]
+    headers = ["Name", "Rank", "Team", "Call Dates", "OT Dates", "Clinic Dates", "MOPD Dates", "Admin Dates"]
     for col, h in enumerate(headers, 1):
         ws.cell(row=3, column=col, value=h)
     _style_header_row(ws, 3, len(headers))
 
-    from ..models import MO_GRADES, TeamAssignment, Team
+    from ..models import TeamAssignment, Team
+    call_eligible = _get_call_eligible_rank_names(db)
     mo_staff = (
         db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in MO_GRADES]))
+        .filter(Staff.active.is_(True), Staff.rank.in_(list(call_eligible)))
         .order_by(Staff.name)
         .all()
     )
@@ -404,14 +416,14 @@ def _build_person_summary(wb, config, db, year, month, num_days, month_name):
     calls = db.query(CallAssignment).filter(CallAssignment.config_id == config.id).all()
     call_dates: dict[int, list[str]] = {}
     for c in calls:
-        call_dates.setdefault(c.staff_id, []).append(f"{c.date.day}({c.call_type.value})")
+        call_dates.setdefault(c.staff_id, []).append(f"{c.date.day}({c.call_type})")
 
     duties = db.query(DutyAssignment).filter(DutyAssignment.config_id == config.id).all()
     duty_dates: dict[int, dict[str, list[int]]] = {}
     for d in duties:
         pid = d.staff_id
         if pid not in duty_dates:
-            duty_dates[pid] = {"OT": [], "Supervised Clinic": [], "MOPD": [], "Admin": []}
+            duty_dates[pid] = {"OT": [], "Clinic": [], "MOPD": [], "Admin": []}
         dtype = d.duty_type.value
         if dtype in duty_dates[pid]:
             duty_dates[pid][dtype].append(d.date.day)
@@ -427,15 +439,15 @@ def _build_person_summary(wb, config, db, year, month, num_days, month_name):
             team_name = team.name if team else ""
 
         cd = sorted(call_dates.get(s.id, []), key=lambda x: int(x.split("(")[0]))
-        dd = duty_dates.get(s.id, {"OT": [], "Supervised Clinic": [], "MOPD": [], "Admin": []})
+        dd = duty_dates.get(s.id, {"OT": [], "Clinic": [], "MOPD": [], "Admin": []})
 
         values = [
             s.name,
-            s.grade.value if hasattr(s.grade, 'value') else s.grade,
+            s.rank,
             team_name,
             ", ".join(cd),
             ", ".join(str(d) for d in sorted(set(dd["OT"]))),
-            ", ".join(str(d) for d in sorted(set(dd["Supervised Clinic"]))),
+            ", ".join(str(d) for d in sorted(set(dd["Clinic"]))),
             ", ".join(str(d) for d in sorted(set(dd["MOPD"]))),
             ", ".join(str(d) for d in sorted(set(dd["Admin"]))),
         ]
@@ -453,32 +465,35 @@ def _build_person_summary(wb, config, db, year, month, num_days, month_name):
 def _build_fairness_sheet(wb, config, db, year, month, month_name):
     ws = wb.create_sheet("Fairness")
 
-    ws.merge_cells("A1:H1")
+    ct_columns = _get_call_type_columns(db)
+    headers = ["Name", "Total Calls"] + ct_columns + ["Weekend/PH", "OT Days", "Clinic", "MOPD", "Admin"]
+    total_cols = len(headers)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=total_cols)
     ws["A1"] = f"Fairness Statistics - {month_name} {year}"
     ws["A1"].font = TITLE_FONT
 
-    headers = ["Name", "Total Calls", "MO1", "MO2", "MO3", "MO4", "MO5", "Weekend/PH",
-               "OT Days", "Clinic", "MOPD", "Admin"]
     for col, h in enumerate(headers, 1):
         ws.cell(row=3, column=col, value=h)
-    _style_header_row(ws, 3, len(headers))
+    _style_header_row(ws, 3, total_cols)
 
-    from ..models import MO_GRADES
     from collections import defaultdict
 
+    call_eligible = _get_call_eligible_rank_names(db)
     mo_staff = (
         db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in MO_GRADES]))
+        .filter(Staff.active.is_(True), Staff.rank.in_(list(call_eligible)))
         .order_by(Staff.name)
         .all()
     )
 
     call_stats: dict[int, dict] = defaultdict(lambda: {
-        "total": 0, "MO1": 0, "MO2": 0, "MO3": 0, "MO4": 0, "MO5": 0, "weekend": 0,
+        "total": 0, "weekend": 0, **{ct: 0 for ct in ct_columns},
     })
     for c in db.query(CallAssignment).filter(CallAssignment.config_id == config.id).all():
         call_stats[c.staff_id]["total"] += 1
-        call_stats[c.staff_id][c.call_type.value] += 1
+        if c.call_type in call_stats[c.staff_id]:
+            call_stats[c.staff_id][c.call_type] += 1
         if c.date.weekday() >= 5:
             call_stats[c.staff_id]["weekend"] += 1
 
@@ -488,7 +503,7 @@ def _build_fairness_sheet(wb, config, db, year, month, month_name):
     for d in db.query(DutyAssignment).filter(DutyAssignment.config_id == config.id).all():
         if d.duty_type == DutyType.OT:
             duty_stats[d.staff_id]["ot"] += 1
-        elif d.duty_type == DutyType.SUPERVISED_CLINIC:
+        elif d.duty_type == DutyType.CLINIC:
             duty_stats[d.staff_id]["clinic"] += 1
         elif d.duty_type == DutyType.MOPD:
             duty_stats[d.staff_id]["mopd"] += 1
@@ -503,7 +518,8 @@ def _build_fairness_sheet(wb, config, db, year, month, month_name):
             continue
         values = [
             s.name,
-            cs["total"], cs["MO1"], cs["MO2"], cs["MO3"], cs["MO4"], cs["MO5"],
+            cs["total"],
+        ] + [cs.get(ct, 0) for ct in ct_columns] + [
             cs["weekend"],
             ds["ot"], ds["clinic"], ds["mopd"], ds["admin"],
         ]
@@ -513,6 +529,6 @@ def _build_fairness_sheet(wb, config, db, year, month, month_name):
             ws.cell(row=row, column=col).alignment = CENTER
         row += 1
 
-    for col in range(1, 13):
+    for col in range(1, total_cols + 1):
         ws.column_dimensions[get_column_letter(col)].width = 12
     ws.column_dimensions["A"].width = 16

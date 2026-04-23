@@ -87,6 +87,97 @@ def _migrate(engine):
                 """))
                 conn.execute(text("DROP TABLE _ot_template_old"))
 
+    # ── Phase 2: Rename grade → rank in staff table ─────────────────────
+    if "staff" in tables:
+        cols = {c["name"] for c in insp.get_columns("staff")}
+        if "grade" in cols and "rank" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE staff RENAME COLUMN grade TO rank"))
+
+    # ── Phase 2: Convert call_assignment.call_type from enum to varchar ──
+    if "call_assignment" in tables:
+        col_info = insp.get_columns("call_assignment")
+        ct_col = next((c for c in col_info if c["name"] == "call_type"), None)
+        if ct_col and str(ct_col.get("type", "")).upper().startswith("VARCHAR"):
+            pass  # already migrated
+        elif ct_col:
+            # SQLite stores enum as VARCHAR anyway, so this is a no-op in practice
+            pass
+
+    # ── Phase 2: Seed rank_config if table is new/empty ─────────────────
+    if "rank_config" in tables:
+        with engine.begin() as conn:
+            count = conn.execute(text("SELECT COUNT(*) FROM rank_config")).scalar()
+            if count == 0:
+                ranks = [
+                    ("Senior Consultant", "SC", 0, 0, 0, 1, 1),
+                    ("Consultant", "C", 1, 0, 0, 1, 1),
+                    ("Associate Consultant", "AC", 2, 0, 0, 1, 1),
+                    ("Senior Staff Registrar", "SSR", 3, 0, 1, 0, 1),
+                    ("Senior Resident", "SR", 4, 0, 1, 0, 1),
+                    ("Senior Medical Officer", "SMO", 5, 1, 1, 0, 1),
+                    ("Medical Officer", "MO", 6, 1, 1, 0, 1),
+                ]
+                for name, abbr, order, call_elig, duty_elig, cons_tier, active in ranks:
+                    conn.execute(text(
+                        "INSERT INTO rank_config (name, abbreviation, display_order, "
+                        "is_call_eligible, is_duty_eligible, is_consultant_tier, is_active) "
+                        "VALUES (:name, :abbr, :order, :call, :duty, :cons, :active)"
+                    ), {"name": name, "abbr": abbr, "order": order,
+                        "call": call_elig, "duty": duty_elig, "cons": cons_tier, "active": active})
+
+    # ── Phase 2: Seed call_type_config if table is new/empty ────────────
+    if "call_type_config" in tables:
+        with engine.begin() as conn:
+            count = conn.execute(text("SELECT COUNT(*) FROM call_type_config")).scalar()
+            if count == 0:
+                call_types = [
+                    ("MO1", 0, 1, "8am", 1, 2, 5, 1, "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"),
+                    ("MO2", 1, 1, "8am", 1, 2, 5, 1, "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"),
+                    ("MO3", 2, 0, "none", 1, 2, 3, 1, "Mon,Tue,Wed,Thu,Fri"),
+                    ("MO4", 3, 0, "none", 1, 0, 1, 0, "Mon,Tue,Wed,Thu,Fri"),
+                    ("MO5", 4, 0, "none", 1, 0, 1, 0, "Mon,Tue,Wed,Thu,Fri"),
+                ]
+                for name, order, overnight, pct, max_c, gap, diff, fairness, days in call_types:
+                    conn.execute(text(
+                        "INSERT INTO call_type_config (name, display_order, is_overnight, "
+                        "post_call_type, max_consecutive_days, min_gap_days, difficulty_points, "
+                        "counts_towards_fairness, applicable_days, is_active) "
+                        "VALUES (:name, :order, :overnight, :pct, :max_c, :gap, :diff, :fairness, :days, 1)"
+                    ), {"name": name, "order": order, "overnight": overnight, "pct": pct,
+                        "max_c": max_c, "gap": gap, "diff": diff, "fairness": fairness, "days": days})
+
+                # Seed eligible ranks for each call type
+                # MO1, MO2: SMO + MO
+                # MO3: SMO only (weekday referral)
+                # MO4, MO5: SMO + MO
+                smo_id = conn.execute(text(
+                    "SELECT id FROM rank_config WHERE abbreviation = 'SMO'"
+                )).scalar()
+                mo_id = conn.execute(text(
+                    "SELECT id FROM rank_config WHERE abbreviation = 'MO'"
+                )).scalar()
+                if smo_id and mo_id:
+                    for ct_name in ["MO1", "MO2", "MO4", "MO5"]:
+                        ct_id = conn.execute(text(
+                            "SELECT id FROM call_type_config WHERE name = :n"
+                        ), {"n": ct_name}).scalar()
+                        if ct_id:
+                            conn.execute(text(
+                                "INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"
+                            ), {"ct": ct_id, "r": smo_id})
+                            conn.execute(text(
+                                "INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"
+                            ), {"ct": ct_id, "r": mo_id})
+                    # MO3: SMO only
+                    mo3_id = conn.execute(text(
+                        "SELECT id FROM call_type_config WHERE name = 'MO3'"
+                    )).scalar()
+                    if mo3_id:
+                        conn.execute(text(
+                            "INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"
+                        ), {"ct": mo3_id, "r": smo_id})
+
 
 def init_db():
     Base.metadata.create_all(bind=engine)

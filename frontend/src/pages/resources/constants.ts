@@ -1,7 +1,7 @@
 export const DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
-export const CONS_GRADES = ["Senior Consultant", "Consultant", "Associate Consultant"];
-export const AC_GRADES = ["Associate Consultant"];
-export const REG_GRADES = ["Senior Staff Registrar", "Senior Resident"];
+export const CONS_RANKS = ["Senior Consultant", "Consultant", "Associate Consultant"];
+export const AC_RANKS = ["Associate Consultant"];
+export const REG_RANKS = ["Senior Staff Registrar", "Senior Resident"];
 
 export const COLOR_PRESETS = [
   "#dbeafe", "#bfdbfe", "#93c5fd",

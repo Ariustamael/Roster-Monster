@@ -1,32 +1,32 @@
 import { useState, useEffect } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { FairnessStats, DutyStats } from "../types";
+import type { FairnessStats, DutyStats, RosterResponse, DutyRosterResponse } from "../types";
 
 export default function FairnessView() {
   const { active } = useConfig();
-  const [callFairness, setCallFairness] = useState<Record<string, FairnessStats> | null>(null);
-  const [dutyStats, setDutyStats] = useState<Record<string, DutyStats> | null>(null);
+  const [callData, setCallData] = useState<RosterResponse | null>(null);
+  const [dutyData, setDutyData] = useState<DutyRosterResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<"calls" | "duties">("calls");
 
   const configId = active?.id ?? 0;
 
   useEffect(() => {
-    setCallFairness(null);
-    setDutyStats(null);
+    setCallData(null);
+    setDutyData(null);
   }, [active?.id]);
 
   async function loadAll() {
     if (!configId) return;
     setLoading(true);
     try {
-      const [callData, dutyData] = await Promise.all([
+      const [cd, dd] = await Promise.all([
         api.generateCallRoster(configId),
         api.generateDutyRoster(configId),
       ]);
-      setCallFairness(callData.fairness);
-      setDutyStats(dutyData.duty_stats);
+      setCallData(cd);
+      setDutyData(dd);
     } catch {
       // ignore
     } finally {
@@ -35,6 +35,10 @@ export default function FairnessView() {
   }
 
   if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
+
+  const callFairness = callData?.fairness ?? null;
+  const dutyStats = dutyData?.duty_stats ?? null;
+  const callColumns = callData?.call_type_columns ?? [];
 
   return (
     <>
@@ -64,12 +68,11 @@ export default function FairnessView() {
                   <th>Name</th>
                   <th>24h Calls</th>
                   <th>All Calls</th>
-                  <th>MO1</th>
-                  <th>MO2</th>
-                  <th>MO3</th>
-                  <th>MO4</th>
-                  <th>MO5</th>
+                  {callColumns.map((col) => (
+                    <th key={col}>{col}</th>
+                  ))}
                   <th>Weekend/PH</th>
+                  <th>Difficulty</th>
                 </tr>
               </thead>
               <tbody>
@@ -86,12 +89,11 @@ export default function FairnessView() {
                           {s.total_24h}
                         </td>
                         <td>{s.total_all}</td>
-                        <td>{s.MO1}</td>
-                        <td>{s.MO2}</td>
-                        <td>{s.MO3}</td>
-                        <td>{s.MO4}</td>
-                        <td>{s.MO5}</td>
+                        {callColumns.map((col) => (
+                          <td key={col}>{s.per_type[col] ?? 0}</td>
+                        ))}
                         <td>{s.weekend_ph}</td>
+                        <td>{s.difficulty_points}</td>
                       </tr>
                     );
                   })}

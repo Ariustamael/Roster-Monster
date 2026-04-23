@@ -1,7 +1,7 @@
 export interface Staff {
   id: number;
   name: string;
-  grade: string;
+  rank: string;
   active: boolean;
   has_admin_role: boolean;
   team_name: string | null;
@@ -21,11 +21,7 @@ export interface DayRoster {
   is_stepdown: boolean;
   consultant_oncall: string | null;
   ac_oncall: string | null;
-  mo1: string | null;
-  mo2: string | null;
-  mo3: string | null;
-  mo4: string | null;
-  mo5: string | null;
+  call_slots: Record<string, string | null>;
 }
 
 export interface RosterResponse {
@@ -34,17 +30,15 @@ export interface RosterResponse {
   days: DayRoster[];
   violations: string[];
   fairness: Record<string, FairnessStats>;
+  call_type_columns: string[];
 }
 
 export interface FairnessStats {
   total_24h: number;
   total_all: number;
-  MO1: number;
-  MO2: number;
-  MO3: number;
-  MO4: number;
-  MO5: number;
+  per_type: Record<string, number>;
   weekend_ph: number;
+  difficulty_points: number;
 }
 
 export interface DutyAssignment {
@@ -68,11 +62,7 @@ export interface DayDutyRoster {
   is_ph: boolean;
   consultant_oncall: string | null;
   ac_oncall: string | null;
-  mo1: string | null;
-  mo2: string | null;
-  mo3: string | null;
-  mo4: string | null;
-  mo5: string | null;
+  call_slots: Record<string, string | null>;
   post_call: string[];
   ot_assignments: DutyAssignment[];
   eot_assignments: DutyAssignment[];
@@ -87,6 +77,7 @@ export interface DutyRosterResponse {
   month: number;
   days: DayDutyRoster[];
   duty_stats: Record<string, DutyStats>;
+  call_type_columns: string[];
 }
 
 export interface DutyStats {
@@ -231,4 +222,30 @@ export interface ResourcesResponse {
   year: number;
   month: number;
   days: ResourceDay[];
+}
+
+export interface RankConfig {
+  id: number;
+  name: string;
+  abbreviation: string;
+  display_order: number;
+  is_call_eligible: boolean;
+  is_duty_eligible: boolean;
+  is_consultant_tier: boolean;
+  is_active: boolean;
+}
+
+export interface CallTypeConfig {
+  id: number;
+  name: string;
+  display_order: number;
+  is_overnight: boolean;
+  post_call_type: string;
+  max_consecutive_days: number;
+  min_gap_days: number;
+  difficulty_points: number;
+  counts_towards_fairness: boolean;
+  applicable_days: string;
+  is_active: boolean;
+  eligible_rank_ids: number[];
 }
