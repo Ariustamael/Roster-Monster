@@ -107,13 +107,13 @@ function DutyRow({ day }: { day: DayDutyRoster }) {
   }
 
   const supAm = day.am_clinics
-    .filter((a) => a.duty_type === "Supervised Clinic")
+    .filter((a) => a.duty_type !== "MOPD")
     .map((a) => `${a.staff_name}`);
   const mopdAm = day.am_clinics
     .filter((a) => a.duty_type === "MOPD")
     .map((a) => a.staff_name);
   const supPm = day.pm_clinics
-    .filter((a) => a.duty_type === "Supervised Clinic")
+    .filter((a) => a.duty_type !== "MOPD")
     .map((a) => `${a.staff_name}`);
   const mopdPm = day.pm_clinics
     .filter((a) => a.duty_type === "MOPD")

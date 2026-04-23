@@ -56,9 +56,6 @@ class DayDutyConfig:
     ot_slots: list[OTSlot]
     am_clinics: list[ClinicSlot]
     pm_clinics: list[ClinicSlot]
-    mopd_rooms_am: int = 6
-    mopd_rooms_pm: int = 6
-    min_mopd_per_session: int = 3
 
 
 @dataclass
