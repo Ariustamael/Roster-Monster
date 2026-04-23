@@ -303,6 +303,10 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
         daily: dict[int, str] = {}
 
         for ct in slots:
+            # R1+2 covers 24h only when R1 or R2 is missing; skip if both already assigned
+            if ct.name == "R1+2" and "R1" in daily.values() and "R2" in daily.values():
+                continue
+
             eligible = [
                 p
                 for p in inp.mo_pool

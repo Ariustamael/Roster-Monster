@@ -349,42 +349,37 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 pm_assigned.add(chosen.id)
                 fairness.ot_days[chosen.id] += 1
 
-        # ── Backfill vacated anchor roles ───────────────────────────
-        if "Ward MO" in vacated_anchor_roles:
-            # WARD_MO: Full day 0800-1730 (covers ward while MO1 is in OT)
-            ward_candidates = sorted(
-                [p for p in available_am if p.id not in full_day_assigned],
-                key=lambda p: fairness.ot_score(p.id),
-                reverse=True,
-            )
-            if ward_candidates:
-                chosen = ward_candidates[0]
+        # ── Anchor role assignments (Ward MO / EOT MO) ─────────────
+        # Always generate an anchor role entry. If the MO was pulled to OT,
+        # backfill from the available pool. Otherwise the MO covers it themselves.
+        for call_type_name, anchor_duty in inp.default_duty_by_call_type.items():
+            mo_id = inp.call_by_type.get(day.d, {}).get(call_type_name)
+            if mo_id is None:
+                continue
+            anchor_dt = DutyType.WARD_MO if anchor_duty == "Ward MO" else DutyType.EOT_MO
+            if mo_id not in full_day_assigned:
+                # MO is on call and not pulled to OT — they cover their own role
                 results.append(DutyResult(
-                    date=day.d, staff_id=chosen.id,
-                    session=Session.FULL_DAY, duty_type=DutyType.WARD_MO,
+                    date=day.d, staff_id=mo_id,
+                    session=Session.FULL_DAY, duty_type=anchor_dt,
                 ))
-                full_day_assigned.add(chosen.id)
-                am_assigned.add(chosen.id)
-                pm_assigned.add(chosen.id)
-                fairness.ot_days[chosen.id] += 1
-
-        if "EOT MO" in vacated_anchor_roles:
-            # EOT_MO: Full day (covers MO2's daytime EOT duty)
-            eot_candidates = sorted(
-                [p for p in available_am if p.id not in full_day_assigned],
-                key=lambda p: fairness.ot_score(p.id),
-                reverse=True,
-            )
-            if eot_candidates:
-                chosen = eot_candidates[0]
-                results.append(DutyResult(
-                    date=day.d, staff_id=chosen.id,
-                    session=Session.FULL_DAY, duty_type=DutyType.EOT_MO,
-                ))
-                full_day_assigned.add(chosen.id)
-                am_assigned.add(chosen.id)
-                pm_assigned.add(chosen.id)
-                fairness.ot_days[chosen.id] += 1
+            elif anchor_duty in vacated_anchor_roles:
+                # MO was pulled to OT — backfill with someone else
+                candidates = sorted(
+                    [p for p in available_am if p.id not in full_day_assigned],
+                    key=lambda p: fairness.ot_score(p.id),
+                    reverse=True,
+                )
+                if candidates:
+                    chosen = candidates[0]
+                    results.append(DutyResult(
+                        date=day.d, staff_id=chosen.id,
+                        session=Session.FULL_DAY, duty_type=anchor_dt,
+                    ))
+                    full_day_assigned.add(chosen.id)
+                    am_assigned.add(chosen.id)
+                    pm_assigned.add(chosen.id)
+                    fairness.ot_days[chosen.id] += 1
 
         # ── 2. AM session ───────────────────────────────────────────
         am_pool = [p for p in available_am if p.id not in am_assigned]
