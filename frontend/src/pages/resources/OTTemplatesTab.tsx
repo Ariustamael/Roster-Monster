@@ -1,9 +1,25 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { api } from "../../api";
 import type { OTTemplate, Staff } from "../../types";
-import { DAY_NAMES, CONS_GRADES } from "./constants";
+import { DAY_NAMES, CONS_GRADES, COLOR_PRESETS } from "./constants";
 
 const CALL_SLOTS = ["MO1", "MO2", "MO3", "MO4", "MO5"];
+
+const DEFAULT_OT_COLORS: Record<string, string> = {
+  _regular: "#dbeafe",
+  _emergency: "#fef3c7",
+};
+
+function loadOTColors(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem("ot-colors");
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
+}
+
+function saveOTColors(colors: Record<string, string>) {
+  localStorage.setItem("ot-colors", JSON.stringify(colors));
+}
 
 export default function OTTemplatesTab() {
   const [templates, setTemplates] = useState<OTTemplate[]>([]);
@@ -12,6 +28,8 @@ export default function OTTemplatesTab() {
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [dragId, setDragId] = useState<number | null>(null);
+  const [customColors, setCustomColors] = useState<Record<string, string>>(loadOTColors);
+  const [showColorEditor, setShowColorEditor] = useState(false);
 
   useEffect(() => {
     Promise.all([api.getOTTemplates(), api.getStaff()]).then(([t, s]) => {
@@ -22,6 +40,20 @@ export default function OTTemplatesTab() {
   }, []);
 
   const consultants = staff.filter((s) => CONS_GRADES.includes(s.grade));
+
+  function otColor(room: string, isEmergency: boolean): string {
+    if (customColors[room]) return customColors[room];
+    return isEmergency
+      ? (customColors._emergency || DEFAULT_OT_COLORS._emergency)
+      : (customColors._regular || DEFAULT_OT_COLORS._regular);
+  }
+
+  function otBorder(room: string, isEmergency: boolean): string {
+    const bg = otColor(room, isEmergency);
+    return darken(bg);
+  }
+
+  const rooms = [...new Set(templates.map((t) => t.room))].sort();
 
   async function handleAdd(data: any) {
     const t = await api.createOTTemplate(data);
@@ -77,8 +109,9 @@ export default function OTTemplatesTab() {
 
   return (
     <>
-      <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add OT</button>
+        <button className="btn btn-secondary" onClick={() => setShowColorEditor(true)}>Colours</button>
       </div>
 
       <div className="clinic-grid-container">
@@ -102,8 +135,8 @@ export default function OTTemplatesTab() {
                       key={t.id}
                       className="clinic-card"
                       style={{
-                        backgroundColor: t.is_emergency ? "#fef3c7" : "#dbeafe",
-                        borderColor: t.is_emergency ? "#f59e0b" : "#93c5fd",
+                        backgroundColor: otColor(t.room, t.is_emergency),
+                        borderColor: otBorder(t.room, t.is_emergency),
                         cursor: "grab",
                       }}
                       draggable
@@ -131,6 +164,24 @@ export default function OTTemplatesTab() {
         </table>
       </div>
 
+      {rooms.length > 0 && (
+        <div style={{ marginTop: 16 }}>
+          <h4 style={{ margin: "0 0 8px" }}>Legend</h4>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {rooms.map((room) => {
+              const tmpl = templates.find((t) => t.room === room);
+              return (
+                <span key={room} style={{
+                  padding: "2px 8px", borderRadius: 4, fontSize: 12,
+                  backgroundColor: otColor(room, tmpl?.is_emergency ?? false),
+                  border: `1px solid ${otBorder(room, tmpl?.is_emergency ?? false)}`,
+                }}>{room}</span>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {showAdd && (
         <OTFormModal
           title="Add OT Template"
@@ -147,6 +198,15 @@ export default function OTTemplatesTab() {
           onSave={(data) => handleUpdate(editTemplate.id, data)}
           onClose={() => setEditId(null)}
           onDelete={() => handleDelete(editTemplate.id)}
+        />
+      )}
+      {showColorEditor && (
+        <OTColorEditorModal
+          colors={customColors}
+          rooms={rooms}
+          templates={templates}
+          onSave={(c) => { setCustomColors(c); saveOTColors(c); setShowColorEditor(false); }}
+          onClose={() => setShowColorEditor(false)}
         />
       )}
     </>
@@ -234,4 +294,96 @@ function OTFormModal({
       </div>
     </div>
   );
+}
+
+function OTColorEditorModal({
+  colors, rooms, templates, onSave, onClose,
+}: {
+  colors: Record<string, string>;
+  rooms: string[];
+  templates: OTTemplate[];
+  onSave: (colors: Record<string, string>) => void;
+  onClose: () => void;
+}) {
+  const [local, setLocal] = useState<Record<string, string>>({ ...colors });
+  const [editing, setEditing] = useState<string | null>(null);
+
+  function getColor(key: string): string {
+    return local[key] || DEFAULT_OT_COLORS[key] || "#dbeafe";
+  }
+
+  function setColor(key: string, color: string) {
+    setLocal((prev) => ({ ...prev, [key]: color }));
+  }
+
+  function resetAll() {
+    setLocal({});
+  }
+
+  const entries: { key: string; label: string }[] = [
+    { key: "_regular", label: "Regular OT (default)" },
+    { key: "_emergency", label: "Emergency OT (default)" },
+    ...rooms.map((r) => ({ key: r, label: r })),
+  ];
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 400, maxWidth: 520 }}>
+        <h3>Customise OT Colours</h3>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
+          Set a colour per room, or change the defaults for regular/emergency OT.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
+          {entries.map(({ key, label }) => (
+            <div key={key}>
+              <div
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+                  padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd",
+                  backgroundColor: getColor(key),
+                }}
+                onClick={() => setEditing(editing === key ? null : key)}
+              >
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{label}</span>
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  {editing === key ? "close" : "change"}
+                </span>
+              </div>
+              {editing === key && (
+                <div style={{
+                  display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 4,
+                  padding: "8px 4px", background: "#fafafa", borderRadius: "0 0 6px 6px",
+                  border: "1px solid #ddd", borderTop: "none",
+                }}>
+                  {COLOR_PRESETS.map((c) => (
+                    <div
+                      key={c}
+                      onClick={() => { setColor(key, c); setEditing(null); }}
+                      style={{
+                        width: 28, height: 28, borderRadius: 4, backgroundColor: c, cursor: "pointer",
+                        border: getColor(key) === c ? "2px solid var(--primary)" : "1px solid #ccc",
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="btn btn-secondary" onClick={resetAll} style={{ marginRight: "auto" }}>Reset Defaults</button>
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => onSave(local)}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function darken(hex: string): string {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const f = 0.7;
+  return `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
 }

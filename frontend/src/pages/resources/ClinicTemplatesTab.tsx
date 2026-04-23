@@ -1,7 +1,7 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { api } from "../../api";
 import type { ClinicTemplate, Staff } from "../../types";
-import { DAY_NAMES, CONS_GRADES } from "./constants";
+import { DAY_NAMES, CONS_GRADES, COLOR_PRESETS } from "./constants";
 
 const SESSIONS = ["AM", "PM"] as const;
 const CLINIC_TYPES = ["NC", "Sup", "MOPD", "Hand VC", "CAT-A", "Lump", "NES", "MSK", "3E", "WMC"] as const;
@@ -306,6 +306,7 @@ function ColorEditorModal({
   onClose: () => void;
 }) {
   const [local, setLocal] = useState<Record<string, string>>({ ...colors });
+  const [editing, setEditing] = useState<string | null>(null);
 
   function getColor(type: string): string {
     return local[type] || defaults[type] || "#f8f9fa";
@@ -321,21 +322,42 @@ function ColorEditorModal({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 380 }}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 400, maxWidth: 520 }}>
         <h3>Customise Clinic Colours</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
           {CLINIC_TYPES.map((ct) => (
-            <div key={ct} style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <input
-                type="color"
-                value={getColor(ct)}
-                onChange={(e) => setColor(ct, e.target.value)}
-                style={{ width: 36, height: 28, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }}
-              />
-              <span style={{
-                flex: 1, padding: "4px 10px", borderRadius: 4, fontSize: 13,
-                backgroundColor: getColor(ct), border: "1px solid #ddd",
-              }}>{ct}</span>
+            <div key={ct}>
+              <div
+                style={{
+                  display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
+                  padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd",
+                  backgroundColor: getColor(ct),
+                }}
+                onClick={() => setEditing(editing === ct ? null : ct)}
+              >
+                <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{ct}</span>
+                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+                  {editing === ct ? "close" : "change"}
+                </span>
+              </div>
+              {editing === ct && (
+                <div style={{
+                  display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 4,
+                  padding: "8px 4px", background: "#fafafa", borderRadius: "0 0 6px 6px",
+                  border: "1px solid #ddd", borderTop: "none",
+                }}>
+                  {COLOR_PRESETS.map((c) => (
+                    <div
+                      key={c}
+                      onClick={() => { setColor(ct, c); setEditing(null); }}
+                      style={{
+                        width: 28, height: 28, borderRadius: 4, backgroundColor: c, cursor: "pointer",
+                        border: getColor(ct) === c ? "2px solid var(--primary)" : "1px solid #ccc",
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>
