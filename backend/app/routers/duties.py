@@ -429,7 +429,7 @@ def _build_day_rosters(
                 clinic_type=ct,
                 is_manual_override=getattr(r, 'is_manual_override', False),
             )
-            if r.duty_type == DutyType.EOT:
+            if r.duty_type in (DutyType.EOT, DutyType.EOT_MO, DutyType.WARD_MO):
                 eot_out.append(out)
             elif r.duty_type == DutyType.OT:
                 ot_out.append(out)
