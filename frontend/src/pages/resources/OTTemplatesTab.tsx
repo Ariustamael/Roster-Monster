@@ -5,22 +5,6 @@ import { DAY_NAMES, CONS_GRADES, COLOR_PRESETS } from "./constants";
 
 const CALL_SLOTS = ["MO1", "MO2", "MO3", "MO4", "MO5"];
 
-const DEFAULT_OT_COLORS: Record<string, string> = {
-  _regular: "#dbeafe",
-  _emergency: "#fef3c7",
-};
-
-function loadOTColors(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem("ot-colors");
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-
-function saveOTColors(colors: Record<string, string>) {
-  localStorage.setItem("ot-colors", JSON.stringify(colors));
-}
-
 export default function OTTemplatesTab() {
   const [templates, setTemplates] = useState<OTTemplate[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -28,8 +12,7 @@ export default function OTTemplatesTab() {
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [dragId, setDragId] = useState<number | null>(null);
-  const [customColors, setCustomColors] = useState<Record<string, string>>(loadOTColors);
-  const [showColorEditor, setShowColorEditor] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([api.getOTTemplates(), api.getStaff()]).then(([t, s]) => {
@@ -41,37 +24,35 @@ export default function OTTemplatesTab() {
 
   const consultants = staff.filter((s) => CONS_GRADES.includes(s.grade));
 
-  function otColor(room: string, isEmergency: boolean): string {
-    if (customColors[room]) return customColors[room];
-    return isEmergency
-      ? (customColors._emergency || DEFAULT_OT_COLORS._emergency)
-      : (customColors._regular || DEFAULT_OT_COLORS._regular);
-  }
-
-  function otBorder(room: string, isEmergency: boolean): string {
-    const bg = otColor(room, isEmergency);
-    return darken(bg);
-  }
-
-  const rooms = [...new Set(templates.map((t) => t.room))].sort();
-
   async function handleAdd(data: any) {
-    const t = await api.createOTTemplate(data);
-    setTemplates((prev) => [...prev, t]);
-    setShowAdd(false);
+    try {
+      const t = await api.createOTTemplate(data);
+      setTemplates((prev) => [...prev, t]);
+      setShowAdd(false);
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to create OT template.");
+    }
   }
 
   async function handleUpdate(id: number, data: any) {
-    const t = await api.updateOTTemplate(id, data);
-    setTemplates((prev) => prev.map((x) => (x.id === id ? t : x)));
-    setEditId(null);
+    try {
+      const t = await api.updateOTTemplate(id, data);
+      setTemplates((prev) => prev.map((x) => (x.id === id ? t : x)));
+      setEditId(null);
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to update OT template.");
+    }
   }
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this OT template?")) return;
-    await api.deleteOTTemplate(id);
-    setTemplates((prev) => prev.filter((x) => x.id !== id));
-    setEditId(null);
+    try {
+      await api.deleteOTTemplate(id);
+      setTemplates((prev) => prev.filter((x) => x.id !== id));
+      setEditId(null);
+    } catch (err: any) {
+      setError(err?.message ?? "Failed to delete OT template.");
+    }
   }
 
   async function handleDrop(e: DragEvent, targetDow: number) {
@@ -87,6 +68,7 @@ export default function OTTemplatesTab() {
       assistants_needed: tmpl.assistants_needed,
       is_emergency: tmpl.is_emergency,
       linked_call_slot: tmpl.linked_call_slot,
+      color: tmpl.color,
     });
     setDragId(null);
   }
@@ -109,9 +91,24 @@ export default function OTTemplatesTab() {
 
   return (
     <>
+      {error && (
+        <div style={{
+          background: "#fee2e2", border: "1px solid #fca5a5", color: "#b91c1c",
+          borderRadius: 6, padding: "10px 14px", marginBottom: 12,
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+        }}>
+          <span>{error}</span>
+          <button
+            onClick={() => setError(null)}
+            style={{ background: "none", border: "none", cursor: "pointer", fontSize: 16, color: "#b91c1c" }}
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add OT</button>
-        <button className="btn btn-secondary" onClick={() => setShowColorEditor(true)}>Colours</button>
       </div>
 
       <div className="clinic-grid-container">
@@ -130,57 +127,41 @@ export default function OTTemplatesTab() {
                   onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
                   onDrop={(e) => handleDrop(e, dow)}
                 >
-                  {grid[day].map((t) => (
-                    <div
-                      key={t.id}
-                      className="clinic-card"
-                      style={{
-                        backgroundColor: otColor(t.room, t.is_emergency),
-                        borderColor: otBorder(t.room, t.is_emergency),
-                        cursor: "grab",
-                      }}
-                      draggable
-                      onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(t.id)); setDragId(t.id); }}
-                      onDragEnd={() => setDragId(null)}
-                      onClick={() => setEditId(t.id)}
-                    >
-                      <div className="clinic-card-type">
-                        {t.is_emergency ? "⚡ " : ""}{t.room}
+                  {grid[day].map((t) => {
+                    const bg = t.color ?? (t.is_emergency ? "#fef3c7" : "#dbeafe");
+                    return (
+                      <div
+                        key={t.id}
+                        className="clinic-card"
+                        style={{
+                          backgroundColor: bg,
+                          cursor: "grab",
+                        }}
+                        draggable
+                        onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(t.id)); setDragId(t.id); }}
+                        onDragEnd={() => setDragId(null)}
+                        onClick={() => setEditId(t.id)}
+                      >
+                        <div className="clinic-card-type">
+                          {t.is_emergency ? "⚡ " : ""}{t.room}
+                        </div>
+                        <div className="clinic-card-cons">
+                          {t.is_emergency
+                            ? (t.linked_call_slot ? `→ ${t.linked_call_slot}` : "Emergency")
+                            : (t.consultant_name ?? "No consultant")}
+                        </div>
+                        <div className="clinic-card-mo">
+                          {t.assistants_needed} asst
+                        </div>
                       </div>
-                      <div className="clinic-card-cons">
-                        {t.is_emergency
-                          ? (t.linked_call_slot ? `→ ${t.linked_call_slot}` : "Emergency")
-                          : (t.consultant_name ?? "No consultant")}
-                      </div>
-                      <div className="clinic-card-mo">
-                        {t.assistants_needed} asst
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </td>
               ))}
             </tr>
           </tbody>
         </table>
       </div>
-
-      {rooms.length > 0 && (
-        <div style={{ marginTop: 16 }}>
-          <h4 style={{ margin: "0 0 8px" }}>Legend</h4>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {rooms.map((room) => {
-              const tmpl = templates.find((t) => t.room === room);
-              return (
-                <span key={room} style={{
-                  padding: "2px 8px", borderRadius: 4, fontSize: 12,
-                  backgroundColor: otColor(room, tmpl?.is_emergency ?? false),
-                  border: `1px solid ${otBorder(room, tmpl?.is_emergency ?? false)}`,
-                }}>{room}</span>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {showAdd && (
         <OTFormModal
@@ -198,15 +179,6 @@ export default function OTTemplatesTab() {
           onSave={(data) => handleUpdate(editTemplate.id, data)}
           onClose={() => setEditId(null)}
           onDelete={() => handleDelete(editTemplate.id)}
-        />
-      )}
-      {showColorEditor && (
-        <OTColorEditorModal
-          colors={customColors}
-          rooms={rooms}
-          templates={templates}
-          onSave={(c) => { setCustomColors(c); saveOTColors(c); setShowColorEditor(false); }}
-          onClose={() => setShowColorEditor(false)}
         />
       )}
     </>
@@ -228,7 +200,16 @@ function OTFormModal({
   const [consId, setConsId] = useState<number | null>(initial?.consultant_id ?? null);
   const [assists, setAssists] = useState(initial?.assistants_needed ?? 2);
   const [isEmergency, setIsEmergency] = useState(initial?.is_emergency ?? false);
-  const [linkedSlot, setLinkedSlot] = useState<string | null>(initial?.linked_call_slot ?? null);
+  const [linkedSlots, setLinkedSlots] = useState<string[]>(
+    initial?.linked_call_slot ? initial.linked_call_slot.split(",").map((s) => s.trim()).filter(Boolean) : []
+  );
+  const [color, setColor] = useState<string | null>(initial?.color ?? null);
+
+  function toggleSlot(slot: string) {
+    setLinkedSlots((prev) =>
+      prev.includes(slot) ? prev.filter((s) => s !== slot) : [...prev, slot]
+    );
+  }
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -268,13 +249,46 @@ function OTFormModal({
         </div>
         {isEmergency && (
           <div className="form-group">
-            <label>Linked Call Slot (auto-assign from call roster)</label>
-            <select value={linkedSlot ?? ""} onChange={(e) => setLinkedSlot(e.target.value || null)}>
-              <option value="">— None —</option>
-              {CALL_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
-            </select>
+            <label>Linked Call Slots (auto-assign from call roster)</label>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
+              {CALL_SLOTS.map((slot) => (
+                <label key={slot} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={linkedSlots.includes(slot)}
+                    onChange={() => toggleSlot(slot)}
+                  />
+                  {slot}
+                </label>
+              ))}
+            </div>
           </div>
         )}
+        <div className="form-group">
+          <label>Card Colour</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 28px)", gap: 4, marginTop: 4 }}>
+            <div
+              onClick={() => setColor(null)}
+              title="Clear (use default)"
+              style={{
+                width: 28, height: 28, borderRadius: 4, cursor: "pointer",
+                background: "repeating-linear-gradient(45deg, #ccc 0px, #ccc 4px, #fff 4px, #fff 8px)",
+                border: color === null ? "2px solid var(--primary, #3b82f6)" : "1px solid #ccc",
+              }}
+            />
+            {COLOR_PRESETS.map((c) => (
+              <div
+                key={c}
+                onClick={() => setColor(c)}
+                title={c}
+                style={{
+                  width: 28, height: 28, borderRadius: 4, backgroundColor: c, cursor: "pointer",
+                  border: color === c ? "2px solid var(--primary, #3b82f6)" : "1px solid #ccc",
+                }}
+              />
+            ))}
+          </div>
+        </div>
         <div className="modal-actions">
           {onDelete && (
             <button className="btn btn-danger" onClick={onDelete} style={{ marginRight: "auto" }}>Delete</button>
@@ -287,103 +301,12 @@ function OTFormModal({
               consultant_id: isEmergency ? null : consId,
               assistants_needed: assists,
               is_emergency: isEmergency,
-              linked_call_slot: isEmergency ? linkedSlot : null,
+              linked_call_slot: isEmergency && linkedSlots.length > 0 ? linkedSlots.join(",") : null,
+              color,
             });
           }}>Save</button>
         </div>
       </div>
     </div>
   );
-}
-
-function OTColorEditorModal({
-  colors, rooms, templates, onSave, onClose,
-}: {
-  colors: Record<string, string>;
-  rooms: string[];
-  templates: OTTemplate[];
-  onSave: (colors: Record<string, string>) => void;
-  onClose: () => void;
-}) {
-  const [local, setLocal] = useState<Record<string, string>>({ ...colors });
-  const [editing, setEditing] = useState<string | null>(null);
-
-  function getColor(key: string): string {
-    return local[key] || DEFAULT_OT_COLORS[key] || "#dbeafe";
-  }
-
-  function setColor(key: string, color: string) {
-    setLocal((prev) => ({ ...prev, [key]: color }));
-  }
-
-  function resetAll() {
-    setLocal({});
-  }
-
-  const entries: { key: string; label: string }[] = [
-    { key: "_regular", label: "Regular OT (default)" },
-    { key: "_emergency", label: "Emergency OT (default)" },
-    ...rooms.map((r) => ({ key: r, label: r })),
-  ];
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 400, maxWidth: 520 }}>
-        <h3>Customise OT Colours</h3>
-        <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 12 }}>
-          Set a colour per room, or change the defaults for regular/emergency OT.
-        </p>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-          {entries.map(({ key, label }) => (
-            <div key={key}>
-              <div
-                style={{
-                  display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
-                  padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd",
-                  backgroundColor: getColor(key),
-                }}
-                onClick={() => setEditing(editing === key ? null : key)}
-              >
-                <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{label}</span>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  {editing === key ? "close" : "change"}
-                </span>
-              </div>
-              {editing === key && (
-                <div style={{
-                  display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 4,
-                  padding: "8px 4px", background: "#fafafa", borderRadius: "0 0 6px 6px",
-                  border: "1px solid #ddd", borderTop: "none",
-                }}>
-                  {COLOR_PRESETS.map((c) => (
-                    <div
-                      key={c}
-                      onClick={() => { setColor(key, c); setEditing(null); }}
-                      style={{
-                        width: 28, height: 28, borderRadius: 4, backgroundColor: c, cursor: "pointer",
-                        border: getColor(key) === c ? "2px solid var(--primary)" : "1px solid #ccc",
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="modal-actions">
-          <button className="btn btn-secondary" onClick={resetAll} style={{ marginRight: "auto" }}>Reset Defaults</button>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => onSave(local)}>Save</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function darken(hex: string): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  const f = 0.7;
-  return `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
 }

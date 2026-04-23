@@ -9,6 +9,7 @@ from ..database import get_db
 from ..models import (
     MonthlyConfig, CallAssignment, DutyAssignment, Staff, TeamAssignment,
     OTTemplate, ClinicTemplate, Leave, PublicHoliday,
+    ConsultantOnCall, ACOnCall,
     DUTY_GRADES, CallType, DutyType, Session,
 )
 from ..schemas import (
@@ -34,6 +35,7 @@ def _ot_out(r: OTTemplate) -> OTTemplateOut:
         assistants_needed=r.assistants_needed,
         is_emergency=r.is_emergency or False,
         linked_call_slot=r.linked_call_slot,
+        color=r.color,
     )
 
 
@@ -61,8 +63,7 @@ def update_ot_template(template_id: int, payload: OTTemplateCreate, db: DBSessio
         setattr(t, k, v)
     db.commit()
     db.refresh(t)
-    return _ot_out(t
-    )
+    return _ot_out(t)
 
 
 @router.delete("/templates/ot/{template_id}")
@@ -88,6 +89,7 @@ def list_clinic_templates(db: DBSession = Depends(get_db)):
             room=r.room, clinic_type=r.clinic_type, mos_required=r.mos_required,
             consultant_id=r.consultant_id,
             consultant_name=r.consultant.name if r.consultant else None,
+            color=r.color,
         )
         for r in rows
     ]
@@ -300,6 +302,27 @@ def _build_day_rosters(
 
     all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
 
+    # Build call team lookup (MO1-MO5)
+    call_rows = db.query(CallAssignment).filter(
+        CallAssignment.config_id == config.id,
+    ).all()
+    call_by_date: dict[date, dict[str, str]] = defaultdict(dict)
+    for r in call_rows:
+        call_by_date[r.date][r.call_type.value] = all_staff_names.get(r.staff_id, f"ID:{r.staff_id}")
+
+    # Build consultant/AC on-call lookup
+    cons_oncall_by_date: dict[date, str] = {}
+    for r in db.query(ConsultantOnCall).filter(ConsultantOnCall.config_id == config.id).all():
+        cons_oncall_by_date[r.date] = all_staff_names.get(r.consultant_id, f"ID:{r.consultant_id}")
+    ac_oncall_by_date: dict[date, str] = {}
+    for r in db.query(ACOnCall).filter(ACOnCall.config_id == config.id).all():
+        ac_oncall_by_date[r.date] = all_staff_names.get(r.ac_id, f"ID:{r.ac_id}")
+
+    # Build clinic_type lookup from DutyAssignment location
+    clinic_type_lookup: dict[tuple[str, str], str] = {}
+    for ct in db.query(ClinicTemplate).all():
+        clinic_type_lookup[(ct.room, ct.session.value)] = ct.clinic_type or "Sup"
+
     day_rosters: list[DayDutyRoster] = []
     num_days = calendar.monthrange(config.year, config.month)[1]
     for day_num in range(1, num_days + 1):
@@ -309,6 +332,8 @@ def _build_day_rosters(
 
         pc_ids = postcall_dates.get(d, set())
         post_call_names = sorted([all_staff_names.get(pid, f"ID:{pid}") for pid in pc_ids])
+
+        call_team = call_by_date.get(d, {})
 
         day_results = results_by_date.get(d, [])
         ot_out = []
@@ -320,6 +345,12 @@ def _build_day_rosters(
 
         for r in day_results:
             staff_id = r.staff_id
+            session_val = r.session.value if hasattr(r.session, 'value') else r.session
+            loc = r.location or ""
+            ct = clinic_type_lookup.get((loc, session_val), None)
+            if r.duty_type in (DutyType.CLINIC, DutyType.CAT_A, DutyType.MOPD):
+                ct = ct or (r.duty_type.value if hasattr(r.duty_type, 'value') else r.duty_type)
+
             out = DutyAssignmentOut(
                 id=getattr(r, 'id', 0) or 0,
                 date=r.date, staff_id=staff_id,
@@ -327,6 +358,7 @@ def _build_day_rosters(
                 session=r.session, duty_type=r.duty_type,
                 location=r.location, consultant_id=r.consultant_id,
                 consultant_name=cons_names.get(r.consultant_id) if r.consultant_id else None,
+                clinic_type=ct,
                 is_manual_override=getattr(r, 'is_manual_override', False),
             )
             if r.duty_type == DutyType.EOT:
@@ -347,6 +379,13 @@ def _build_day_rosters(
         day_rosters.append(DayDutyRoster(
             date=d, day_name=d.strftime("%a"),
             is_weekend=is_wknd, is_ph=is_ph,
+            consultant_oncall=cons_oncall_by_date.get(d),
+            ac_oncall=ac_oncall_by_date.get(d),
+            mo1=call_team.get("MO1"),
+            mo2=call_team.get("MO2"),
+            mo3=call_team.get("MO3"),
+            mo4=call_team.get("MO4"),
+            mo5=call_team.get("MO5"),
             post_call=post_call_names,
             ot_assignments=ot_out,
             eot_assignments=eot_out,

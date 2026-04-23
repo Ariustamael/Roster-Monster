@@ -15,17 +15,6 @@ const DEFAULT_COLORS: Record<string, string> = {
   WMC: "#e8eaed",
 };
 
-function loadCustomColors(): Record<string, string> {
-  try {
-    const raw = localStorage.getItem("clinic-colors");
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-
-function saveCustomColors(colors: Record<string, string>) {
-  localStorage.setItem("clinic-colors", JSON.stringify(colors));
-}
-
 export default function ClinicTemplatesTab() {
   const [templates, setTemplates] = useState<ClinicTemplate[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -33,8 +22,7 @@ export default function ClinicTemplatesTab() {
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
   const [dragId, setDragId] = useState<number | null>(null);
-  const [customColors, setCustomColors] = useState<Record<string, string>>(loadCustomColors);
-  const [showColorEditor, setShowColorEditor] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([api.getClinicTemplates(), api.getStaff()]).then(([t, s]) => {
@@ -44,29 +32,37 @@ export default function ClinicTemplatesTab() {
     });
   }, []);
 
-  function clinicColor(type: string): string {
-    return customColors[type] || DEFAULT_COLORS[type] || "#f8f9fa";
-  }
-
   const consultants = staff.filter((s) => CONS_GRADES.includes(s.grade));
 
   async function handleAdd(data: any) {
-    const t = await api.createClinicTemplate(data);
-    setTemplates((prev) => [...prev, t]);
-    setShowAdd(false);
+    try {
+      const t = await api.createClinicTemplate(data);
+      setTemplates((prev) => [...prev, t]);
+      setShowAdd(false);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to add clinic template.");
+    }
   }
 
   async function handleUpdate(id: number, data: any) {
-    const t = await api.updateClinicTemplate(id, data);
-    setTemplates((prev) => prev.map((x) => (x.id === id ? t : x)));
-    setEditId(null);
+    try {
+      const t = await api.updateClinicTemplate(id, data);
+      setTemplates((prev) => prev.map((x) => (x.id === id ? t : x)));
+      setEditId(null);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to update clinic template.");
+    }
   }
 
   async function handleDelete(id: number) {
     if (!confirm("Delete this clinic template?")) return;
-    await api.deleteClinicTemplate(id);
-    setTemplates((prev) => prev.filter((x) => x.id !== id));
-    setEditId(null);
+    try {
+      await api.deleteClinicTemplate(id);
+      setTemplates((prev) => prev.filter((x) => x.id !== id));
+      setEditId(null);
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to delete clinic template.");
+    }
   }
 
   async function handleDrop(e: DragEvent, targetDow: number, targetSession: string) {
@@ -86,6 +82,7 @@ export default function ClinicTemplatesTab() {
       clinic_type: tmpl.clinic_type,
       mos_required: tmpl.mos_required,
       consultant_id: tmpl.consultant_id,
+      color: tmpl.color,
     });
     setDragId(null);
   }
@@ -111,9 +108,22 @@ export default function ClinicTemplatesTab() {
 
   return (
     <>
+      {error && (
+        <div style={{
+          background: "#fee2e2", color: "#b91c1c", border: "1px solid #fca5a5",
+          borderRadius: 6, padding: "8px 14px", marginBottom: 12, display: "flex",
+          alignItems: "center", justifyContent: "space-between",
+        }}>
+          <span>{error}</span>
+          <button
+            onClick={() => setError(null)}
+            style={{ background: "none", border: "none", cursor: "pointer", fontWeight: 700, color: "#b91c1c" }}
+          >✕</button>
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Clinic</button>
-        <button className="btn btn-secondary" onClick={() => setShowColorEditor(true)}>Colours</button>
       </div>
 
       <div className="clinic-grid-container">
@@ -139,7 +149,7 @@ export default function ClinicTemplatesTab() {
                       <div
                         key={t.id}
                         className={`clinic-card ${dragId === t.id ? "dragging" : ""}`}
-                        style={{ backgroundColor: clinicColor(t.clinic_type), cursor: "grab" }}
+                        style={{ backgroundColor: t.color ?? DEFAULT_COLORS[t.clinic_type] ?? "#f8f9fa", cursor: "grab" }}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData("text/plain", String(t.id));
@@ -172,7 +182,7 @@ export default function ClinicTemplatesTab() {
           {CLINIC_TYPES.map((ct) => (
             <span key={ct} style={{
               padding: "2px 8px", borderRadius: 4, fontSize: 12,
-              backgroundColor: clinicColor(ct), border: "1px solid #ddd",
+              backgroundColor: DEFAULT_COLORS[ct] ?? "#f8f9fa", border: "1px solid #ddd",
             }}>{ct}</span>
           ))}
         </div>
@@ -182,7 +192,6 @@ export default function ClinicTemplatesTab() {
         <ClinicFormModal
           title="Add Clinic Template"
           consultants={consultants}
-          clinicColor={clinicColor}
           onSave={handleAdd}
           onClose={() => setShowAdd(false)}
         />
@@ -191,19 +200,10 @@ export default function ClinicTemplatesTab() {
         <ClinicFormModal
           title="Edit Clinic Template"
           consultants={consultants}
-          clinicColor={clinicColor}
           initial={editTemplate}
           onSave={(data) => handleUpdate(editTemplate.id, data)}
           onClose={() => setEditId(null)}
           onDelete={() => handleDelete(editTemplate.id)}
-        />
-      )}
-      {showColorEditor && (
-        <ColorEditorModal
-          colors={customColors}
-          defaults={DEFAULT_COLORS}
-          onSave={(c) => { setCustomColors(c); saveCustomColors(c); setShowColorEditor(false); }}
-          onClose={() => setShowColorEditor(false)}
         />
       )}
     </>
@@ -211,11 +211,10 @@ export default function ClinicTemplatesTab() {
 }
 
 function ClinicFormModal({
-  title, consultants, clinicColor, initial, onSave, onClose, onDelete,
+  title, consultants, initial, onSave, onClose, onDelete,
 }: {
   title: string;
   consultants: Staff[];
-  clinicColor: (type: string) => string;
   initial?: ClinicTemplate;
   onSave: (data: any) => void;
   onClose: () => void;
@@ -227,6 +226,9 @@ function ClinicFormModal({
   const [clinicType, setClinicType] = useState(initial?.clinic_type ?? "Sup");
   const [mosRequired, setMosRequired] = useState(initial?.mos_required ?? 1);
   const [consId, setConsId] = useState<number | "">(initial?.consultant_id ?? "");
+  const [color, setColor] = useState<string | null>(initial?.color ?? null);
+
+  const effectiveColor = color ?? DEFAULT_COLORS[clinicType] ?? "#f8f9fa";
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -253,7 +255,7 @@ function ClinicFormModal({
           <select
             value={clinicType}
             onChange={(e) => setClinicType(e.target.value)}
-            style={{ backgroundColor: clinicColor(clinicType) }}
+            style={{ backgroundColor: effectiveColor }}
           >
             {CLINIC_TYPES.map((ct) => <option key={ct} value={ct}>{ct}</option>)}
           </select>
@@ -272,6 +274,32 @@ function ClinicFormModal({
             {consultants.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
+        <div className="form-group">
+          <label>Card Colour</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 4, marginTop: 4 }}>
+            {/* Clear / reset-to-default swatch */}
+            <div
+              title="Reset to default"
+              onClick={() => setColor(null)}
+              style={{
+                width: 28, height: 28, borderRadius: 4, cursor: "pointer",
+                background: "linear-gradient(135deg, #fff 45%, #f00 45%, #f00 55%, #fff 55%)",
+                border: color === null ? "2px solid var(--primary)" : "1px solid #ccc",
+              }}
+            />
+            {COLOR_PRESETS.map((c) => (
+              <div
+                key={c}
+                title={c}
+                onClick={() => setColor(c)}
+                style={{
+                  width: 28, height: 28, borderRadius: 4, backgroundColor: c, cursor: "pointer",
+                  border: color === c ? "2px solid var(--primary)" : "1px solid #ccc",
+                }}
+              />
+            ))}
+          </div>
+        </div>
         <div className="modal-actions">
           {onDelete && (
             <button className="btn btn-danger" onClick={onDelete} style={{ marginRight: "auto" }}>Delete</button>
@@ -285,86 +313,13 @@ function ClinicFormModal({
                   day_of_week: dow, session, room: room.trim(),
                   clinic_type: clinicType, mos_required: mosRequired,
                   consultant_id: consId || null,
+                  color,
                 });
               }
             }}
           >
             Save
           </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ColorEditorModal({
-  colors, defaults, onSave, onClose,
-}: {
-  colors: Record<string, string>;
-  defaults: Record<string, string>;
-  onSave: (colors: Record<string, string>) => void;
-  onClose: () => void;
-}) {
-  const [local, setLocal] = useState<Record<string, string>>({ ...colors });
-  const [editing, setEditing] = useState<string | null>(null);
-
-  function getColor(type: string): string {
-    return local[type] || defaults[type] || "#f8f9fa";
-  }
-
-  function setColor(type: string, color: string) {
-    setLocal((prev) => ({ ...prev, [type]: color }));
-  }
-
-  function resetAll() {
-    setLocal({});
-  }
-
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 400, maxWidth: 520 }}>
-        <h3>Customise Clinic Colours</h3>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 16 }}>
-          {CLINIC_TYPES.map((ct) => (
-            <div key={ct}>
-              <div
-                style={{
-                  display: "flex", alignItems: "center", gap: 10, cursor: "pointer",
-                  padding: "6px 10px", borderRadius: 6, border: "1px solid #ddd",
-                  backgroundColor: getColor(ct),
-                }}
-                onClick={() => setEditing(editing === ct ? null : ct)}
-              >
-                <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{ct}</span>
-                <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                  {editing === ct ? "close" : "change"}
-                </span>
-              </div>
-              {editing === ct && (
-                <div style={{
-                  display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 4,
-                  padding: "8px 4px", background: "#fafafa", borderRadius: "0 0 6px 6px",
-                  border: "1px solid #ddd", borderTop: "none",
-                }}>
-                  {COLOR_PRESETS.map((c) => (
-                    <div
-                      key={c}
-                      onClick={() => { setColor(ct, c); setEditing(null); }}
-                      style={{
-                        width: 28, height: 28, borderRadius: 4, backgroundColor: c, cursor: "pointer",
-                        border: getColor(ct) === c ? "2px solid var(--primary)" : "1px solid #ccc",
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-        <div className="modal-actions">
-          <button className="btn btn-secondary" onClick={resetAll} style={{ marginRight: "auto" }}>Reset Defaults</button>
-          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => onSave(local)}>Save</button>
         </div>
       </div>
     </div>

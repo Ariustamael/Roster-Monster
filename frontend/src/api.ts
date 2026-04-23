@@ -151,9 +151,9 @@ export const api = {
   // OT Templates
   getOTTemplates: () =>
     request<import("./types").OTTemplate[]>("/templates/ot"),
-  createOTTemplate: (data: { day_of_week: number; room: string; consultant_id?: number | null; assistants_needed?: number; is_emergency?: boolean; linked_call_slot?: string | null }) =>
+  createOTTemplate: (data: { day_of_week: number; room: string; consultant_id?: number | null; assistants_needed?: number; is_emergency?: boolean; linked_call_slot?: string | null; color?: string | null }) =>
     request<import("./types").OTTemplate>("/templates/ot", { method: "POST", body: JSON.stringify(data) }),
-  updateOTTemplate: (id: number, data: { day_of_week: number; room: string; consultant_id?: number | null; assistants_needed?: number; is_emergency?: boolean; linked_call_slot?: string | null }) =>
+  updateOTTemplate: (id: number, data: { day_of_week: number; room: string; consultant_id?: number | null; assistants_needed?: number; is_emergency?: boolean; linked_call_slot?: string | null; color?: string | null }) =>
     request<import("./types").OTTemplate>(`/templates/ot/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteOTTemplate: (id: number) =>
     request<{ ok: boolean }>(`/templates/ot/${id}`, { method: "DELETE" }),
@@ -161,9 +161,9 @@ export const api = {
   // Clinic Templates
   getClinicTemplates: () =>
     request<import("./types").ClinicTemplate[]>("/templates/clinics"),
-  createClinicTemplate: (data: { day_of_week: number; session: string; room: string; clinic_type?: string; mos_required?: number; consultant_id?: number | null }) =>
+  createClinicTemplate: (data: { day_of_week: number; session: string; room: string; clinic_type?: string; mos_required?: number; consultant_id?: number | null; color?: string | null }) =>
     request<import("./types").ClinicTemplate>("/templates/clinics", { method: "POST", body: JSON.stringify(data) }),
-  updateClinicTemplate: (id: number, data: { day_of_week: number; session: string; room: string; clinic_type?: string; mos_required?: number; consultant_id?: number | null }) =>
+  updateClinicTemplate: (id: number, data: { day_of_week: number; session: string; room: string; clinic_type?: string; mos_required?: number; consultant_id?: number | null; color?: string | null }) =>
     request<import("./types").ClinicTemplate>(`/templates/clinics/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteClinicTemplate: (id: number) =>
     request<{ ok: boolean }>(`/templates/clinics/${id}`, { method: "DELETE" }),

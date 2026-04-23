@@ -277,16 +277,15 @@ class OTTemplate(Base):
     __tablename__ = "ot_template"
 
     id = Column(Integer, primary_key=True)
-    day_of_week = Column(Integer, nullable=False)  # 0=Mon..4=Fri
-    room = Column(String(20), nullable=False)       # OT3, OT4, OT10, DSOT3, OT6
+    day_of_week = Column(Integer, nullable=False)
+    room = Column(String(20), nullable=False)
     consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     assistants_needed = Column(Integer, default=2)
     is_emergency = Column(Boolean, default=False)
-    linked_call_slot = Column(String(10), nullable=True)
+    linked_call_slot = Column(String(50), nullable=True)
+    color = Column(String(10), nullable=True)
 
     consultant = relationship("Staff")
-
-    __table_args__ = (UniqueConstraint("day_of_week", "room"),)
 
 
 # ── Clinic Templates (weekly recurring) ──────────────────────────────────
@@ -298,9 +297,10 @@ class ClinicTemplate(Base):
     day_of_week = Column(Integer, nullable=False)  # 0=Mon..4=Fri
     session = Column(SAEnum(Session), nullable=False)  # AM or PM
     room = Column(String(20), nullable=False)
-    clinic_type = Column(String(20), default="Sup")  # NC, Sup, MOPD, Hand VC, CAT-A, etc.
+    clinic_type = Column(String(20), default="Sup")
     mos_required = Column(Integer, default=1)
     consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
+    color = Column(String(10), nullable=True)
 
     consultant = relationship("Staff")
 

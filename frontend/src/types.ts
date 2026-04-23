@@ -57,6 +57,7 @@ export interface DutyAssignment {
   location: string | null;
   consultant_id: number | null;
   consultant_name: string | null;
+  clinic_type: string | null;
   is_manual_override: boolean;
 }
 
@@ -65,6 +66,13 @@ export interface DayDutyRoster {
   day_name: string;
   is_weekend: boolean;
   is_ph: boolean;
+  consultant_oncall: string | null;
+  ac_oncall: string | null;
+  mo1: string | null;
+  mo2: string | null;
+  mo3: string | null;
+  mo4: string | null;
+  mo5: string | null;
   post_call: string[];
   ot_assignments: DutyAssignment[];
   eot_assignments: DutyAssignment[];
@@ -144,6 +152,7 @@ export interface OTTemplate {
   assistants_needed: number;
   is_emergency: boolean;
   linked_call_slot: string | null;
+  color: string | null;
 }
 
 export interface ClinicTemplate {
@@ -155,6 +164,7 @@ export interface ClinicTemplate {
   mos_required: number;
   consultant_id: number | null;
   consultant_name: string | null;
+  color: string | null;
 }
 
 export interface ConsultantOnCall {

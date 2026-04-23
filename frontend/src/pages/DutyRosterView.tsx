@@ -1,26 +1,21 @@
-import { useEffect, useState, type DragEvent } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { DutyRosterResponse, DayDutyRoster, DutyAssignment, Staff } from "../types";
+import type { DutyRosterResponse, DayDutyRoster, DutyAssignment } from "../types";
 
 export default function DutyRosterView() {
   const { active } = useConfig();
   const [roster, setRoster] = useState<DutyRosterResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [staff, setStaff] = useState<Staff[]>([]);
 
   const configId = active?.id ?? 0;
 
   useEffect(() => {
     setRoster(null);
     if (!configId) return;
-    Promise.all([
-      api.viewDutyRoster(configId).catch(() => null),
-      api.getStaff(),
-    ]).then(([data, staffList]) => {
+    api.viewDutyRoster(configId).catch(() => null).then((data) => {
       if (data) setRoster(data);
-      setStaff(staffList);
     });
   }, [configId]);
 
@@ -116,7 +111,16 @@ export default function DutyRosterView() {
   );
 }
 
+function clinicRoomHeader(room: string, assignment: DutyAssignment): string {
+  const parts: string[] = [];
+  if (assignment.clinic_type) parts.push(assignment.clinic_type);
+  parts.push(room);
+  const label = parts.join(": ");
+  return assignment.consultant_name ? `${label} (${assignment.consultant_name})` : label;
+}
+
 function DayCard({ day }: { day: DayDutyRoster }) {
+  // OT groups (regular)
   const otGroups: Record<string, { consultant: string | null; staff: DutyAssignment[] }> = {};
   for (const a of day.ot_assignments) {
     const key = a.location || "OT";
@@ -124,6 +128,7 @@ function DayCard({ day }: { day: DayDutyRoster }) {
     otGroups[key].staff.push(a);
   }
 
+  // EOT groups — merged into the OT column
   const eotGroups: Record<string, { staff: DutyAssignment[] }> = {};
   for (const a of day.eot_assignments) {
     const key = a.location || "EOT";
@@ -149,6 +154,15 @@ function DayCard({ day }: { day: DayDutyRoster }) {
     clinicPmByRoom[key].push(a);
   }
 
+  // MO list for the call team column
+  const moList: Array<{ label: string; name: string }> = [
+    { label: "MO1", name: day.mo1 ?? "" },
+    { label: "MO2", name: day.mo2 ?? "" },
+    { label: "MO3", name: day.mo3 ?? "" },
+    { label: "MO4", name: day.mo4 ?? "" },
+    { label: "MO5", name: day.mo5 ?? "" },
+  ].filter((m) => m.name);
+
   return (
     <div className="card" style={{ marginBottom: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
@@ -163,11 +177,35 @@ function DayCard({ day }: { day: DayDutyRoster }) {
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-        {/* Column 1: OT & EOT */}
+      <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 1fr 1fr", gap: 12 }}>
+        {/* Column 1: Call Team */}
         <div>
-          <SectionLabel label="OT (Full Day)" color="var(--ot-bg)" />
-          {Object.keys(otGroups).length === 0 && <EmptyNote />}
+          <SectionLabel label="Call Team" color="#ede9fe" />
+          {day.consultant_oncall && (
+            <div style={{ marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>Consultant </span>
+              <span className="duty-tag" style={{ background: "#ddd6fe", color: "#4c1d95" }}>{day.consultant_oncall}</span>
+            </div>
+          )}
+          {day.ac_oncall && (
+            <div style={{ marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>AC </span>
+              <span className="duty-tag" style={{ background: "#e9d5ff", color: "#6b21a8" }}>{day.ac_oncall}</span>
+            </div>
+          )}
+          {moList.map((m) => (
+            <div key={m.label} style={{ marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>{m.label} </span>
+              <span className="duty-tag" style={{ background: "#f3e8ff", color: "#7e22ce" }}>{m.name}</span>
+            </div>
+          ))}
+          {!day.consultant_oncall && !day.ac_oncall && moList.length === 0 && <EmptyNote />}
+        </div>
+
+        {/* Column 2: OT / EOT */}
+        <div>
+          <SectionLabel label="OT / EOT (Full Day)" color="var(--ot-bg)" />
+          {Object.keys(otGroups).length === 0 && Object.keys(eotGroups).length === 0 && <EmptyNote />}
           {Object.entries(otGroups).map(([room, g]) => (
             <div key={room} style={{ marginBottom: 6 }}>
               <div style={{ fontSize: 11, fontWeight: 700, color: "#1e40af" }}>
@@ -180,25 +218,19 @@ function DayCard({ day }: { day: DayDutyRoster }) {
               </div>
             </div>
           ))}
-
-          {Object.keys(eotGroups).length > 0 && (
-            <>
-              <SectionLabel label="Emergency OT" color="#fef3c7" />
-              {Object.entries(eotGroups).map(([room, g]) => (
-                <div key={room} style={{ marginBottom: 6 }}>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e" }}>{room}</div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {g.staff.map((a) => (
-                      <span key={a.staff_id} className="duty-tag" style={{ background: "#fef3c7", color: "#92400e" }}>{a.staff_name}</span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </>
-          )}
+          {Object.entries(eotGroups).map(([room, g]) => (
+            <div key={room} style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#92400e" }}>⚡{room}</div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {g.staff.map((a) => (
+                  <span key={a.staff_id} className="duty-tag" style={{ background: "#fef3c7", color: "#92400e" }}>{a.staff_name}</span>
+                ))}
+              </div>
+            </div>
+          ))}
         </div>
 
-        {/* Column 2: AM */}
+        {/* Column 3: AM */}
         <div>
           <SectionLabel label="AM" color="#d1fae5" />
           {Object.keys(clinicAmByRoom).length > 0 && (
@@ -207,10 +239,7 @@ function DayCard({ day }: { day: DayDutyRoster }) {
               {Object.entries(clinicAmByRoom).map(([room, staff]) => (
                 <div key={room} style={{ marginBottom: 4 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: "#065f46" }}>
-                    {room}
-                    {staff[0]?.consultant_name && (
-                      <span style={{ fontWeight: 400, color: "var(--text-muted)" }}> ({staff[0].consultant_name})</span>
-                    )}
+                    {clinicRoomHeader(room, staff[0])}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {staff.map((a) => (
@@ -238,7 +267,7 @@ function DayCard({ day }: { day: DayDutyRoster }) {
           </div>
         </div>
 
-        {/* Column 3: PM */}
+        {/* Column 4: PM */}
         <div>
           <SectionLabel label="PM" color="#dbeafe" />
           {Object.keys(clinicPmByRoom).length > 0 && (
@@ -247,10 +276,7 @@ function DayCard({ day }: { day: DayDutyRoster }) {
               {Object.entries(clinicPmByRoom).map(([room, staff]) => (
                 <div key={room} style={{ marginBottom: 4 }}>
                   <div style={{ fontSize: 11, fontWeight: 600, color: "#065f46" }}>
-                    {room}
-                    {staff[0]?.consultant_name && (
-                      <span style={{ fontWeight: 400, color: "var(--text-muted)" }}> ({staff[0].consultant_name})</span>
-                    )}
+                    {clinicRoomHeader(room, staff[0])}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {staff.map((a) => (

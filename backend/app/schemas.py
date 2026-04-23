@@ -253,6 +253,7 @@ class OTTemplateCreate(BaseModel):
     assistants_needed: int = 2
     is_emergency: bool = False
     linked_call_slot: Optional[str] = None
+    color: Optional[str] = None
 
 
 class OTTemplateOut(BaseModel):
@@ -264,6 +265,7 @@ class OTTemplateOut(BaseModel):
     assistants_needed: int
     is_emergency: bool
     linked_call_slot: Optional[str] = None
+    color: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -277,6 +279,7 @@ class ClinicTemplateCreate(BaseModel):
     clinic_type: str = "Sup"
     mos_required: int = 1
     consultant_id: Optional[int] = None
+    color: Optional[str] = None
 
 
 class ClinicTemplateOut(BaseModel):
@@ -288,6 +291,7 @@ class ClinicTemplateOut(BaseModel):
     mos_required: int
     consultant_id: Optional[int]
     consultant_name: Optional[str] = None
+    color: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -304,6 +308,7 @@ class DutyAssignmentOut(BaseModel):
     location: Optional[str]
     consultant_id: Optional[int]
     consultant_name: Optional[str] = None
+    clinic_type: Optional[str] = None
     is_manual_override: bool
 
     model_config = {"from_attributes": True}
@@ -314,6 +319,13 @@ class DayDutyRoster(BaseModel):
     day_name: str
     is_weekend: bool
     is_ph: bool
+    consultant_oncall: Optional[str] = None
+    ac_oncall: Optional[str] = None
+    mo1: Optional[str] = None
+    mo2: Optional[str] = None
+    mo3: Optional[str] = None
+    mo4: Optional[str] = None
+    mo5: Optional[str] = None
     post_call: list[str]
     ot_assignments: list[DutyAssignmentOut]
     eot_assignments: list[DutyAssignmentOut]

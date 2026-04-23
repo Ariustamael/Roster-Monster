@@ -46,7 +46,46 @@ def _migrate(engine):
             if "is_emergency" not in cols:
                 conn.execute(text("ALTER TABLE ot_template ADD COLUMN is_emergency BOOLEAN DEFAULT 0"))
             if "linked_call_slot" not in cols:
-                conn.execute(text("ALTER TABLE ot_template ADD COLUMN linked_call_slot VARCHAR(10)"))
+                conn.execute(text("ALTER TABLE ot_template ADD COLUMN linked_call_slot VARCHAR(50)"))
+            if "color" not in cols:
+                conn.execute(text("ALTER TABLE ot_template ADD COLUMN color VARCHAR(10)"))
+
+    if "clinic_template" in tables:
+        cols2 = {c["name"] for c in insp.get_columns("clinic_template")}
+        if "color" not in cols2:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE clinic_template ADD COLUMN color VARCHAR(10)"))
+
+    # Remove unique constraint on (day_of_week, room) from ot_template
+    if "ot_template" in tables:
+        indexes = insp.get_unique_constraints("ot_template")
+        has_legacy = any(
+            set(idx.get("column_names", [])) == {"day_of_week", "room"}
+            for idx in indexes
+        )
+        if has_legacy:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE ot_template RENAME TO _ot_template_old"))
+                conn.execute(text("""
+                    CREATE TABLE ot_template (
+                        id INTEGER PRIMARY KEY,
+                        day_of_week INTEGER NOT NULL,
+                        room VARCHAR(20) NOT NULL,
+                        consultant_id INTEGER REFERENCES staff(id),
+                        assistants_needed INTEGER DEFAULT 2,
+                        is_emergency BOOLEAN DEFAULT 0,
+                        linked_call_slot VARCHAR(50),
+                        color VARCHAR(10)
+                    )
+                """))
+                conn.execute(text("""
+                    INSERT INTO ot_template (id, day_of_week, room, consultant_id,
+                        assistants_needed, is_emergency, linked_call_slot, color)
+                    SELECT id, day_of_week, room, consultant_id,
+                        assistants_needed, is_emergency, linked_call_slot, color
+                    FROM _ot_template_old
+                """))
+                conn.execute(text("DROP TABLE _ot_template_old"))
 
 
 def init_db():
