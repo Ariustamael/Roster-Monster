@@ -8,9 +8,8 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..models import (
-    MonthlyConfig, ConsultantOnCall, ACOnCall, StepdownDay, EveningOTDate,
-    Staff, TeamAssignment, Team, Leave, CallPreference, CallAssignment,
-    PublicHoliday, MO_GRADES, PreferenceType, Grade,
+    MonthlyConfig, Staff, TeamAssignment, Leave, CallPreference, CallAssignment,
+    PublicHoliday, MO_GRADES, PreferenceType,
     OTTemplate, ClinicTemplate, CallType, DUTY_GRADES,
 )
 from ..schemas import RosterResponse, DayRoster, CallAssignmentOut, ManualOverrideCreate
@@ -18,7 +17,6 @@ from ..services.solver import (
     SolverInput, DayConfig, PersonInfo, solve, compute_fairness_stats,
 )
 from ..services.exporter import export_original, export_clean
-from ..services.validators import validate_full_roster as _validate
 
 router = APIRouter(prefix="/api/roster", tags=["roster"])
 

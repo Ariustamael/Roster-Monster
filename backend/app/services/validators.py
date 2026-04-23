@@ -1,5 +1,5 @@
 from datetime import date, timedelta
-from ..models import CallType, OVERNIGHT_CALL_TYPES
+from ..models import CallType
 
 
 def is_overnight(call_type: CallType, d: date, stepdown_dates: set[date]) -> bool:

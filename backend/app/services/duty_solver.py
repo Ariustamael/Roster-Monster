@@ -11,22 +11,23 @@ Runs AFTER call roster generation. For each weekday:
 Weekends/PH have no OT or clinics — only call team works.
 """
 
-from datetime import date, timedelta
+from datetime import date
 from dataclasses import dataclass, field
 from collections import defaultdict
 
 from ..models import (
-    CallType, DutyType, Session, OVERNIGHT_CALL_TYPES, DUTY_GRADES, Grade,
+    DutyType, Session, Grade,
 )
 
 
 @dataclass
 class OTSlot:
     room: str
-    consultant_id: int
+    consultant_id: int | None
     consultant_team_id: int | None
     assistants_needed: int
-    is_la: bool
+    is_emergency: bool = False
+    linked_call_slot: str | None = None
 
 
 @dataclass
@@ -214,15 +215,19 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
 
         # ── 1. OT assignments (full day) ────────────────────────────
         for ot in day.ot_slots:
+            if ot.assistants_needed <= 0:
+                continue
             pool = [p for p in available if p.id not in full_day_assigned]
             if not pool:
                 break
+
+            duty_type = DutyType.EOT if ot.is_emergency else DutyType.OT
 
             scored = sorted(
                 pool,
                 key=lambda p: (
                     fairness.ot_score(p.id)
-                    + (5.0 if p.supervisor_id == ot.consultant_id else 0.0)
+                    + (5.0 if ot.consultant_id and p.supervisor_id == ot.consultant_id else 0.0)
                     + (3.0 if ot.consultant_team_id and p.team_id == ot.consultant_team_id else 0.0)
                     + (3.0 if p.grade == Grade.SENIOR_RESIDENT.value else 0.0)
                 ),
@@ -233,7 +238,7 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 chosen = scored[i]
                 results.append(DutyResult(
                     date=day.d, staff_id=chosen.id,
-                    session=Session.FULL_DAY, duty_type=DutyType.OT,
+                    session=Session.FULL_DAY, duty_type=duty_type,
                     location=ot.room, consultant_id=ot.consultant_id,
                 ))
                 full_day_assigned.add(chosen.id)
@@ -288,6 +293,7 @@ def compute_duty_stats(
     for p in mo_pool:
         stats[p.name] = {
             "ot_days": 0,
+            "eot_days": 0,
             "supervised_sessions": 0,
             "mopd_sessions": 0,
             "admin_sessions": 0,
@@ -299,6 +305,8 @@ def compute_duty_stats(
             continue
         if r.duty_type == DutyType.OT:
             stats[name]["ot_days"] += 1
+        elif r.duty_type == DutyType.EOT:
+            stats[name]["eot_days"] += 1
         elif r.duty_type in (DutyType.CLINIC, DutyType.CAT_A):
             stats[name]["supervised_sessions"] += 1
         elif r.duty_type == DutyType.MOPD:

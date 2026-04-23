@@ -13,8 +13,8 @@ from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 
 from ..models import (
-    CallAssignment, DutyAssignment, Staff, MonthlyConfig,
-    ConsultantOnCall, ACOnCall, DutyType, Session, CallType,
+    CallAssignment, DutyAssignment, Staff,
+    ConsultantOnCall, ACOnCall, DutyType,
 )
 
 

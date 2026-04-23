@@ -453,8 +453,8 @@ def seed():
     print(f"  SMOs: {smo_count}, MOs: {mo_count}, Registrars: {reg_count}, Senior Residents: {sr_count}")
     print(f"  Consultant on-call days: {len(consultant_oncall)}")
     print(f"  AC on-call days (secondary): {len(ac_oncall)}")
-    print(f"  Evening OT dates: 10")
-    print(f"  Stepdown days: 3")
+    print("  Evening OT dates: 10")
+    print("  Stepdown days: 3")
     print(f"  OT templates: {len(ot_template_data)}")
     print(f"  Clinic templates: {len(clinic_data)}")
 

@@ -9,7 +9,7 @@ from ..database import get_db
 from ..models import (
     MonthlyConfig, CallAssignment, DutyAssignment, Staff, TeamAssignment,
     OTTemplate, ClinicTemplate, Leave, PublicHoliday,
-    DUTY_GRADES, CallType, OVERNIGHT_CALL_TYPES, DutyType, Session,
+    DUTY_GRADES, CallType, DutyType, Session,
 )
 from ..schemas import (
     DutyRosterResponse, DayDutyRoster, DutyAssignmentOut,
@@ -26,17 +26,21 @@ router = APIRouter(prefix="/api", tags=["duties"])
 
 # ── OT Templates ────────────────────────────────────────────────────────
 
+def _ot_out(r: OTTemplate) -> OTTemplateOut:
+    return OTTemplateOut(
+        id=r.id, day_of_week=r.day_of_week, room=r.room,
+        consultant_id=r.consultant_id,
+        consultant_name=r.consultant.name if r.consultant else None,
+        assistants_needed=r.assistants_needed,
+        is_emergency=r.is_emergency or False,
+        linked_call_slot=r.linked_call_slot,
+    )
+
+
 @router.get("/templates/ot", response_model=list[OTTemplateOut])
 def list_ot_templates(db: DBSession = Depends(get_db)):
     rows = db.query(OTTemplate).order_by(OTTemplate.day_of_week, OTTemplate.room).all()
-    return [
-        OTTemplateOut(
-            id=r.id, day_of_week=r.day_of_week, room=r.room,
-            consultant_id=r.consultant_id, consultant_name=r.consultant.name,
-            assistants_needed=r.assistants_needed, is_la=r.is_la,
-        )
-        for r in rows
-    ]
+    return [_ot_out(r) for r in rows]
 
 
 @router.post("/templates/ot", response_model=OTTemplateOut)
@@ -45,11 +49,7 @@ def create_ot_template(payload: OTTemplateCreate, db: DBSession = Depends(get_db
     db.add(t)
     db.commit()
     db.refresh(t)
-    return OTTemplateOut(
-        id=t.id, day_of_week=t.day_of_week, room=t.room,
-        consultant_id=t.consultant_id, consultant_name=t.consultant.name,
-        assistants_needed=t.assistants_needed, is_la=t.is_la,
-    )
+    return _ot_out(t)
 
 
 @router.put("/templates/ot/{template_id}", response_model=OTTemplateOut)
@@ -61,10 +61,7 @@ def update_ot_template(template_id: int, payload: OTTemplateCreate, db: DBSessio
         setattr(t, k, v)
     db.commit()
     db.refresh(t)
-    return OTTemplateOut(
-        id=t.id, day_of_week=t.day_of_week, room=t.room,
-        consultant_id=t.consultant_id, consultant_name=t.consultant.name,
-        assistants_needed=t.assistants_needed, is_la=t.is_la,
+    return _ot_out(t
     )
 
 
@@ -197,14 +194,22 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         is_ph = d in ph_dates
 
         ot_slots = []
-        if not is_wknd and not is_ph:
-            for t in ot_by_dow.get(dow, []):
+        for t in ot_by_dow.get(dow, []):
+            if t.is_emergency:
                 ot_slots.append(OTSlot(
                     room=t.room,
                     consultant_id=t.consultant_id,
-                    consultant_team_id=consultant_team.get(t.consultant_id),
+                    consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
                     assistants_needed=t.assistants_needed,
-                    is_la=t.is_la,
+                    is_emergency=True,
+                    linked_call_slot=t.linked_call_slot,
+                ))
+            elif not is_wknd and not is_ph:
+                ot_slots.append(OTSlot(
+                    room=t.room,
+                    consultant_id=t.consultant_id,
+                    consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
+                    assistants_needed=t.assistants_needed,
                 ))
 
         am_clinics = []
@@ -273,6 +278,87 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     )
 
 
+def _build_day_rosters(
+    config: MonthlyConfig,
+    db: DBSession,
+    duty_results,
+    pid_to_name: dict[int, str],
+    cons_names: dict[int, str],
+    postcall_dates: dict[date, set[int]],
+) -> list[DayDutyRoster]:
+    from ..services.duty_solver import DutyResult as DR
+
+    ph_dates = {
+        r.date for r in db.query(PublicHoliday).all()
+        if r.date.year == config.year and r.date.month == config.month
+    }
+
+    results_by_date: dict[date, list] = defaultdict(list)
+    for r in duty_results:
+        r_date = r.date if isinstance(r, DR) else r.date
+        results_by_date[r_date].append(r)
+
+    all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
+
+    day_rosters: list[DayDutyRoster] = []
+    num_days = calendar.monthrange(config.year, config.month)[1]
+    for day_num in range(1, num_days + 1):
+        d = date(config.year, config.month, day_num)
+        is_wknd = d.weekday() >= 5
+        is_ph = d in ph_dates
+
+        pc_ids = postcall_dates.get(d, set())
+        post_call_names = sorted([all_staff_names.get(pid, f"ID:{pid}") for pid in pc_ids])
+
+        day_results = results_by_date.get(d, [])
+        ot_out = []
+        eot_out = []
+        am_clinics_out = []
+        pm_clinics_out = []
+        am_admin = []
+        pm_admin = []
+
+        for r in day_results:
+            staff_id = r.staff_id
+            out = DutyAssignmentOut(
+                id=getattr(r, 'id', 0) or 0,
+                date=r.date, staff_id=staff_id,
+                staff_name=pid_to_name.get(staff_id, all_staff_names.get(staff_id, f"ID:{staff_id}")),
+                session=r.session, duty_type=r.duty_type,
+                location=r.location, consultant_id=r.consultant_id,
+                consultant_name=cons_names.get(r.consultant_id) if r.consultant_id else None,
+                is_manual_override=getattr(r, 'is_manual_override', False),
+            )
+            if r.duty_type == DutyType.EOT:
+                eot_out.append(out)
+            elif r.duty_type == DutyType.OT:
+                ot_out.append(out)
+            elif r.session == Session.AM:
+                if r.duty_type == DutyType.ADMIN:
+                    am_admin.append(out.staff_name)
+                else:
+                    am_clinics_out.append(out)
+            elif r.session == Session.PM:
+                if r.duty_type == DutyType.ADMIN:
+                    pm_admin.append(out.staff_name)
+                else:
+                    pm_clinics_out.append(out)
+
+        day_rosters.append(DayDutyRoster(
+            date=d, day_name=d.strftime("%a"),
+            is_weekend=is_wknd, is_ph=is_ph,
+            post_call=post_call_names,
+            ot_assignments=ot_out,
+            eot_assignments=eot_out,
+            am_clinics=am_clinics_out,
+            pm_clinics=pm_clinics_out,
+            am_admin=am_admin,
+            pm_admin=pm_admin,
+        ))
+
+    return day_rosters
+
+
 @router.post("/roster/{config_id}/generate-duties", response_model=DutyRosterResponse)
 def generate_duties(config_id: int, db: DBSession = Depends(get_db)):
     config = db.query(MonthlyConfig).get(config_id)
@@ -310,63 +396,7 @@ def generate_duties(config_id: int, db: DBSession = Depends(get_db)):
         ))
     db.commit()
 
-    # Build response
-    ph_dates = {
-        r.date for r in db.query(PublicHoliday).all()
-        if r.date.year == config.year and r.date.month == config.month
-    }
-
-    day_rosters: list[DayDutyRoster] = []
-    results_by_date: dict[date, list] = defaultdict(list)
-    for r in duty_results:
-        results_by_date[r.date].append(r)
-
-    num_days = calendar.monthrange(config.year, config.month)[1]
-    for day_num in range(1, num_days + 1):
-        d = date(config.year, config.month, day_num)
-        is_wknd = d.weekday() >= 5
-        is_ph = d in ph_dates
-
-        day_results = results_by_date.get(d, [])
-
-        ot_out = []
-        am_clinics_out = []
-        pm_clinics_out = []
-        am_admin = []
-        pm_admin = []
-
-        for r in day_results:
-            out = DutyAssignmentOut(
-                id=0, date=r.date, staff_id=r.staff_id,
-                staff_name=pid_to_name.get(r.staff_id, f"ID:{r.staff_id}"),
-                session=r.session, duty_type=r.duty_type,
-                location=r.location, consultant_id=r.consultant_id,
-                consultant_name=cons_names.get(r.consultant_id) if r.consultant_id else None,
-                is_manual_override=False,
-            )
-            if r.duty_type == DutyType.OT:
-                ot_out.append(out)
-            elif r.session == Session.AM:
-                if r.duty_type == DutyType.ADMIN:
-                    am_admin.append(out.staff_name)
-                else:
-                    am_clinics_out.append(out)
-            elif r.session == Session.PM:
-                if r.duty_type == DutyType.ADMIN:
-                    pm_admin.append(out.staff_name)
-                else:
-                    pm_clinics_out.append(out)
-
-        day_rosters.append(DayDutyRoster(
-            date=d, day_name=d.strftime("%a"),
-            is_weekend=is_wknd, is_ph=is_ph,
-            ot_assignments=ot_out,
-            am_clinics=am_clinics_out,
-            pm_clinics=pm_clinics_out,
-            am_admin=am_admin,
-            pm_admin=pm_admin,
-        ))
-
+    day_rosters = _build_day_rosters(config, db, duty_results, pid_to_name, cons_names, inp.postcall_dates)
     duty_stats = compute_duty_stats(duty_results, inp.mo_pool)
 
     return DutyRosterResponse(
@@ -412,70 +442,26 @@ def view_duties(config_id: int, db: DBSession = Depends(get_db)):
     if not rows:
         raise HTTPException(404, "No duty roster generated yet")
 
-    year, month = config.year, config.month
-    num_days = calendar.monthrange(year, month)[1]
+    all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
+    cons_names = all_staff_names
+    pid_to_name = {r.staff_id: r.staff.name for r in rows}
 
-    cons_names = {s.id: s.name for s in db.query(Staff).all()}
-    ph_dates = {
-        r.date for r in db.query(PublicHoliday).all()
-        if r.date.year == year and r.date.month == month
-    }
+    stepdown_dates = {sd.date for sd in config.stepdown_days}
+    call_rows = db.query(CallAssignment).filter(CallAssignment.config_id == config_id).all()
+    postcall_dates: dict[date, set[int]] = defaultdict(set)
+    for r in call_rows:
+        if is_overnight(r.call_type, r.date, stepdown_dates):
+            next_day = r.date + timedelta(days=1)
+            postcall_dates[next_day].add(r.staff_id)
 
-    results_by_date: dict[date, list[DutyAssignment]] = defaultdict(list)
-    for r in rows:
-        results_by_date[r.date].append(r)
-
-    day_rosters: list[DayDutyRoster] = []
-    for day_num in range(1, num_days + 1):
-        d = date(year, month, day_num)
-        is_wknd = d.weekday() >= 5
-        is_ph = d in ph_dates
-
-        day_results = results_by_date.get(d, [])
-        ot_out = []
-        am_clinics_out = []
-        pm_clinics_out = []
-        am_admin = []
-        pm_admin = []
-
-        for r in day_results:
-            out = DutyAssignmentOut(
-                id=r.id, date=r.date, staff_id=r.staff_id,
-                staff_name=r.staff.name, session=r.session,
-                duty_type=r.duty_type, location=r.location,
-                consultant_id=r.consultant_id,
-                consultant_name=cons_names.get(r.consultant_id) if r.consultant_id else None,
-                is_manual_override=r.is_manual_override,
-            )
-            if r.duty_type == DutyType.OT:
-                ot_out.append(out)
-            elif r.session == Session.AM:
-                if r.duty_type == DutyType.ADMIN:
-                    am_admin.append(out.staff_name)
-                else:
-                    am_clinics_out.append(out)
-            elif r.session == Session.PM:
-                if r.duty_type == DutyType.ADMIN:
-                    pm_admin.append(out.staff_name)
-                else:
-                    pm_clinics_out.append(out)
-
-        day_rosters.append(DayDutyRoster(
-            date=d, day_name=d.strftime("%a"),
-            is_weekend=is_wknd, is_ph=is_ph,
-            ot_assignments=ot_out,
-            am_clinics=am_clinics_out,
-            pm_clinics=pm_clinics_out,
-            am_admin=am_admin,
-            pm_admin=pm_admin,
-        ))
+    day_rosters = _build_day_rosters(config, db, rows, pid_to_name, cons_names, dict(postcall_dates))
 
     duty_staff = (
         db.query(Staff)
         .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in DUTY_GRADES]))
         .all()
     )
-    mo_pool = [PersonInfo(id=s.id, name=s.name) for s in duty_staff]
+    mo_pool = [PersonInfo(id=s.id, name=s.name, grade=s.grade.value) for s in duty_staff]
     from ..services.duty_solver import DutyResult
     duty_results = [
         DutyResult(date=r.date, staff_id=r.staff_id, session=r.session,
@@ -485,6 +471,6 @@ def view_duties(config_id: int, db: DBSession = Depends(get_db)):
     duty_stats = compute_duty_stats(duty_results, mo_pool)
 
     return DutyRosterResponse(
-        year=year, month=month,
+        year=config.year, month=config.month,
         days=day_rosters, duty_stats=duty_stats,
     )

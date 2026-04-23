@@ -249,19 +249,21 @@ class RosterResponse(BaseModel):
 class OTTemplateCreate(BaseModel):
     day_of_week: int
     room: str
-    consultant_id: int
+    consultant_id: Optional[int] = None
     assistants_needed: int = 2
-    is_la: bool = False
+    is_emergency: bool = False
+    linked_call_slot: Optional[str] = None
 
 
 class OTTemplateOut(BaseModel):
     id: int
     day_of_week: int
     room: str
-    consultant_id: int
-    consultant_name: str
+    consultant_id: Optional[int]
+    consultant_name: Optional[str] = None
     assistants_needed: int
-    is_la: bool
+    is_emergency: bool
+    linked_call_slot: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -312,7 +314,9 @@ class DayDutyRoster(BaseModel):
     day_name: str
     is_weekend: bool
     is_ph: bool
+    post_call: list[str]
     ot_assignments: list[DutyAssignmentOut]
+    eot_assignments: list[DutyAssignmentOut]
     am_clinics: list[DutyAssignmentOut]
     pm_clinics: list[DutyAssignmentOut]
     am_admin: list[str]

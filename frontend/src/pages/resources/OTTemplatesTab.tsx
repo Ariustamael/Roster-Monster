@@ -3,6 +3,8 @@ import { api } from "../../api";
 import type { OTTemplate, Staff } from "../../types";
 import { DAY_NAMES, CONS_GRADES } from "./constants";
 
+const CALL_SLOTS = ["MO1", "MO2", "MO3", "MO4", "MO5"];
+
 export default function OTTemplatesTab() {
   const [templates, setTemplates] = useState<OTTemplate[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -51,7 +53,8 @@ export default function OTTemplatesTab() {
       room: tmpl.room,
       consultant_id: tmpl.consultant_id,
       assistants_needed: tmpl.assistants_needed,
-      is_la: tmpl.is_la,
+      is_emergency: tmpl.is_emergency,
+      linked_call_slot: tmpl.linked_call_slot,
     });
     setDragId(null);
   }
@@ -65,7 +68,10 @@ export default function OTTemplatesTab() {
       grid[DAY_NAMES[t.day_of_week]].push(t);
     }
   }
-  for (const day of DAY_NAMES) grid[day].sort((a, b) => a.room.localeCompare(b.room));
+  for (const day of DAY_NAMES) grid[day].sort((a, b) => {
+    if (a.is_emergency !== b.is_emergency) return a.is_emergency ? 1 : -1;
+    return a.room.localeCompare(b.room);
+  });
 
   const editTemplate = editId != null ? templates.find((t) => t.id === editId) : null;
 
@@ -95,16 +101,26 @@ export default function OTTemplatesTab() {
                     <div
                       key={t.id}
                       className="clinic-card"
-                      style={{ backgroundColor: t.is_la ? "#fef7e0" : "#dbeafe", cursor: "grab" }}
+                      style={{
+                        backgroundColor: t.is_emergency ? "#fef3c7" : "#dbeafe",
+                        borderColor: t.is_emergency ? "#f59e0b" : "#93c5fd",
+                        cursor: "grab",
+                      }}
                       draggable
                       onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(t.id)); setDragId(t.id); }}
                       onDragEnd={() => setDragId(null)}
                       onClick={() => setEditId(t.id)}
                     >
-                      <div className="clinic-card-type">{t.room}</div>
-                      <div className="clinic-card-cons">{t.consultant_name}</div>
+                      <div className="clinic-card-type">
+                        {t.is_emergency ? "⚡ " : ""}{t.room}
+                      </div>
+                      <div className="clinic-card-cons">
+                        {t.is_emergency
+                          ? (t.linked_call_slot ? `→ ${t.linked_call_slot}` : "Emergency")
+                          : (t.consultant_name ?? "No consultant")}
+                      </div>
                       <div className="clinic-card-mo">
-                        {t.assistants_needed} asst{t.is_la ? " · LA" : ""}
+                        {t.assistants_needed} asst
                       </div>
                     </div>
                   ))}
@@ -149,14 +165,24 @@ function OTFormModal({
 }) {
   const [dow, setDow] = useState(initial?.day_of_week ?? 0);
   const [room, setRoom] = useState(initial?.room ?? "");
-  const [consId, setConsId] = useState(initial?.consultant_id ?? consultants[0]?.id ?? 0);
+  const [consId, setConsId] = useState<number | null>(initial?.consultant_id ?? null);
   const [assists, setAssists] = useState(initial?.assistants_needed ?? 2);
-  const [isLa, setIsLa] = useState(initial?.is_la ?? false);
+  const [isEmergency, setIsEmergency] = useState(initial?.is_emergency ?? false);
+  const [linkedSlot, setLinkedSlot] = useState<string | null>(initial?.linked_call_slot ?? null);
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>{title}</h3>
+        <div className="form-group">
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={isEmergency} onChange={(e) => {
+              setIsEmergency(e.target.checked);
+              if (e.target.checked) setConsId(null);
+            }} />
+            Emergency OT (24h, no fixed consultant)
+          </label>
+        </div>
         <div className="form-group">
           <label>Day</label>
           <select value={dow} onChange={(e) => setDow(Number(e.target.value))}>
@@ -165,30 +191,44 @@ function OTFormModal({
         </div>
         <div className="form-group">
           <label>Room</label>
-          <input type="text" value={room} onChange={(e) => setRoom(e.target.value)} placeholder="e.g. OT3" />
+          <input type="text" value={room} onChange={(e) => setRoom(e.target.value)} placeholder="e.g. EOT, OT3" />
         </div>
-        <div className="form-group">
-          <label>Consultant</label>
-          <select value={consId} onChange={(e) => setConsId(Number(e.target.value))}>
-            {consultants.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-        </div>
+        {!isEmergency && (
+          <div className="form-group">
+            <label>Consultant</label>
+            <select value={consId ?? ""} onChange={(e) => setConsId(e.target.value ? Number(e.target.value) : null)}>
+              <option value="">— None —</option>
+              {consultants.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+        )}
         <div className="form-group">
           <label>Assistants Needed</label>
-          <input type="number" value={assists} onChange={(e) => setAssists(Number(e.target.value))} min={1} max={4} />
+          <input type="number" value={assists} onChange={(e) => setAssists(Number(e.target.value))} min={0} max={6} />
         </div>
-        <div className="form-group">
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" checked={isLa} onChange={(e) => setIsLa(e.target.checked)} /> LA (Local Anaesthesia)
-          </label>
-        </div>
+        {isEmergency && (
+          <div className="form-group">
+            <label>Linked Call Slot (auto-assign from call roster)</label>
+            <select value={linkedSlot ?? ""} onChange={(e) => setLinkedSlot(e.target.value || null)}>
+              <option value="">— None —</option>
+              {CALL_SLOTS.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        )}
         <div className="modal-actions">
           {onDelete && (
             <button className="btn btn-danger" onClick={onDelete} style={{ marginRight: "auto" }}>Delete</button>
           )}
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
           <button className="btn btn-primary" onClick={() => {
-            if (room.trim()) onSave({ day_of_week: dow, room: room.trim(), consultant_id: consId, assistants_needed: assists, is_la: isLa });
+            if (room.trim()) onSave({
+              day_of_week: dow,
+              room: room.trim(),
+              consultant_id: isEmergency ? null : consId,
+              assistants_needed: assists,
+              is_emergency: isEmergency,
+              linked_call_slot: isEmergency ? linkedSlot : null,
+            });
           }}>Save</button>
         </div>
       </div>

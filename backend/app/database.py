@@ -39,8 +39,14 @@ def _migrate(engine):
                 conn.execute(text("ALTER TABLE clinic_template ADD COLUMN clinic_type VARCHAR(20) DEFAULT 'Sup'"))
             if "mos_required" not in cols:
                 conn.execute(text("ALTER TABLE clinic_template ADD COLUMN mos_required INTEGER DEFAULT 1"))
-            if "is_supervised" in cols and "clinic_type" in cols:
-                pass
+
+    if "ot_template" in tables:
+        cols = {c["name"] for c in insp.get_columns("ot_template")}
+        with engine.begin() as conn:
+            if "is_emergency" not in cols:
+                conn.execute(text("ALTER TABLE ot_template ADD COLUMN is_emergency BOOLEAN DEFAULT 0"))
+            if "linked_call_slot" not in cols:
+                conn.execute(text("ALTER TABLE ot_template ADD COLUMN linked_call_slot VARCHAR(10)"))
 
 
 def init_db():

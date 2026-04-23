@@ -151,9 +151,9 @@ export const api = {
   // OT Templates
   getOTTemplates: () =>
     request<import("./types").OTTemplate[]>("/templates/ot"),
-  createOTTemplate: (data: { day_of_week: number; room: string; consultant_id: number; assistants_needed?: number; is_la?: boolean }) =>
+  createOTTemplate: (data: { day_of_week: number; room: string; consultant_id?: number | null; assistants_needed?: number; is_emergency?: boolean; linked_call_slot?: string | null }) =>
     request<import("./types").OTTemplate>("/templates/ot", { method: "POST", body: JSON.stringify(data) }),
-  updateOTTemplate: (id: number, data: { day_of_week: number; room: string; consultant_id: number; assistants_needed?: number; is_la?: boolean }) =>
+  updateOTTemplate: (id: number, data: { day_of_week: number; room: string; consultant_id?: number | null; assistants_needed?: number; is_emergency?: boolean; linked_call_slot?: string | null }) =>
     request<import("./types").OTTemplate>(`/templates/ot/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteOTTemplate: (id: number) =>
     request<{ ok: boolean }>(`/templates/ot/${id}`, { method: "DELETE" }),

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..models import (
     MonthlyConfig, ConsultantOnCall, ACOnCall,
-    RegistrarDuty, StepdownDay, EveningOTDate, Staff, PublicHoliday,
+    RegistrarDuty, StepdownDay, EveningOTDate, PublicHoliday,
 )
 from ..schemas import (
     MonthlyConfigCreate, MonthlyConfigOut,

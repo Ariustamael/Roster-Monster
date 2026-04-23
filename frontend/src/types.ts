@@ -65,7 +65,9 @@ export interface DayDutyRoster {
   day_name: string;
   is_weekend: boolean;
   is_ph: boolean;
+  post_call: string[];
   ot_assignments: DutyAssignment[];
+  eot_assignments: DutyAssignment[];
   am_clinics: DutyAssignment[];
   pm_clinics: DutyAssignment[];
   am_admin: string[];
@@ -81,6 +83,7 @@ export interface DutyRosterResponse {
 
 export interface DutyStats {
   ot_days: number;
+  eot_days: number;
   supervised_sessions: number;
   mopd_sessions: number;
   admin_sessions: number;
@@ -136,10 +139,11 @@ export interface OTTemplate {
   id: number;
   day_of_week: number;
   room: string;
-  consultant_id: number;
-  consultant_name: string;
+  consultant_id: number | null;
+  consultant_name: string | null;
   assistants_needed: number;
-  is_la: boolean;
+  is_emergency: boolean;
+  linked_call_slot: string | null;
 }
 
 export interface ClinicTemplate {

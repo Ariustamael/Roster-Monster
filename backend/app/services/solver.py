@@ -24,7 +24,7 @@ from datetime import date, timedelta
 from dataclasses import dataclass, field
 from collections import defaultdict
 
-from ..models import CallType, PreferenceType, OVERNIGHT_CALL_TYPES, MO_GRADES, Grade
+from ..models import CallType, Grade
 from .validators import (
     is_overnight,
     check_post_call,

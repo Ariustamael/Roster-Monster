@@ -44,6 +44,7 @@ OVERNIGHT_CALL_TYPES = {CallType.MO1, CallType.MO2}
 
 class DutyType(str, enum.Enum):
     OT = "OT"
+    EOT = "EOT"
     CLINIC = "Clinic"
     MOPD = "MOPD"
     ADMIN = "Admin"
@@ -278,9 +279,10 @@ class OTTemplate(Base):
     id = Column(Integer, primary_key=True)
     day_of_week = Column(Integer, nullable=False)  # 0=Mon..4=Fri
     room = Column(String(20), nullable=False)       # OT3, OT4, OT10, DSOT3, OT6
-    consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=False)
-    assistants_needed = Column(Integer, default=2)  # 2 for active OT, 1 for LA
-    is_la = Column(Boolean, default=False)
+    consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
+    assistants_needed = Column(Integer, default=2)
+    is_emergency = Column(Boolean, default=False)
+    linked_call_slot = Column(String(10), nullable=True)
 
     consultant = relationship("Staff")
 
