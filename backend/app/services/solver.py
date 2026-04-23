@@ -130,14 +130,31 @@ class FairnessTracker:
 DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
-def _required_slots(day: DayConfig, call_type_configs: list[CallTypeInfo]) -> list[CallTypeInfo]:
+def _day_matches_applicable(day: DayConfig, applicable_days: str) -> bool:
+    val = applicable_days.strip().lower()
+    if val == "all":
+        return True
+    if val == "weekday":
+        return day.d.weekday() < 5 and not day.is_ph and not day.is_stepdown
+    if val == "weekend_ph":
+        return day.is_weekend or day.is_ph
+    if val == "stepdown":
+        return day.is_stepdown
+    if val == "evening_ot":
+        return day.has_evening_ot
     day_label = DAY_LABELS[day.d.weekday()]
+    tokens = [t.strip() for t in applicable_days.split(",")]
+    if day_label in tokens:
+        return True
+    if "PH" in tokens and day.is_ph:
+        return True
+    return False
+
+
+def _required_slots(day: DayConfig, call_type_configs: list[CallTypeInfo]) -> list[CallTypeInfo]:
     slots = []
     for ct in sorted(call_type_configs, key=lambda c: c.display_order):
-        applicable = [d.strip() for d in ct.applicable_days.split(",")]
-        if day_label in applicable:
-            slots.append(ct)
-        elif "PH" in applicable and day.is_ph:
+        if _day_matches_applicable(day, ct.applicable_days):
             slots.append(ct)
     return slots
 

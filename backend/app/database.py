@@ -94,6 +94,23 @@ def _migrate(engine):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE staff RENAME COLUMN grade TO rank"))
 
+    # ── Phase 2: Convert enum rank names to display names ──────────────
+    if "staff" in tables:
+        rank_map = {
+            "SENIOR_CONSULTANT": "Senior Consultant",
+            "CONSULTANT": "Consultant",
+            "ASSOCIATE_CONSULTANT": "Associate Consultant",
+            "SENIOR_STAFF_REGISTRAR": "Senior Staff Registrar",
+            "SENIOR_RESIDENT": "Senior Resident",
+            "SENIOR_MEDICAL_OFFICER": "Senior Medical Officer",
+            "MEDICAL_OFFICER": "Medical Officer",
+        }
+        with engine.begin() as conn:
+            for old, new in rank_map.items():
+                conn.execute(text(
+                    "UPDATE staff SET rank = :new WHERE rank = :old"
+                ), {"old": old, "new": new})
+
     # ── Phase 2: Convert call_assignment.call_type from enum to varchar ──
     if "call_assignment" in tables:
         col_info = insp.get_columns("call_assignment")
@@ -132,11 +149,12 @@ def _migrate(engine):
             count = conn.execute(text("SELECT COUNT(*) FROM call_type_config")).scalar()
             if count == 0:
                 call_types = [
-                    ("MO1", 0, 1, "8am", 1, 2, 5, 1, "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"),
-                    ("MO2", 1, 1, "8am", 1, 2, 5, 1, "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"),
-                    ("MO3", 2, 0, "none", 1, 2, 3, 1, "Mon,Tue,Wed,Thu,Fri"),
-                    ("MO4", 3, 0, "none", 1, 0, 1, 0, "Mon,Tue,Wed,Thu,Fri"),
-                    ("MO5", 4, 0, "none", 1, 0, 1, 0, "Mon,Tue,Wed,Thu,Fri"),
+                    ("MO1", 0, 1, "8am", 1, 2, 5, 1, "all"),
+                    ("MO2", 1, 1, "8am", 1, 2, 5, 1, "all"),
+                    ("MO3 (WD)", 2, 0, "none", 1, 0, 3, 0, "weekday"),
+                    ("MO3 (WE)", 3, 1, "8am", 1, 2, 5, 1, "stepdown"),
+                    ("MO4", 4, 0, "none", 1, 0, 1, 0, "evening_ot"),
+                    ("MO5", 5, 0, "none", 1, 0, 1, 0, "evening_ot"),
                 ]
                 for name, order, overnight, pct, max_c, gap, diff, fairness, days in call_types:
                     conn.execute(text(
@@ -158,7 +176,7 @@ def _migrate(engine):
                     "SELECT id FROM rank_config WHERE abbreviation = 'MO'"
                 )).scalar()
                 if smo_id and mo_id:
-                    for ct_name in ["MO1", "MO2", "MO4", "MO5"]:
+                    for ct_name in ["MO1", "MO2", "MO3 (WE)", "MO4", "MO5"]:
                         ct_id = conn.execute(text(
                             "SELECT id FROM call_type_config WHERE name = :n"
                         ), {"n": ct_name}).scalar()
@@ -169,16 +187,17 @@ def _migrate(engine):
                             conn.execute(text(
                                 "INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"
                             ), {"ct": ct_id, "r": mo_id})
-                    # MO3: SMO only
-                    mo3_id = conn.execute(text(
-                        "SELECT id FROM call_type_config WHERE name = 'MO3'"
+                    # MO3 (WD): SMO only
+                    mo3wd_id = conn.execute(text(
+                        "SELECT id FROM call_type_config WHERE name = 'MO3 (WD)'"
                     )).scalar()
-                    if mo3_id:
+                    if mo3wd_id:
                         conn.execute(text(
                             "INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"
-                        ), {"ct": mo3_id, "r": smo_id})
+                        ), {"ct": mo3wd_id, "r": smo_id})
 
 
 def init_db():
+    from . import models  # noqa: F401 — ensure all models registered with Base
     Base.metadata.create_all(bind=engine)
     _migrate(engine)

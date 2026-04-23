@@ -6,6 +6,8 @@ import { CONS_RANKS, AC_RANKS } from "./constants";
 interface DayRow {
   date: string;
   dayName: string;
+  dayNum: number;
+  dow: number;
   isWeekend: boolean;
   consultantId: number | "";
   supervisingId: number | "";
@@ -18,8 +20,6 @@ interface DragPayload {
   staffId: number;
   staffType: "consultant" | "ac";
 }
-
-// ── Sidebar staff card ─────────────────────────────────────────────────────
 
 function StaffCard({
   staff,
@@ -43,8 +43,6 @@ function StaffCard({
     </div>
   );
 }
-
-// ── Single drop zone inside a day cell ────────────────────────────────────
 
 function DropSlot({
   label,
@@ -119,7 +117,7 @@ function DropSlot({
   );
 }
 
-// ── Main component ─────────────────────────────────────────────────────────
+const DOW_HEADERS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default function ConsultantRosterTab({ configId, year, month }: { configId: number; year: number; month: number }) {
   const [rows, setRows] = useState<DayRow[]>([]);
@@ -155,6 +153,8 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
       dayRows.push({
         date: dateStr,
         dayName: dt.toLocaleDateString("en", { weekday: "short" }),
+        dayNum: d,
+        dow: (dt.getDay() + 6) % 7,
         isWeekend: dt.getDay() === 0 || dt.getDay() === 6,
         consultantId: cons?.consultant_id ?? "",
         supervisingId: cons?.supervising_consultant_id ?? "",
@@ -169,10 +169,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
   useEffect(() => { load(); }, [load]);
 
   const consultants = staff.filter((s) => CONS_RANKS.includes(s.rank) && !AC_RANKS.includes(s.rank));
-
   const acs = staff.filter((s) => AC_RANKS.includes(s.rank));
-
-  // Build lookup maps for names
   const staffById = new Map<number, Staff>(staff.map((s) => [s.id, s]));
 
   function handleDragStart(payload: DragPayload) {
@@ -194,7 +191,6 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
     const payload = dragPayload.current;
     if (!payload) return;
 
-    // Validate drop: consultants go to consultant/supervising, acs go to ac
     if (slotType === "ac" && payload.staffType !== "ac") return;
     if ((slotType === "consultant" || slotType === "supervising") && payload.staffType !== "consultant") return;
 
@@ -250,12 +246,28 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
 
   if (loading) return <div className="loading"><span className="spinner" /> Loading...</div>;
 
+  const weeks: (DayRow | null)[][] = [];
+  let currentWeek: (DayRow | null)[] = [];
+  if (rows.length > 0) {
+    for (let i = 0; i < rows[0].dow; i++) currentWeek.push(null);
+    for (const r of rows) {
+      currentWeek.push(r);
+      if (currentWeek.length === 7) {
+        weeks.push(currentWeek);
+        currentWeek = [];
+      }
+    }
+    if (currentWeek.length > 0) {
+      while (currentWeek.length < 7) currentWeek.push(null);
+      weeks.push(currentWeek);
+    }
+  }
+
   return (
     <div style={{ display: "flex", gap: 0, alignItems: "flex-start", minHeight: 0 }}>
-      {/* ── Staff sidebar ── */}
       <div
         style={{
-          width: 200,
+          width: 180,
           flexShrink: 0,
           marginRight: 16,
           position: "sticky",
@@ -265,7 +277,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
         }}
       >
         <div className="card" style={{ marginBottom: 12 }}>
-          <h3 style={{ fontSize: 11, marginBottom: 8 }}>Consultants</h3>
+          <h3 style={{ fontSize: 11, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>Consultants</h3>
           {consultants.length === 0 && (
             <div className="team-empty">No consultants</div>
           )}
@@ -274,7 +286,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
           ))}
         </div>
         <div className="card">
-          <h3 style={{ fontSize: 11, marginBottom: 8 }}>ACs</h3>
+          <h3 style={{ fontSize: 11, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>ACs</h3>
           {acs.length === 0 && (
             <div className="team-empty">No ACs</div>
           )}
@@ -284,7 +296,6 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
         </div>
       </div>
 
-      {/* ── Calendar grid ── */}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center" }}>
           <button className="btn btn-primary" onClick={save} disabled={saving || !dirty}>
@@ -293,58 +304,66 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
           {dirty && <span style={{ fontSize: 12, color: "var(--warning)" }}>Unsaved changes</span>}
         </div>
 
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ borderCollapse: "collapse", tableLayout: "fixed", minWidth: numDays * 110 }}>
-            <colgroup>
-              {rows.map((r) => (
-                <col key={r.date} style={{ width: 110 }} />
+        <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed" }}>
+          <thead>
+            <tr>
+              {DOW_HEADERS.map((d, i) => (
+                <th
+                  key={d}
+                  style={{
+                    background: i >= 5 ? "var(--weekend)" : "#f0f1f5",
+                    border: "1px solid var(--border)",
+                    padding: "6px 4px",
+                    textAlign: "center",
+                    fontSize: 12,
+                    fontWeight: 600,
+                  }}
+                >
+                  {d}
+                </th>
               ))}
-            </colgroup>
-            <thead>
-              <tr>
-                {rows.map((r) => (
-                  <th
-                    key={r.date}
-                    style={{
-                      background: r.isWeekend ? "var(--weekend)" : "#f0f1f5",
-                      border: "1px solid var(--border)",
-                      padding: "6px 4px",
-                      textAlign: "center",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    <div>{r.date.slice(8)}</div>
-                    <div style={{ fontSize: 10, fontWeight: 400, color: "var(--text-muted)" }}>{r.dayName}</div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                {rows.map((r, idx) => {
-                  const consName = r.consultantId ? staffById.get(r.consultantId as number)?.name : undefined;
-                  const supName = r.supervisingId ? staffById.get(r.supervisingId as number)?.name : undefined;
-                  const acName = r.acId ? staffById.get(r.acId as number)?.name : undefined;
-                  const slotBase = `${r.date}`;
+            </tr>
+          </thead>
+          <tbody>
+            {weeks.map((week, wi) => (
+              <tr key={wi}>
+                {week.map((cell, ci) => {
+                  if (!cell) {
+                    return (
+                      <td
+                        key={ci}
+                        style={{
+                          background: "#f8f9fa",
+                          border: "1px solid var(--border)",
+                          verticalAlign: "top",
+                          padding: 4,
+                          height: 90,
+                        }}
+                      />
+                    );
+                  }
+                  const idx = rows.indexOf(cell);
+                  const consName = cell.consultantId ? staffById.get(cell.consultantId as number)?.name : undefined;
+                  const supName = cell.supervisingId ? staffById.get(cell.supervisingId as number)?.name : undefined;
+                  const acName = cell.acId ? staffById.get(cell.acId as number)?.name : undefined;
 
                   return (
                     <td
-                      key={r.date}
+                      key={ci}
                       style={{
-                        background: r.isWeekend ? "var(--weekend)" : "var(--surface)",
+                        background: cell.isWeekend ? "var(--weekend)" : "var(--surface)",
                         border: "1px solid var(--border)",
                         verticalAlign: "top",
-                        padding: "4px",
-                        minHeight: 80,
+                        padding: 4,
+                        height: 90,
                       }}
                     >
+                      <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>{cell.dayNum}</div>
                       <DropSlot
                         label="Consultant"
                         slotType="consultant"
                         filledName={consName}
-                        slotKey={`${slotBase}:consultant`}
+                        slotKey={`${cell.date}:consultant`}
                         dragOverSlot={dragOverSlot}
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
@@ -355,8 +374,8 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                         label="Supervising"
                         slotType="supervising"
                         filledName={supName}
-                        disabled={!r.consultantId}
-                        slotKey={`${slotBase}:supervising`}
+                        disabled={!cell.consultantId}
+                        slotKey={`${cell.date}:supervising`}
                         dragOverSlot={dragOverSlot}
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
@@ -367,7 +386,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                         label="AC"
                         slotType="ac"
                         filledName={acName}
-                        slotKey={`${slotBase}:ac`}
+                        slotKey={`${cell.date}:ac`}
                         dragOverSlot={dragOverSlot}
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
@@ -378,9 +397,9 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                   );
                 })}
               </tr>
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

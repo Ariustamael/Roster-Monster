@@ -16,10 +16,10 @@ app.add_middleware(
 
 app.include_router(staff.router)
 app.include_router(teams.router)
+app.include_router(config.router)
 app.include_router(monthly_config.router)
 app.include_router(roster.router)
 app.include_router(duties.router)
-app.include_router(config.router)
 
 
 @app.on_event("startup")
