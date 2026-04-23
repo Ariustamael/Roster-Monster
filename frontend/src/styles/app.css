@@ -170,6 +170,7 @@ body {
   border: 1px solid var(--border);
   vertical-align: top;
   line-height: 1.5;
+  white-space: normal;
 }
 
 .rules-table td:first-child {
@@ -794,4 +795,16 @@ td.override {
   font-size: 10px;
   font-weight: 600;
   color: var(--primary);
+}
+
+.clinic-cell.drop-highlight {
+  background: #f0f4ff;
+}
+
+.clinic-card.dragging {
+  opacity: 0.4;
+}
+
+.clinic-grid td.clinic-cell:nth-child(n+7) {
+  background: #fdf8f0;
 }

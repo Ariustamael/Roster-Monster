@@ -310,7 +310,7 @@ def view_roster(config_id: int, db: Session = Depends(get_db)):
         .all()
     )
     from ..services.solver import PersonInfo as SolverPersonInfo
-    mo_pool_persons = [SolverPersonInfo(id=s.id, name=s.name) for s in mo_pool_staff]
+    mo_pool_persons = [SolverPersonInfo(id=s.id, name=s.name, grade=s.grade) for s in mo_pool_staff]
 
     call_map: dict[date, dict[int, CallType]] = defaultdict(dict)
     for r in call_rows:

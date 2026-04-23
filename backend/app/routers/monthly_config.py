@@ -40,6 +40,44 @@ def create_config(payload: MonthlyConfigCreate, db: Session = Depends(get_db)):
     return cfg
 
 
+# ── Public Holidays (before /{config_id} to avoid path conflict) ────────
+
+@router.get("/public-holidays", response_model=list[PublicHolidayOut])
+def list_public_holidays(
+    year: int | None = Query(None),
+    db: Session = Depends(get_db),
+):
+    q = db.query(PublicHoliday).order_by(PublicHoliday.date)
+    if year is not None:
+        from sqlalchemy import extract
+        q = q.filter(extract("year", PublicHoliday.date) == year)
+    return q.all()
+
+
+@router.post("/public-holidays", response_model=PublicHolidayOut)
+def create_public_holiday(payload: PublicHolidayCreate, db: Session = Depends(get_db)):
+    existing = db.query(PublicHoliday).filter(PublicHoliday.date == payload.date).first()
+    if existing:
+        raise HTTPException(409, "Holiday already exists for this date")
+    ph = PublicHoliday(date=payload.date, name=payload.name)
+    db.add(ph)
+    db.commit()
+    db.refresh(ph)
+    return ph
+
+
+@router.delete("/public-holidays/{holiday_id}")
+def delete_public_holiday(holiday_id: int, db: Session = Depends(get_db)):
+    ph = db.query(PublicHoliday).get(holiday_id)
+    if not ph:
+        raise HTTPException(404, "Holiday not found")
+    db.delete(ph)
+    db.commit()
+    return {"ok": True}
+
+
+# ── Config by ID ────────────────────────────────────────────────────────
+
 @router.get("/{config_id}", response_model=MonthlyConfigOut)
 def get_config(config_id: int, db: Session = Depends(get_db)):
     cfg = db.query(MonthlyConfig).get(config_id)
@@ -233,39 +271,3 @@ def get_evening_ot_dates(config_id: int, db: Session = Depends(get_db)):
         .all()
     )
     return [EveningOTDateOut(id=r.id, date=r.date) for r in rows]
-
-
-# ── Public Holidays ──────────────────────────────────────────────────────
-
-@router.get("/public-holidays", response_model=list[PublicHolidayOut])
-def list_public_holidays(
-    year: int | None = Query(None),
-    db: Session = Depends(get_db),
-):
-    q = db.query(PublicHoliday).order_by(PublicHoliday.date)
-    if year is not None:
-        from sqlalchemy import extract
-        q = q.filter(extract("year", PublicHoliday.date) == year)
-    return q.all()
-
-
-@router.post("/public-holidays", response_model=PublicHolidayOut)
-def create_public_holiday(payload: PublicHolidayCreate, db: Session = Depends(get_db)):
-    existing = db.query(PublicHoliday).filter(PublicHoliday.date == payload.date).first()
-    if existing:
-        raise HTTPException(409, "Holiday already exists for this date")
-    ph = PublicHoliday(date=payload.date, name=payload.name)
-    db.add(ph)
-    db.commit()
-    db.refresh(ph)
-    return ph
-
-
-@router.delete("/public-holidays/{holiday_id}")
-def delete_public_holiday(holiday_id: int, db: Session = Depends(get_db)):
-    ph = db.query(PublicHoliday).get(holiday_id)
-    if not ph:
-        raise HTTPException(404, "Holiday not found")
-    db.delete(ph)
-    db.commit()
-    return {"ok": True}

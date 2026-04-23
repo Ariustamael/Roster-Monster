@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { api } from "../../api";
 import type { ClinicTemplate, Staff } from "../../types";
 import { DAY_NAMES, CONS_GRADES } from "./constants";
@@ -6,23 +6,24 @@ import { DAY_NAMES, CONS_GRADES } from "./constants";
 const SESSIONS = ["AM", "PM"] as const;
 const CLINIC_TYPES = ["NC", "Sup", "MOPD", "Hand VC", "CAT-A", "Lump", "NES", "MSK", "3E", "WMC"] as const;
 
-function clinicLabel(t: ClinicTemplate): string {
-  const parts = [t.clinic_type || "Sup"];
-  if (t.room) parts.push(t.room);
-  if (t.mos_required > 0) parts.push(`(${t.mos_required} MO)`);
-  return parts.join(" · ");
+const DEFAULT_COLORS: Record<string, string> = {
+  NC: "#e8f0fe",
+  Sup: "#e6f4ea",
+  MOPD: "#fef7e0",
+  "Hand VC": "#fce8e6",
+  "CAT-A": "#f3e8fd",
+  WMC: "#e8eaed",
+};
+
+function loadCustomColors(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem("clinic-colors");
+    return raw ? JSON.parse(raw) : {};
+  } catch { return {}; }
 }
 
-function clinicColor(type: string): string {
-  switch (type) {
-    case "NC": return "#e8f0fe";
-    case "Sup": return "#e6f4ea";
-    case "MOPD": return "#fef7e0";
-    case "Hand VC": return "#fce8e6";
-    case "CAT-A": return "#f3e8fd";
-    case "WMC": return "#e8eaed";
-    default: return "#f8f9fa";
-  }
+function saveCustomColors(colors: Record<string, string>) {
+  localStorage.setItem("clinic-colors", JSON.stringify(colors));
 }
 
 export default function ClinicTemplatesTab() {
@@ -31,6 +32,9 @@ export default function ClinicTemplatesTab() {
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<number | null>(null);
+  const [dragId, setDragId] = useState<number | null>(null);
+  const [customColors, setCustomColors] = useState<Record<string, string>>(loadCustomColors);
+  const [showColorEditor, setShowColorEditor] = useState(false);
 
   useEffect(() => {
     Promise.all([api.getClinicTemplates(), api.getStaff()]).then(([t, s]) => {
@@ -39,6 +43,10 @@ export default function ClinicTemplatesTab() {
       setLoading(false);
     });
   }, []);
+
+  function clinicColor(type: string): string {
+    return customColors[type] || DEFAULT_COLORS[type] || "#f8f9fa";
+  }
 
   const consultants = staff.filter((s) => CONS_GRADES.includes(s.grade));
 
@@ -58,22 +66,41 @@ export default function ClinicTemplatesTab() {
     if (!confirm("Delete this clinic template?")) return;
     await api.deleteClinicTemplate(id);
     setTemplates((prev) => prev.filter((x) => x.id !== id));
+    setEditId(null);
+  }
+
+  async function handleDrop(e: DragEvent, targetDow: number, targetSession: string) {
+    e.preventDefault();
+    const id = Number(e.dataTransfer.getData("text/plain"));
+    if (!id) return;
+    const tmpl = templates.find((t) => t.id === id);
+    if (!tmpl) { setDragId(null); return; }
+    if (tmpl.day_of_week === targetDow && tmpl.session === targetSession) {
+      setDragId(null);
+      return;
+    }
+    await handleUpdate(id, {
+      day_of_week: targetDow,
+      session: targetSession,
+      room: tmpl.room,
+      clinic_type: tmpl.clinic_type,
+      mos_required: tmpl.mos_required,
+      consultant_id: tmpl.consultant_id,
+    });
+    setDragId(null);
   }
 
   if (loading) return <div className="loading"><span className="spinner" /> Loading...</div>;
 
   const grid: Record<string, Record<string, ClinicTemplate[]>> = {};
-  for (const day of DAY_NAMES) {
-    grid[day] = { AM: [], PM: [] };
-  }
+  for (const day of DAY_NAMES) grid[day] = { AM: [], PM: [] };
   for (const t of templates) {
-    if (t.day_of_week >= 0 && t.day_of_week < 5) {
+    if (t.day_of_week >= 0 && t.day_of_week < 7) {
       const dayKey = DAY_NAMES[t.day_of_week];
       const sess = t.session === "PM" ? "PM" : "AM";
       grid[dayKey][sess].push(t);
     }
   }
-
   for (const day of DAY_NAMES) {
     for (const sess of SESSIONS) {
       grid[day][sess].sort((a, b) => a.room.localeCompare(b.room));
@@ -84,8 +111,9 @@ export default function ClinicTemplatesTab() {
 
   return (
     <>
-      <div style={{ marginBottom: 12 }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Clinic</button>
+        <button className="btn btn-secondary" onClick={() => setShowColorEditor(true)}>Colours</button>
       </div>
 
       <div className="clinic-grid-container">
@@ -93,22 +121,31 @@ export default function ClinicTemplatesTab() {
           <thead>
             <tr>
               <th style={{ width: 60 }}></th>
-              {DAY_NAMES.map((d) => (
-                <th key={d}>{d}</th>
-              ))}
+              {DAY_NAMES.map((d) => <th key={d}>{d}</th>)}
             </tr>
           </thead>
           <tbody>
             {SESSIONS.map((sess) => (
               <tr key={sess}>
                 <td className="session-label">{sess}</td>
-                {DAY_NAMES.map((day) => (
-                  <td key={`${day}-${sess}`} className="clinic-cell">
+                {DAY_NAMES.map((day, dow) => (
+                  <td
+                    key={`${day}-${sess}`}
+                    className={`clinic-cell ${dragId !== null ? "drop-highlight" : ""}`}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                    onDrop={(e) => handleDrop(e, dow, sess)}
+                  >
                     {grid[day][sess].map((t) => (
                       <div
                         key={t.id}
-                        className="clinic-card"
-                        style={{ backgroundColor: clinicColor(t.clinic_type) }}
+                        className={`clinic-card ${dragId === t.id ? "dragging" : ""}`}
+                        style={{ backgroundColor: clinicColor(t.clinic_type), cursor: "grab" }}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData("text/plain", String(t.id));
+                          setDragId(t.id);
+                        }}
+                        onDragEnd={() => setDragId(null)}
                         onClick={() => setEditId(t.id)}
                       >
                         <div className="clinic-card-type">{t.clinic_type || "Sup"}</div>
@@ -145,7 +182,8 @@ export default function ClinicTemplatesTab() {
         <ClinicFormModal
           title="Add Clinic Template"
           consultants={consultants}
-          onSave={(data) => handleAdd(data)}
+          clinicColor={clinicColor}
+          onSave={handleAdd}
           onClose={() => setShowAdd(false)}
         />
       )}
@@ -153,10 +191,19 @@ export default function ClinicTemplatesTab() {
         <ClinicFormModal
           title="Edit Clinic Template"
           consultants={consultants}
+          clinicColor={clinicColor}
           initial={editTemplate}
           onSave={(data) => handleUpdate(editTemplate.id, data)}
           onClose={() => setEditId(null)}
           onDelete={() => handleDelete(editTemplate.id)}
+        />
+      )}
+      {showColorEditor && (
+        <ColorEditorModal
+          colors={customColors}
+          defaults={DEFAULT_COLORS}
+          onSave={(c) => { setCustomColors(c); saveCustomColors(c); setShowColorEditor(false); }}
+          onClose={() => setShowColorEditor(false)}
         />
       )}
     </>
@@ -164,10 +211,11 @@ export default function ClinicTemplatesTab() {
 }
 
 function ClinicFormModal({
-  title, consultants, initial, onSave, onClose, onDelete,
+  title, consultants, clinicColor, initial, onSave, onClose, onDelete,
 }: {
   title: string;
   consultants: Staff[];
+  clinicColor: (type: string) => string;
   initial?: ClinicTemplate;
   onSave: (data: any) => void;
   onClose: () => void;
@@ -202,7 +250,11 @@ function ClinicFormModal({
         </div>
         <div className="form-group">
           <label>Clinic Type</label>
-          <select value={clinicType} onChange={(e) => setClinicType(e.target.value)}>
+          <select
+            value={clinicType}
+            onChange={(e) => setClinicType(e.target.value)}
+            style={{ backgroundColor: clinicColor(clinicType) }}
+          >
             {CLINIC_TYPES.map((ct) => <option key={ct} value={ct}>{ct}</option>)}
           </select>
         </div>
@@ -239,6 +291,58 @@ function ClinicFormModal({
           >
             Save
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ColorEditorModal({
+  colors, defaults, onSave, onClose,
+}: {
+  colors: Record<string, string>;
+  defaults: Record<string, string>;
+  onSave: (colors: Record<string, string>) => void;
+  onClose: () => void;
+}) {
+  const [local, setLocal] = useState<Record<string, string>>({ ...colors });
+
+  function getColor(type: string): string {
+    return local[type] || defaults[type] || "#f8f9fa";
+  }
+
+  function setColor(type: string, color: string) {
+    setLocal((prev) => ({ ...prev, [type]: color }));
+  }
+
+  function resetAll() {
+    setLocal({});
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ minWidth: 380 }}>
+        <h3>Customise Clinic Colours</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+          {CLINIC_TYPES.map((ct) => (
+            <div key={ct} style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <input
+                type="color"
+                value={getColor(ct)}
+                onChange={(e) => setColor(ct, e.target.value)}
+                style={{ width: 36, height: 28, border: "1px solid #ccc", borderRadius: 4, cursor: "pointer" }}
+              />
+              <span style={{
+                flex: 1, padding: "4px 10px", borderRadius: 4, fontSize: 13,
+                backgroundColor: getColor(ct), border: "1px solid #ddd",
+              }}>{ct}</span>
+            </div>
+          ))}
+        </div>
+        <div className="modal-actions">
+          <button className="btn btn-secondary" onClick={resetAll} style={{ marginRight: "auto" }}>Reset Defaults</button>
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => onSave(local)}>Save</button>
         </div>
       </div>
     </div>
