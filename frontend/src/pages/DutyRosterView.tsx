@@ -195,6 +195,7 @@ function DayCard({
 
   const eotGroups: Record<string, { consultantId: number | null; staff: DutyAssignment[] }> = {};
   for (const a of day.eot_assignments) {
+    if (a.duty_type === "EOT MO") continue;
     const key = a.location || "EOT";
     if (!eotGroups[key]) eotGroups[key] = { consultantId: a.consultant_id, staff: [] };
     eotGroups[key].staff.push(a);
