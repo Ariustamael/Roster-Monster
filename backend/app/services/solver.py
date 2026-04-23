@@ -138,17 +138,18 @@ def _day_matches_applicable(day: DayConfig, applicable_days: str) -> bool:
         return day.d.weekday() < 5 and not day.is_ph and not day.is_stepdown
     if val == "weekend_ph":
         return day.is_weekend or day.is_ph
-    if val == "stepdown":
-        return day.is_stepdown
-    if val == "evening_ot":
-        return day.has_evening_ot
     day_label = DAY_LABELS[day.d.weekday()]
     tokens = [t.strip() for t in applicable_days.split(",")]
+    matched = False
     if day_label in tokens:
-        return True
+        matched = True
     if "PH" in tokens and day.is_ph:
-        return True
-    return False
+        matched = True
+    if "Stepdown" in tokens and day.is_stepdown:
+        matched = True
+    if "Evening OT" in tokens and day.has_evening_ot:
+        matched = True
+    return matched
 
 
 def _required_slots(day: DayConfig, call_type_configs: list[CallTypeInfo]) -> list[CallTypeInfo]:

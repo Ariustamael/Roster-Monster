@@ -304,6 +304,8 @@ class OTTemplate(Base):
     is_emergency = Column(Boolean, default=False)
     linked_call_slot = Column(String(50), nullable=True)
     color = Column(String(10), nullable=True)
+    is_active = Column(Boolean, default=True)
+    week_of_month = Column(Integer, nullable=True)
 
     consultant = relationship("Staff")
 
@@ -321,6 +323,7 @@ class ClinicTemplate(Base):
     mos_required = Column(Integer, default=1)
     consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     color = Column(String(10), nullable=True)
+    is_active = Column(Boolean, default=True)
 
     consultant = relationship("Staff")
 

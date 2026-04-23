@@ -259,6 +259,8 @@ class OTTemplateCreate(BaseModel):
     is_emergency: bool = False
     linked_call_slot: Optional[str] = None
     color: Optional[str] = None
+    is_active: bool = True
+    week_of_month: Optional[int] = None
 
 
 class OTTemplateOut(BaseModel):
@@ -271,6 +273,8 @@ class OTTemplateOut(BaseModel):
     is_emergency: bool
     linked_call_slot: Optional[str] = None
     color: Optional[str] = None
+    is_active: bool = True
+    week_of_month: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
@@ -285,6 +289,7 @@ class ClinicTemplateCreate(BaseModel):
     mos_required: int = 1
     consultant_id: Optional[int] = None
     color: Optional[str] = None
+    is_active: bool = True
 
 
 class ClinicTemplateOut(BaseModel):
@@ -297,6 +302,7 @@ class ClinicTemplateOut(BaseModel):
     consultant_id: Optional[int]
     consultant_name: Optional[str] = None
     color: Optional[str] = None
+    is_active: bool = True
 
     model_config = {"from_attributes": True}
 

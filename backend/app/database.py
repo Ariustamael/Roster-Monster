@@ -56,6 +56,24 @@ def _migrate(engine):
             with engine.begin() as conn:
                 conn.execute(text("ALTER TABLE clinic_template ADD COLUMN color VARCHAR(10)"))
 
+    if "ot_template" in tables:
+        ot_cols = {c["name"] for c in insp.get_columns("ot_template")}
+        if "is_active" not in ot_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE ot_template ADD COLUMN is_active BOOLEAN DEFAULT 1"))
+
+    if "clinic_template" in tables:
+        ct_cols = {c["name"] for c in insp.get_columns("clinic_template")}
+        if "is_active" not in ct_cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE clinic_template ADD COLUMN is_active BOOLEAN DEFAULT 1"))
+
+    if "ot_template" in tables:
+        ot_cols2 = {c["name"] for c in insp.get_columns("ot_template")}
+        if "week_of_month" not in ot_cols2:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE ot_template ADD COLUMN week_of_month INTEGER"))
+
     # Remove unique constraint on (day_of_week, room) from ot_template
     if "ot_template" in tables:
         indexes = insp.get_unique_constraints("ot_template")
@@ -149,12 +167,15 @@ def _migrate(engine):
             count = conn.execute(text("SELECT COUNT(*) FROM call_type_config")).scalar()
             if count == 0:
                 call_types = [
-                    ("MO1", 0, 1, "8am", 1, 2, 5, 1, "all"),
-                    ("MO2", 1, 1, "8am", 1, 2, 5, 1, "all"),
-                    ("MO3 (WD)", 2, 0, "none", 1, 0, 3, 0, "weekday"),
-                    ("MO3 (WE)", 3, 1, "8am", 1, 2, 5, 1, "stepdown"),
-                    ("MO4", 4, 0, "none", 1, 0, 1, 0, "evening_ot"),
-                    ("MO5", 5, 0, "none", 1, 0, 1, 0, "evening_ot"),
+                    ("MO1", 0, 1, "8am", 1, 2, 5, 1, "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"),
+                    ("MO2", 1, 1, "8am", 1, 2, 5, 1, "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"),
+                    ("MO3 (WD)", 2, 0, "none", 1, 0, 3, 0, "Mon,Tue,Wed,Thu,Fri"),
+                    ("MO3 (WE)", 3, 1, "8am", 1, 2, 5, 1, "Stepdown"),
+                    ("MO4", 4, 0, "none", 1, 0, 1, 0, "Evening OT"),
+                    ("MO5", 5, 0, "none", 1, 0, 1, 0, "Evening OT"),
+                    ("R1", 6, 1, "8am", 1, 2, 4, 1, "Mon,Tue,Wed,Thu,Fri"),
+                    ("R2", 7, 1, "8am", 3, 2, 4, 1, "Mon,Tue,Wed,Thu,Fri"),
+                    ("R1+2", 8, 1, "8am", 1, 2, 5, 1, "Sat,Sun,PH"),
                 ]
                 for name, order, overnight, pct, max_c, gap, diff, fairness, days in call_types:
                     conn.execute(text(
@@ -195,6 +216,26 @@ def _migrate(engine):
                         conn.execute(text(
                             "INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"
                         ), {"ct": mo3wd_id, "r": smo_id})
+
+                    # R1, R2, R1+2: SSR + SR only
+                    ssr_id = conn.execute(text(
+                        "SELECT id FROM rank_config WHERE abbreviation = 'SSR'"
+                    )).scalar()
+                    sr_id = conn.execute(text(
+                        "SELECT id FROM rank_config WHERE abbreviation = 'SR'"
+                    )).scalar()
+                    if ssr_id and sr_id:
+                        for ct_name in ["R1", "R2", "R1+2"]:
+                            ct_id = conn.execute(text(
+                                "SELECT id FROM call_type_config WHERE name = :n"
+                            ), {"n": ct_name}).scalar()
+                            if ct_id:
+                                conn.execute(text(
+                                    "INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"
+                                ), {"ct": ct_id, "r": ssr_id})
+                                conn.execute(text(
+                                    "INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"
+                                ), {"ct": ct_id, "r": sr_id})
 
 
 def init_db():

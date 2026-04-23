@@ -10,13 +10,21 @@ const POST_CALL_OPTIONS = [
   { value: "none", label: "None (fully available)" },
 ] as const;
 
-const APPLICABLE_DAYS_OPTIONS = [
-  { value: "all", label: "All days" },
-  { value: "weekday", label: "Weekdays only" },
-  { value: "weekend_ph", label: "Weekends/PH only" },
-  { value: "stepdown", label: "Stepdown days only" },
-  { value: "evening_ot", label: "Evening OT days only" },
-] as const;
+const ALL_DAY_TOKENS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "PH", "Stepdown", "Evening OT"] as const;
+
+function parseDays(str: string): Set<string> {
+  return new Set(str.split(",").map((s) => s.trim()).filter(Boolean));
+}
+
+function toggleDay(current: string, day: string): string {
+  const set = parseDays(current);
+  if (set.has(day)) {
+    set.delete(day);
+  } else {
+    set.add(day);
+  }
+  return ALL_DAY_TOKENS.filter((d) => set.has(d)).join(",");
+}
 
 interface DraftCallType {
   id: number | null;
@@ -86,7 +94,7 @@ export default function CallTypeConfigTab() {
       min_gap_days: 2,
       difficulty_points: 3,
       counts_towards_fairness: true,
-      applicable_days: "all",
+      applicable_days: "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH",
       is_active: true,
       eligible_rank_ids: ranks.filter((r) => r.is_call_eligible).map((r) => r.id),
     });
@@ -250,9 +258,21 @@ export default function CallTypeConfigTab() {
 
             <div className="form-group">
               <label>Applicable Days</label>
-              <select value={draft.applicable_days} onChange={(e) => setDraft({ ...draft, applicable_days: e.target.value })}>
-                {APPLICABLE_DAYS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4, alignItems: "center" }}>
+                {ALL_DAY_TOKENS.map((day, i) => (
+                  <span key={day} style={{ display: "inline-flex", alignItems: "center", gap: 0 }}>
+                    {i === 7 && <span style={{ margin: "0 6px", color: "#ccc" }}>|</span>}
+                    <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", fontSize: 13 }}>
+                      <input
+                        type="checkbox"
+                        checked={parseDays(draft.applicable_days).has(day)}
+                        onChange={() => setDraft({ ...draft, applicable_days: toggleDay(draft.applicable_days, day) })}
+                      />
+                      {day}
+                    </label>
+                  </span>
+                ))}
+              </div>
             </div>
 
             <div className="form-group">

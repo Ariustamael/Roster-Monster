@@ -36,6 +36,8 @@ def _ot_out(r: OTTemplate) -> OTTemplateOut:
         is_emergency=r.is_emergency or False,
         linked_call_slot=r.linked_call_slot,
         color=r.color,
+        is_active=r.is_active if r.is_active is not None else True,
+        week_of_month=r.week_of_month,
     )
 
 
@@ -90,6 +92,7 @@ def list_clinic_templates(db: DBSession = Depends(get_db)):
             consultant_id=r.consultant_id,
             consultant_name=r.consultant.name if r.consultant else None,
             color=r.color,
+            is_active=r.is_active if r.is_active is not None else True,
         )
         for r in rows
     ]
@@ -106,6 +109,8 @@ def create_clinic_template(payload: ClinicTemplateCreate, db: DBSession = Depend
         room=t.room, clinic_type=t.clinic_type, mos_required=t.mos_required,
         consultant_id=t.consultant_id,
         consultant_name=t.consultant.name if t.consultant else None,
+        color=t.color,
+        is_active=t.is_active if t.is_active is not None else True,
     )
 
 
@@ -123,6 +128,8 @@ def update_clinic_template(template_id: int, payload: ClinicTemplateCreate, db: 
         room=t.room, clinic_type=t.clinic_type, mos_required=t.mos_required,
         consultant_id=t.consultant_id,
         consultant_name=t.consultant.name if t.consultant else None,
+        color=t.color,
+        is_active=t.is_active if t.is_active is not None else True,
     )
 
 
@@ -170,12 +177,12 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     for ta in db.query(TeamAssignment).filter(TeamAssignment.role == "consultant").all():
         consultant_team[ta.staff_id] = ta.team_id
 
-    ot_templates = db.query(OTTemplate).all()
-    clinic_templates = db.query(ClinicTemplate).all()
+    ot_templates = db.query(OTTemplate).filter(OTTemplate.is_active.is_(True)).all()
+    clinic_templates = db.query(ClinicTemplate).filter(ClinicTemplate.is_active.is_(True)).all()
 
-    ot_by_dow: dict[int, list[OTTemplate]] = defaultdict(list)
+    ot_by_dow_week: dict[tuple[int, int | None], list[OTTemplate]] = defaultdict(list)
     for t in ot_templates:
-        ot_by_dow[t.day_of_week].append(t)
+        ot_by_dow_week[(t.day_of_week, t.week_of_month)].append(t)
 
     clinic_by_dow_session: dict[tuple[int, str], list[ClinicTemplate]] = defaultdict(list)
     for t in clinic_templates:
@@ -225,8 +232,16 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         is_wknd = dow >= 5
         is_ph = d in ph_dates
 
+        week_num = (d.day - 1) // 7 + 1
+
+        day_ot_templates = []
+        for t in ot_by_dow_week.get((dow, None), []):
+            day_ot_templates.append(t)
+        for t in ot_by_dow_week.get((dow, week_num), []):
+            day_ot_templates.append(t)
+
         ot_slots = []
-        for t in ot_by_dow.get(dow, []):
+        for t in day_ot_templates:
             if t.is_emergency:
                 ot_slots.append(OTSlot(
                     room=t.room,

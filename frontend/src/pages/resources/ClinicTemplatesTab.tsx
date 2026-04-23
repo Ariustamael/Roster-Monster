@@ -83,6 +83,7 @@ export default function ClinicTemplatesTab() {
       mos_required: tmpl.mos_required,
       consultant_id: tmpl.consultant_id,
       color: tmpl.color,
+      is_active: tmpl.is_active,
     });
     setDragId(null);
   }
@@ -149,7 +150,7 @@ export default function ClinicTemplatesTab() {
                       <div
                         key={t.id}
                         className={`clinic-card ${dragId === t.id ? "dragging" : ""}`}
-                        style={{ backgroundColor: t.color ?? DEFAULT_COLORS[t.clinic_type] ?? "#f8f9fa", cursor: "grab" }}
+                        style={{ backgroundColor: t.color ?? DEFAULT_COLORS[t.clinic_type] ?? "#f8f9fa", cursor: "grab", opacity: t.is_active === false ? 0.45 : 1 }}
                         draggable
                         onDragStart={(e) => {
                           e.dataTransfer.setData("text/plain", String(t.id));
@@ -227,6 +228,7 @@ function ClinicFormModal({
   const [mosRequired, setMosRequired] = useState(initial?.mos_required ?? 1);
   const [consId, setConsId] = useState<number | "">(initial?.consultant_id ?? "");
   const [color, setColor] = useState<string | null>(initial?.color ?? null);
+  const [isActive, setIsActive] = useState(initial?.is_active ?? true);
 
   const effectiveColor = color ?? DEFAULT_COLORS[clinicType] ?? "#f8f9fa";
 
@@ -275,6 +277,12 @@ function ClinicFormModal({
           </select>
         </div>
         <div className="form-group">
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+            Active
+          </label>
+        </div>
+        <div className="form-group">
           <label>Card Colour</label>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 1fr)", gap: 4, marginTop: 4 }}>
             {/* Clear / reset-to-default swatch */}
@@ -314,6 +322,7 @@ function ClinicFormModal({
                   clinic_type: clinicType, mos_required: mosRequired,
                   consultant_id: consId || null,
                   color,
+                  is_active: isActive,
                 });
               }
             }}

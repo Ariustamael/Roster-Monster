@@ -144,6 +144,8 @@ export interface OTTemplate {
   is_emergency: boolean;
   linked_call_slot: string | null;
   color: string | null;
+  is_active: boolean;
+  week_of_month: number | null;
 }
 
 export interface ClinicTemplate {
@@ -156,6 +158,7 @@ export interface ClinicTemplate {
   consultant_id: number | null;
   consultant_name: string | null;
   color: string | null;
+  is_active: boolean;
 }
 
 export interface ConsultantOnCall {

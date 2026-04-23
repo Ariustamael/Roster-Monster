@@ -69,6 +69,8 @@ export default function OTTemplatesTab() {
       is_emergency: tmpl.is_emergency,
       linked_call_slot: tmpl.linked_call_slot,
       color: tmpl.color,
+      is_active: tmpl.is_active,
+      week_of_month: tmpl.week_of_month,
     });
     setDragId(null);
   }
@@ -136,6 +138,7 @@ export default function OTTemplatesTab() {
                         style={{
                           backgroundColor: bg,
                           cursor: "grab",
+                          opacity: t.is_active === false ? 0.45 : 1,
                         }}
                         draggable
                         onDragStart={(e) => { e.dataTransfer.setData("text/plain", String(t.id)); setDragId(t.id); }}
@@ -144,6 +147,11 @@ export default function OTTemplatesTab() {
                       >
                         <div className="clinic-card-type">
                           {t.is_emergency ? "⚡ " : ""}{t.room}
+                          {t.week_of_month != null && (
+                            <span style={{ fontSize: 10, marginLeft: 4, color: "#6b7280", fontWeight: 400 }}>
+                              Wk{t.week_of_month}
+                            </span>
+                          )}
                         </div>
                         <div className="clinic-card-cons">
                           {t.is_emergency
@@ -207,6 +215,8 @@ function OTFormModal({
     initial?.linked_call_slot ? initial.linked_call_slot.split(",").map((s) => s.trim()).filter(Boolean) : []
   );
   const [color, setColor] = useState<string | null>(initial?.color ?? null);
+  const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [weekOfMonth, setWeekOfMonth] = useState<number | null>(initial?.week_of_month ?? null);
 
   function toggleSlot(slot: string) {
     setLinkedSlots((prev) =>
@@ -236,6 +246,17 @@ function OTFormModal({
         <div className="form-group">
           <label>Room</label>
           <input type="text" value={room} onChange={(e) => setRoom(e.target.value)} placeholder="e.g. EOT, OT3" />
+        </div>
+        <div className="form-group">
+          <label>Week of Month</label>
+          <select value={weekOfMonth ?? ""} onChange={(e) => setWeekOfMonth(e.target.value ? Number(e.target.value) : null)}>
+            <option value="">Every week</option>
+            <option value="1">Week 1 (days 1-7)</option>
+            <option value="2">Week 2 (days 8-14)</option>
+            <option value="3">Week 3 (days 15-21)</option>
+            <option value="4">Week 4 (days 22-28)</option>
+            <option value="5">Week 5 (days 29+)</option>
+          </select>
         </div>
         {!isEmergency && (
           <div className="form-group">
@@ -267,6 +288,12 @@ function OTFormModal({
             </div>
           </div>
         )}
+        <div className="form-group">
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <input type="checkbox" checked={isActive} onChange={(e) => setIsActive(e.target.checked)} />
+            Active
+          </label>
+        </div>
         <div className="form-group">
           <label>Card Colour</label>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(9, 28px)", gap: 4, marginTop: 4 }}>
@@ -306,6 +333,8 @@ function OTFormModal({
               is_emergency: isEmergency,
               linked_call_slot: isEmergency && linkedSlots.length > 0 ? linkedSlots.join(",") : null,
               color,
+              is_active: isActive,
+              week_of_month: weekOfMonth,
             });
           }}>Save</button>
         </div>

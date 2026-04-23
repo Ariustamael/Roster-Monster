@@ -5,8 +5,6 @@ import OTTemplatesTab from "./resources/OTTemplatesTab";
 import ClinicTemplatesTab from "./resources/ClinicTemplatesTab";
 import ConsultantRosterTab from "./resources/ConsultantRosterTab";
 import RegistrarRosterTab from "./resources/RegistrarRosterTab";
-import DayFlagsTab from "./resources/DayFlagsTab";
-import PublicHolidaysTab from "./resources/PublicHolidaysTab";
 
 const TABS = [
   { key: "supply", label: "Supply / Demand", needsConfig: true },
@@ -14,8 +12,6 @@ const TABS = [
   { key: "clinics", label: "Clinic Templates", needsConfig: false },
   { key: "consultant", label: "Consultant Roster", needsConfig: true },
   { key: "registrar", label: "Registrar Roster", needsConfig: true },
-  { key: "flags", label: "Day Flags", needsConfig: true },
-  { key: "holidays", label: "Public Holidays", needsConfig: false },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -63,10 +59,6 @@ export default function ResourcesView() {
           {tab === "registrar" && active && (
             <RegistrarRosterTab configId={active.id} year={active.year} month={active.month} />
           )}
-          {tab === "flags" && active && (
-            <DayFlagsTab configId={active.id} year={active.year} month={active.month} />
-          )}
-          {tab === "holidays" && <PublicHolidaysTab />}
         </>
       )}
     </>
