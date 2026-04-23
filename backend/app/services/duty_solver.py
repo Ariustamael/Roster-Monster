@@ -351,20 +351,22 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
 
         # ── Backfill vacated anchor roles ───────────────────────────
         if "Ward MO" in vacated_anchor_roles:
-            # WARD_MO: AM only (covers 0800-1730 until MO1 returns from OT)
+            # WARD_MO: Full day 0800-1730 (covers ward while MO1 is in OT)
             ward_candidates = sorted(
-                [p for p in available_am if p.id not in am_assigned],
-                key=lambda p: fairness.clinic_score(p.id),
+                [p for p in available_am if p.id not in full_day_assigned],
+                key=lambda p: fairness.ot_score(p.id),
                 reverse=True,
             )
             if ward_candidates:
                 chosen = ward_candidates[0]
                 results.append(DutyResult(
                     date=day.d, staff_id=chosen.id,
-                    session=Session.AM, duty_type=DutyType.WARD_MO,
+                    session=Session.FULL_DAY, duty_type=DutyType.WARD_MO,
                 ))
+                full_day_assigned.add(chosen.id)
                 am_assigned.add(chosen.id)
-                fairness.clinic_sessions[chosen.id] += 1
+                pm_assigned.add(chosen.id)
+                fairness.ot_days[chosen.id] += 1
 
         if "EOT MO" in vacated_anchor_roles:
             # EOT_MO: Full day (covers MO2's daytime EOT duty)

@@ -195,15 +195,15 @@ function DayCard({
 
   const eotGroups: Record<string, { consultantId: number | null; staff: DutyAssignment[] }> = {};
   for (const a of day.eot_assignments) {
-    if (a.duty_type === "EOT MO") continue;
+    if (a.duty_type === "EOT MO" || a.duty_type === "Ward MO") continue;
     const key = a.location || "EOT";
     if (!eotGroups[key]) eotGroups[key] = { consultantId: a.consultant_id, staff: [] };
     eotGroups[key].staff.push(a);
   }
 
-  const clinicAm = day.am_clinics.filter((a) => a.duty_type !== "MOPD" && a.duty_type !== "Ward MO" && a.duty_type !== "EOT MO");
+  const clinicAm = day.am_clinics.filter((a) => a.duty_type !== "MOPD");
   const mopdAm = day.am_clinics.filter((a) => a.duty_type === "MOPD");
-  const wardMo = day.am_clinics.filter((a) => a.duty_type === "Ward MO");
+  const wardMo = [...day.ot_assignments, ...day.eot_assignments].filter((a) => a.duty_type === "Ward MO");
   const eotMo = [...day.ot_assignments, ...day.eot_assignments].filter((a) => a.duty_type === "EOT MO");
   const clinicPm = day.pm_clinics.filter((a) => a.duty_type !== "MOPD");
   const mopdPm = day.pm_clinics.filter((a) => a.duty_type === "MOPD");
