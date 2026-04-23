@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 *.sqlite3
 *.db
+!backend/data/roster.db
 .env
 node_modules/
 dist/
