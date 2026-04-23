@@ -20,6 +20,7 @@ class StaffOut(BaseModel):
     active: bool
     has_admin_role: bool
     team_name: Optional[str] = None
+    supervisor_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
@@ -401,6 +402,8 @@ class CallTypeConfigCreate(BaseModel):
     applicable_days: str = "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"
     required_conditions: Optional[str] = None
     default_duty_type: Optional[str] = None
+    is_night_float: bool = False
+    night_float_run: Optional[str] = None
     is_active: bool = True
     eligible_rank_ids: list[int] = []
 
@@ -418,6 +421,8 @@ class CallTypeConfigOut(BaseModel):
     applicable_days: str
     required_conditions: Optional[str] = None
     default_duty_type: Optional[str] = None
+    is_night_float: bool = False
+    night_float_run: Optional[str] = None
     is_active: bool
     eligible_rank_ids: list[int] = []
 

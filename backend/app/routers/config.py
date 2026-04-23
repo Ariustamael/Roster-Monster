@@ -74,6 +74,10 @@ def list_call_types(db: Session = Depends(get_db)):
             difficulty_points=ct.difficulty_points,
             counts_towards_fairness=ct.counts_towards_fairness,
             applicable_days=ct.applicable_days,
+            required_conditions=ct.required_conditions,
+            default_duty_type=ct.default_duty_type,
+            is_night_float=ct.is_night_float or False,
+            night_float_run=ct.night_float_run,
             is_active=ct.is_active,
             eligible_rank_ids=rank_ids,
         ))
@@ -99,8 +103,9 @@ def create_call_type(payload: CallTypeConfigCreate, db: Session = Depends(get_db
         is_overnight=ct.is_overnight, post_call_type=ct.post_call_type,
         max_consecutive_days=ct.max_consecutive_days, min_gap_days=ct.min_gap_days,
         difficulty_points=ct.difficulty_points, counts_towards_fairness=ct.counts_towards_fairness,
-        applicable_days=ct.applicable_days, is_active=ct.is_active,
-        eligible_rank_ids=rank_ids,
+        applicable_days=ct.applicable_days, required_conditions=ct.required_conditions,
+        default_duty_type=ct.default_duty_type, is_night_float=ct.is_night_float or False,
+        night_float_run=ct.night_float_run, is_active=ct.is_active, eligible_rank_ids=rank_ids,
     )
 
 
@@ -126,8 +131,9 @@ def update_call_type(ct_id: int, payload: CallTypeConfigCreate, db: Session = De
         is_overnight=ct.is_overnight, post_call_type=ct.post_call_type,
         max_consecutive_days=ct.max_consecutive_days, min_gap_days=ct.min_gap_days,
         difficulty_points=ct.difficulty_points, counts_towards_fairness=ct.counts_towards_fairness,
-        applicable_days=ct.applicable_days, is_active=ct.is_active,
-        eligible_rank_ids=rank_ids,
+        applicable_days=ct.applicable_days, required_conditions=ct.required_conditions,
+        default_duty_type=ct.default_duty_type, is_night_float=ct.is_night_float or False,
+        night_float_run=ct.night_float_run, is_active=ct.is_active, eligible_rank_ids=rank_ids,
     )
 
 

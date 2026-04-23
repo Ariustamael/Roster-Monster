@@ -26,6 +26,20 @@ function toggleDay(current: string, day: string): string {
   return ALL_DAY_TOKENS.filter((d) => set.has(d)).join(",");
 }
 
+const WEEKDAY_TOKENS = ["Mon", "Tue", "Wed", "Thu", "Fri"] as const;
+
+function parseRunDays(str: string | null): Set<string> {
+  if (!str) return new Set();
+  return new Set(str.split(",").map((s) => s.trim()).filter(Boolean));
+}
+
+function toggleRunDay(current: string | null, day: string): string {
+  const set = parseRunDays(current);
+  if (set.has(day)) set.delete(day);
+  else set.add(day);
+  return WEEKDAY_TOKENS.filter((d) => set.has(d)).join(",");
+}
+
 interface DraftCallType {
   id: number | null;
   name: string;
@@ -37,6 +51,8 @@ interface DraftCallType {
   difficulty_points: number;
   counts_towards_fairness: boolean;
   applicable_days: string;
+  is_night_float: boolean;
+  night_float_run: string | null;
   is_active: boolean;
   eligible_rank_ids: number[];
 }
@@ -77,6 +93,8 @@ export default function CallTypeConfigTab() {
       difficulty_points: ct.difficulty_points,
       counts_towards_fairness: ct.counts_towards_fairness,
       applicable_days: ct.applicable_days,
+      is_night_float: ct.is_night_float,
+      night_float_run: ct.night_float_run,
       is_active: ct.is_active,
       eligible_rank_ids: ct.eligible_rank_ids,
     });
@@ -95,6 +113,8 @@ export default function CallTypeConfigTab() {
       difficulty_points: 3,
       counts_towards_fairness: true,
       applicable_days: "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH",
+      is_night_float: false,
+      night_float_run: null,
       is_active: true,
       eligible_rank_ids: ranks.filter((r) => r.is_call_eligible).map((r) => r.id),
     });
@@ -114,6 +134,8 @@ export default function CallTypeConfigTab() {
         difficulty_points: draft.difficulty_points,
         counts_towards_fairness: draft.counts_towards_fairness,
         applicable_days: draft.applicable_days,
+        is_night_float: draft.is_night_float,
+        night_float_run: draft.night_float_run || null,
         is_active: draft.is_active,
         eligible_rank_ids: draft.eligible_rank_ids,
       };
@@ -175,6 +197,7 @@ export default function CallTypeConfigTab() {
                 <th>Order</th>
                 <th>Name</th>
                 <th>Overnight</th>
+                <th>Night Float</th>
                 <th>Post-Call</th>
                 <th>Gap</th>
                 <th>Difficulty</th>
@@ -191,6 +214,7 @@ export default function CallTypeConfigTab() {
                   <td>{ct.display_order}</td>
                   <td style={{ fontWeight: 600 }}>{ct.name}</td>
                   <td>{ct.is_overnight ? "Yes" : "No"}</td>
+                  <td>{ct.is_night_float ? <span style={{ color: "#6366f1", fontSize: 11, fontWeight: 600 }}>NF{ct.night_float_run ? ` (${ct.night_float_run})` : ""}</span> : "-"}</td>
                   <td>{ct.post_call_type}</td>
                   <td>{ct.min_gap_days}d</td>
                   <td>{ct.difficulty_points}</td>
@@ -206,7 +230,7 @@ export default function CallTypeConfigTab() {
                 </tr>
               ))}
               {callTypes.length === 0 && (
-                <tr><td colSpan={11} style={{ textAlign: "center", color: "var(--text-muted)" }}>No call types configured.</td></tr>
+                <tr><td colSpan={12} style={{ textAlign: "center", color: "var(--text-muted)" }}>No call types configured.</td></tr>
               )}
             </tbody>
           </table>
@@ -239,6 +263,32 @@ export default function CallTypeConfigTab() {
               <select value={draft.post_call_type} onChange={(e) => setDraft({ ...draft, post_call_type: e.target.value })}>
                 {POST_CALL_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>
+            </div>
+
+            <div className="form-group" style={{ background: "var(--bg-muted, #f8fafc)", borderRadius: 6, padding: "10px 12px", border: "1px solid var(--border)" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600 }}>
+                <input type="checkbox" checked={draft.is_night_float} onChange={(e) => setDraft({ ...draft, is_night_float: e.target.checked, night_float_run: e.target.checked ? draft.night_float_run : null })} />
+                Night Float (nights only — excluded from day duties)
+              </label>
+              {draft.is_night_float && (
+                <div style={{ marginTop: 8 }}>
+                  <label style={{ fontSize: 12, color: "var(--text-muted)", display: "block", marginBottom: 4 }}>
+                    Consecutive Run Days (same person covers all selected days in a week)
+                  </label>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    {WEEKDAY_TOKENS.map((day) => (
+                      <label key={day} style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", fontSize: 13 }}>
+                        <input
+                          type="checkbox"
+                          checked={parseRunDays(draft.night_float_run).has(day)}
+                          onChange={() => setDraft({ ...draft, night_float_run: toggleRunDay(draft.night_float_run, day) })}
+                        />
+                        {day}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>

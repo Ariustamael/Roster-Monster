@@ -5,6 +5,7 @@ export interface Staff {
   active: boolean;
   has_admin_role: boolean;
   team_name: string | null;
+  supervisor_name: string | null;
 }
 
 export interface Team {
@@ -252,6 +253,8 @@ export interface CallTypeConfig {
   applicable_days: string;
   required_conditions: string | null;
   default_duty_type: string | null;
+  is_night_float: boolean;
+  night_float_run: string | null;
   is_active: boolean;
   eligible_rank_ids: number[];
 }

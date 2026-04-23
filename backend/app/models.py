@@ -79,6 +79,8 @@ class CallTypeConfig(Base):
     applicable_days = Column(String(50), default="Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH")
     required_conditions = Column(String(100), nullable=True)
     default_duty_type = Column(String(20), nullable=True)
+    is_night_float = Column(Boolean, default=False)
+    night_float_run = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True)
 
     eligible_ranks = relationship(

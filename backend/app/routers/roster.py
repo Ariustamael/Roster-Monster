@@ -42,6 +42,8 @@ def _load_call_type_infos(db: Session) -> list[CallTypeInfo]:
             applicable_days=ct.applicable_days,
             eligible_rank_names=rank_names,
             required_conditions=ct.required_conditions or "",
+            is_night_float=ct.is_night_float or False,
+            night_float_run=ct.night_float_run or "",
         ))
     return result
 

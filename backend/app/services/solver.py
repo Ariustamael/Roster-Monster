@@ -49,6 +49,8 @@ class CallTypeInfo:
     applicable_days: str
     eligible_rank_names: set[str]
     required_conditions: str = ""
+    is_night_float: bool = False
+    night_float_run: str = ""
 
 
 @dataclass
@@ -253,6 +255,17 @@ def _score_candidate(
 
     if day.d in request_dates.get(person.id, set()):
         score += 4.0
+
+    # Night float run continuity bonus: same person should cover consecutive run days
+    if ct.night_float_run:
+        run_days = {d.strip() for d in ct.night_float_run.split(",")}
+        today_label = DAY_LABELS[day.d.weekday()]
+        if today_label in run_days:
+            prev_day = day.d - timedelta(days=1)
+            prev_label = DAY_LABELS[prev_day.weekday()]
+            if prev_label in run_days and prev_day in assignments:
+                if person.id in assignments[prev_day] and assignments[prev_day].get(person.id) == ct.name:
+                    score += 25.0
 
     last_call_date = None
     for offset in range(1, 10):

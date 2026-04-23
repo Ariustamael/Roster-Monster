@@ -55,7 +55,8 @@ export default function StaffView() {
       (s) =>
         s.name.toLowerCase().includes(filter.toLowerCase()) ||
         s.rank.toLowerCase().includes(filter.toLowerCase()) ||
-        (s.team_name || "").toLowerCase().includes(filter.toLowerCase())
+        (s.team_name || "").toLowerCase().includes(filter.toLowerCase()) ||
+        (s.supervisor_name || "").toLowerCase().includes(filter.toLowerCase())
     )
     .sort((a, b) => (RANK_ORDER[a.rank] ?? 9) - (RANK_ORDER[b.rank] ?? 9) || a.name.localeCompare(b.name));
 
@@ -152,6 +153,7 @@ export default function StaffView() {
                   <th>Name</th>
                   <th>Rank</th>
                   <th>Team</th>
+                  <th>Supervisor</th>
                   <th>Leaves</th>
                   <th>Prefs</th>
                   <th style={{ width: 120 }}></th>
@@ -246,6 +248,7 @@ function StaffRow({
         <td style={{ fontWeight: 500 }}>{s.name}</td>
         <td>{s.rank}</td>
         <td>{s.team_name || "-"}</td>
+        <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{s.supervisor_name || "-"}</td>
         <td>{leaves.length || "-"}</td>
         <td>{prefs.length || "-"}</td>
         <td>
@@ -257,7 +260,7 @@ function StaffRow({
       </tr>
       {isExpanded && (
         <tr className="staff-detail">
-          <td colSpan={7}>
+          <td colSpan={8}>
             <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
               <div>
                 <strong style={{ fontSize: 12 }}>Leaves ({monthLabel})</strong>
@@ -325,6 +328,7 @@ function EditRow({
         </select>
       </td>
       <td>{staff.team_name || "-"}</td>
+      <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{staff.supervisor_name || "-"}</td>
       <td colSpan={2}></td>
       <td>
         <div className="btn-group">

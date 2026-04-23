@@ -22,6 +22,7 @@ def list_staff(active_only: bool = True, db: Session = Depends(get_db)):
     result = []
     for s in staff:
         team_name = None
+        supervisor_name = None
         ta = (
             db.query(TeamAssignment)
             .filter(TeamAssignment.staff_id == s.id)
@@ -32,6 +33,10 @@ def list_staff(active_only: bool = True, db: Session = Depends(get_db)):
             team = db.query(Team).get(ta.team_id)
             if team:
                 team_name = team.name
+            if ta.supervisor_id:
+                sup = db.query(Staff).get(ta.supervisor_id)
+                if sup:
+                    supervisor_name = sup.name
         result.append(
             StaffOut(
                 id=s.id,
@@ -40,6 +45,7 @@ def list_staff(active_only: bool = True, db: Session = Depends(get_db)):
                 active=s.active,
                 has_admin_role=s.has_admin_role,
                 team_name=team_name,
+                supervisor_name=supervisor_name,
             )
         )
     return result
