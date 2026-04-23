@@ -12,6 +12,8 @@ export default function TeamsView() {
   const [loading, setLoading] = useState(true);
   const [dragId, setDragId] = useState<number | null>(null);
   const [dragGrade, setDragGrade] = useState<string>("");
+  const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
+  const [editName, setEditName] = useState("");
 
   async function reload() {
     const [s, t, a] = await Promise.all([
@@ -45,9 +47,6 @@ export default function TeamsView() {
   }
 
   function getTeamUntaggedMOs(teamId: number): Staff[] {
-    const teamConsIds = new Set(
-      assignments.filter((a) => a.team_id === teamId && a.role === "consultant").map((a) => a.staff_id)
-    );
     const moIds = assignments
       .filter((a) => a.team_id === teamId && a.role === "mo" && !a.supervisor_id)
       .map((a) => a.staff_id);
@@ -128,6 +127,35 @@ export default function TeamsView() {
     }
   }
 
+  async function moveTeam(teamId: number, direction: -1 | 1) {
+    const idx = teams.findIndex((t) => t.id === teamId);
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= teams.length) return;
+    const reordered = [...teams];
+    [reordered[idx], reordered[newIdx]] = [reordered[newIdx], reordered[idx]];
+    setTeams(reordered);
+    try {
+      await api.reorderTeams(reordered.map((t) => t.id));
+    } catch (e: any) {
+      alert(e.message);
+      await reload();
+    }
+  }
+
+  async function saveTeamName(teamId: number) {
+    if (!editName.trim()) {
+      setEditingTeamId(null);
+      return;
+    }
+    try {
+      await api.renameTeam(teamId, editName.trim());
+      await reload();
+    } catch (e: any) {
+      alert(e.message);
+    }
+    setEditingTeamId(null);
+  }
+
   if (loading) return <div className="loading"><span className="spinner" /> Loading teams...</div>;
 
   const unassigned = getUnassigned();
@@ -141,11 +169,11 @@ export default function TeamsView() {
         </div>
       </div>
       <p style={{ fontSize: 13, color: "var(--text-muted)", marginBottom: 16 }}>
-        Drag staff between teams. Drop an MO onto a consultant to tag them to that consultant.
+        Drag staff between teams. Drop an MO onto a consultant to tag them. Use arrows to reorder teams.
       </p>
 
       <div className="team-board">
-        {teams.map((team) => {
+        {teams.map((team, teamIdx) => {
           const consultants = getTeamConsultants(team.id);
           const untagged = getTeamUntaggedMOs(team.id);
 
@@ -157,16 +185,54 @@ export default function TeamsView() {
               onDrop={(e) => onDropTeam(e, team.id)}
             >
               <div className="team-header">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <strong>{team.name}</strong>
-                  <button
-                    className="btn-add-month"
-                    onClick={() => deleteTeam(team.id, team.name)}
-                    title="Delete team"
-                    style={{ background: "rgba(220,38,38,0.15)", color: "var(--danger)", width: 22, height: 22, fontSize: 13 }}
-                  >
-                    x
-                  </button>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 4 }}>
+                  {editingTeamId === team.id ? (
+                    <input
+                      type="text"
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      onBlur={() => saveTeamName(team.id)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveTeamName(team.id); if (e.key === "Escape") setEditingTeamId(null); }}
+                      autoFocus
+                      style={{ fontWeight: 600, fontSize: 14, border: "1px solid var(--primary)", borderRadius: 4, padding: "2px 6px", width: "100%" }}
+                    />
+                  ) : (
+                    <strong
+                      style={{ cursor: "pointer" }}
+                      onDoubleClick={() => { setEditingTeamId(team.id); setEditName(team.name); }}
+                      title="Double-click to rename"
+                    >
+                      {team.name}
+                    </strong>
+                  )}
+                  <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+                    <button
+                      className="btn-add-month"
+                      onClick={() => moveTeam(team.id, -1)}
+                      disabled={teamIdx === 0}
+                      title="Move left"
+                      style={{ width: 20, height: 20, fontSize: 11, opacity: teamIdx === 0 ? 0.3 : 1 }}
+                    >
+                      &#9664;
+                    </button>
+                    <button
+                      className="btn-add-month"
+                      onClick={() => moveTeam(team.id, 1)}
+                      disabled={teamIdx === teams.length - 1}
+                      title="Move right"
+                      style={{ width: 20, height: 20, fontSize: 11, opacity: teamIdx === teams.length - 1 ? 0.3 : 1 }}
+                    >
+                      &#9654;
+                    </button>
+                    <button
+                      className="btn-add-month"
+                      onClick={() => deleteTeam(team.id, team.name)}
+                      title="Delete team"
+                      style={{ background: "rgba(220,38,38,0.15)", color: "var(--danger)", width: 20, height: 20, fontSize: 11 }}
+                    >
+                      x
+                    </button>
+                  </div>
                 </div>
               </div>
               <div className="team-members">

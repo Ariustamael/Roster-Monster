@@ -44,9 +44,10 @@ OVERNIGHT_CALL_TYPES = {CallType.MO1, CallType.MO2}
 
 class DutyType(str, enum.Enum):
     OT = "OT"
-    SUPERVISED_CLINIC = "Supervised Clinic"
+    CLINIC = "Clinic"
     MOPD = "MOPD"
     ADMIN = "Admin"
+    CAT_A = "CAT-A"
     SPECIAL = "Special"
 
 
@@ -100,6 +101,7 @@ class Team(Base):
 
     id = Column(Integer, primary_key=True)
     name = Column(String(60), nullable=False, unique=True)
+    display_order = Column(Integer, nullable=False, server_default="0")
 
     assignments = relationship("TeamAssignment", back_populates="team", cascade="all, delete-orphan")
 
@@ -294,7 +296,8 @@ class ClinicTemplate(Base):
     day_of_week = Column(Integer, nullable=False)  # 0=Mon..4=Fri
     session = Column(SAEnum(Session), nullable=False)  # AM or PM
     room = Column(String(20), nullable=False)
-    is_supervised = Column(Boolean, default=False)
+    clinic_type = Column(String(20), default="Sup")  # NC, Sup, MOPD, Hand VC, CAT-A, etc.
+    mos_required = Column(Integer, default=1)
     consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
 
     consultant = relationship("Staff")

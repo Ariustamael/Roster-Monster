@@ -19,12 +19,20 @@ export default function CallRosterView() {
     api.getMOStaff().then((all) => setMoStaff(all.filter((s) => MO_GRADES.includes(s.grade))));
   }, []);
 
+  const configId = active?.id ?? 0;
+
   useEffect(() => {
     setRoster(null);
     setAssignments([]);
-  }, [active?.id]);
-
-  const configId = active?.id ?? 0;
+    if (!configId) return;
+    api.viewCallRoster(configId)
+      .then(async (data) => {
+        setRoster(data);
+        const a = await api.getAssignments(configId);
+        setAssignments(a);
+      })
+      .catch(() => {});
+  }, [configId]);
 
   async function generate() {
     if (!configId) return;

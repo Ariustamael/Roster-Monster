@@ -235,6 +235,95 @@ def generate_roster(config_id: int, db: Session = Depends(get_db)):
     )
 
 
+@router.get("/{config_id}/view", response_model=RosterResponse)
+def view_roster(config_id: int, db: Session = Depends(get_db)):
+    config = db.query(MonthlyConfig).get(config_id)
+    if not config:
+        raise HTTPException(404, "Config not found")
+
+    call_rows = (
+        db.query(CallAssignment)
+        .filter(CallAssignment.config_id == config_id)
+        .all()
+    )
+    if not call_rows:
+        raise HTTPException(404, "No roster generated yet")
+
+    year, month = config.year, config.month
+    num_days = calendar.monthrange(year, month)[1]
+
+    all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
+    ph_dates = {
+        r.date for r in db.query(PublicHoliday).all()
+        if r.date.year == year and r.date.month == month
+    }
+    cons_oncall_rows = {r.date: r for r in config.consultant_oncalls}
+    stepdown_dates = {r.date for r in config.stepdown_days}
+
+    consultant_oncall_map: dict[date, int] = {}
+    for r in config.consultant_oncalls:
+        consultant_oncall_map[r.date] = r.consultant_id
+    ac_oncall_map: dict[date, int] = {}
+    for r in config.ac_oncalls:
+        ac_oncall_map[r.date] = r.ac_id
+
+    assignments_by_date: dict[date, dict[str, str]] = defaultdict(dict)
+    for r in call_rows:
+        assignments_by_date[r.date][r.call_type.value] = all_staff_names.get(r.staff_id, f"ID:{r.staff_id}")
+
+    day_rosters: list[DayRoster] = []
+    for day_num in range(1, num_days + 1):
+        d = date(year, month, day_num)
+        is_wknd = d.weekday() >= 5
+        is_ph = d in ph_dates
+
+        inv_map = assignments_by_date.get(d, {})
+        cons_id = consultant_oncall_map.get(d)
+        ac_id = ac_oncall_map.get(d)
+
+        cons_row = cons_oncall_rows.get(d)
+        if cons_row and cons_row.supervising_consultant_id:
+            cons_display = f"{all_staff_names.get(cons_id, '')} / {all_staff_names.get(cons_row.supervising_consultant_id, '')}"
+            ac_display = None
+        else:
+            cons_display = all_staff_names.get(cons_id) if cons_id else None
+            ac_display = all_staff_names.get(ac_id) if ac_id else None
+
+        day_rosters.append(DayRoster(
+            date=d,
+            day_name=d.strftime("%a"),
+            is_weekend=is_wknd,
+            is_ph=is_ph,
+            is_stepdown=d in stepdown_dates,
+            consultant_oncall=cons_display,
+            ac_oncall=ac_display,
+            mo1=inv_map.get("MO1"),
+            mo2=inv_map.get("MO2"),
+            mo3=inv_map.get("MO3"),
+            mo4=inv_map.get("MO4"),
+            mo5=inv_map.get("MO5"),
+        ))
+
+    mo_pool_staff = (
+        db.query(Staff)
+        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in MO_GRADES]))
+        .all()
+    )
+    from ..services.solver import PersonInfo as SolverPersonInfo
+    mo_pool_persons = [SolverPersonInfo(id=s.id, name=s.name) for s in mo_pool_staff]
+
+    call_map: dict[date, dict[int, CallType]] = defaultdict(dict)
+    for r in call_rows:
+        call_map[r.date][r.staff_id] = r.call_type
+
+    fairness = compute_fairness_stats(dict(call_map), mo_pool_persons, stepdown_dates)
+
+    return RosterResponse(
+        year=year, month=month, days=day_rosters,
+        violations=[], fairness=fairness,
+    )
+
+
 @router.get("/{config_id}/export")
 def export_roster(
     config_id: int,
@@ -330,10 +419,11 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
                     ot_assistants += ot.assistants_needed
             for cl in clinic_templates:
                 if cl.day_of_week == dow:
-                    if cl.is_supervised:
-                        clinic_sup += 1
-                    else:
+                    ct = cl.clinic_type or "Sup"
+                    if ct == "MOPD":
                         clinic_mopd += 1
+                    elif (cl.mos_required or 0) > 0:
+                        clinic_sup += 1
 
         call_slots = 2
         if not is_wknd and not is_ph:

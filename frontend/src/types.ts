@@ -10,6 +10,7 @@ export interface Staff {
 export interface Team {
   id: number;
   name: string;
+  display_order: number;
 }
 
 export interface DayRoster {
@@ -146,7 +147,8 @@ export interface ClinicTemplate {
   day_of_week: number;
   session: string;
   room: string;
-  is_supervised: boolean;
+  clinic_type: string;
+  mos_required: number;
   consultant_id: number | null;
   consultant_name: string | null;
 }

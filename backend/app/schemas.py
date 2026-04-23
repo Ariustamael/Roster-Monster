@@ -29,6 +29,7 @@ class StaffOut(BaseModel):
 class TeamOut(BaseModel):
     id: int
     name: str
+    display_order: int = 0
 
     model_config = {"from_attributes": True}
 
@@ -271,7 +272,8 @@ class ClinicTemplateCreate(BaseModel):
     day_of_week: int
     session: Session
     room: str
-    is_supervised: bool = False
+    clinic_type: str = "Sup"
+    mos_required: int = 1
     consultant_id: Optional[int] = None
 
 
@@ -280,7 +282,8 @@ class ClinicTemplateOut(BaseModel):
     day_of_week: int
     session: Session
     room: str
-    is_supervised: bool
+    clinic_type: str
+    mos_required: int
     consultant_id: Optional[int]
     consultant_name: Optional[str] = None
 

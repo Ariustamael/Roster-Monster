@@ -21,5 +21,28 @@ def get_db():
         db.close()
 
 
+def _migrate(engine):
+    from sqlalchemy import inspect, text
+    insp = inspect(engine)
+    tables = insp.get_table_names()
+
+    if "team" in tables:
+        cols = {c["name"] for c in insp.get_columns("team")}
+        if "display_order" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE team ADD COLUMN display_order INTEGER NOT NULL DEFAULT 0"))
+
+    if "clinic_template" in tables:
+        cols = {c["name"] for c in insp.get_columns("clinic_template")}
+        with engine.begin() as conn:
+            if "clinic_type" not in cols:
+                conn.execute(text("ALTER TABLE clinic_template ADD COLUMN clinic_type VARCHAR(20) DEFAULT 'Sup'"))
+            if "mos_required" not in cols:
+                conn.execute(text("ALTER TABLE clinic_template ADD COLUMN mos_required INTEGER DEFAULT 1"))
+            if "is_supervised" in cols and "clinic_type" in cols:
+                pass
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
+    _migrate(engine)

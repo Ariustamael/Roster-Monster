@@ -33,7 +33,8 @@ class OTSlot:
 class ClinicSlot:
     room: str
     session: Session
-    is_supervised: bool
+    clinic_type: str = "Sup"
+    mos_required: int = 1
     consultant_id: int | None = None
     consultant_team_id: int | None = None
 
@@ -118,6 +119,77 @@ def _available_mos(
     ]
 
 
+def _assign_session(
+    day: DayDutyConfig,
+    session: Session,
+    clinics: list[ClinicSlot],
+    pool: list[PersonInfo],
+    assigned: set[int],
+    fairness: FairnessTracker,
+    results: list[DutyResult],
+) -> None:
+    """Assign clinics (NC/Sup/MOPD/CAT-A) for one session."""
+    # Consultant clinics first (NC needs multiple MOs, Sup needs 1)
+    for clinic in clinics:
+        if clinic.mos_required <= 0:
+            continue
+        if clinic.clinic_type == "MOPD":
+            continue
+
+        candidates = [
+            p for p in pool
+            if p.id not in assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
+        ]
+        if not candidates:
+            continue
+
+        scored = sorted(
+            candidates,
+            key=lambda p: (
+                fairness.clinic_score(p.id)
+                + (5.0 if clinic.consultant_id and p.supervisor_id == clinic.consultant_id else 0.0)
+                + (3.0 if clinic.consultant_team_id and p.team_id == clinic.consultant_team_id else 0.0)
+            ),
+            reverse=True,
+        )
+
+        duty_type = DutyType.CAT_A if clinic.clinic_type == "CAT-A" else DutyType.CLINIC
+        for i in range(min(clinic.mos_required, len(scored))):
+            chosen = scored[i]
+            results.append(DutyResult(
+                date=day.d, staff_id=chosen.id,
+                session=session, duty_type=duty_type,
+                location=clinic.room, consultant_id=clinic.consultant_id,
+            ))
+            assigned.add(chosen.id)
+            fairness.clinic_sessions[chosen.id] += 1
+
+    # MOPD slots (SSRs and SRs excluded)
+    mopd_clinics = [c for c in clinics if c.clinic_type == "MOPD" and c.mos_required > 0]
+    mopd_total = sum(c.mos_required for c in mopd_clinics)
+    if mopd_total > 0:
+        mopd_pool = [
+            p for p in pool
+            if p.id not in assigned
+            and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
+            and p.grade != Grade.SENIOR_RESIDENT.value
+        ]
+        mopd_scored = sorted(
+            mopd_pool,
+            key=lambda p: fairness.mopd_score(p.id),
+            reverse=True,
+        )
+        for i in range(min(mopd_total, len(mopd_scored))):
+            chosen = mopd_scored[i]
+            results.append(DutyResult(
+                date=day.d, staff_id=chosen.id,
+                session=session, duty_type=DutyType.MOPD,
+                location="MOPD",
+            ))
+            assigned.add(chosen.id)
+            fairness.mopd_sessions[chosen.id] += 1
+
+
 def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
     results: list[DutyResult] = []
     fairness = FairnessTracker()
@@ -174,61 +246,10 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
 
         # ── 2. AM session ───────────────────────────────────────────
         am_pool = [p for p in available if p.id not in am_assigned]
-
-        # Supervised clinics AM (SSRs excluded)
-        for clinic in day.am_clinics:
-            if not clinic.is_supervised:
-                continue
-            candidates = [
-                p for p in am_pool
-                if p.id not in am_assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
-            ]
-            if not candidates:
-                break
-            scored = sorted(
-                candidates,
-                key=lambda p: (
-                    fairness.clinic_score(p.id)
-                    + (5.0 if clinic.consultant_id and p.supervisor_id == clinic.consultant_id else 0.0)
-                    + (3.0 if clinic.consultant_team_id and p.team_id == clinic.consultant_team_id else 0.0)
-                ),
-                reverse=True,
-            )
-            chosen = scored[0]
-            results.append(DutyResult(
-                date=day.d, staff_id=chosen.id,
-                session=Session.AM, duty_type=DutyType.SUPERVISED_CLINIC,
-                location=clinic.room, consultant_id=clinic.consultant_id,
-            ))
-            am_assigned.add(chosen.id)
-            fairness.clinic_sessions[chosen.id] += 1
-
-        # MOPD AM (SSRs and SRs excluded)
-        mopd_am_pool = [
-            p for p in am_pool
-            if p.id not in am_assigned
-            and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
-            and p.grade != Grade.SENIOR_RESIDENT.value
-        ]
-        supervised_am_count = sum(1 for c in day.am_clinics if c.is_supervised)
-        mopd_slots_am = day.mopd_rooms_am - supervised_am_count
-        mopd_to_assign = min(mopd_slots_am, len(mopd_am_pool))
-        mopd_to_assign = max(mopd_to_assign, min(day.min_mopd_per_session, len(mopd_am_pool)))
-
-        mopd_scored = sorted(
-            mopd_am_pool,
-            key=lambda p: fairness.mopd_score(p.id),
-            reverse=True,
+        _assign_session(
+            day, Session.AM, day.am_clinics, am_pool,
+            am_assigned, fairness, results,
         )
-        for i in range(min(mopd_to_assign, len(mopd_scored))):
-            chosen = mopd_scored[i]
-            results.append(DutyResult(
-                date=day.d, staff_id=chosen.id,
-                session=Session.AM, duty_type=DutyType.MOPD,
-                location=f"MOPD",
-            ))
-            am_assigned.add(chosen.id)
-            fairness.mopd_sessions[chosen.id] += 1
 
         # Admin AM
         for p in am_pool:
@@ -242,61 +263,10 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
 
         # ── 3. PM session ───────────────────────────────────────────
         pm_pool = [p for p in available if p.id not in pm_assigned]
-
-        # Supervised clinics PM (SSRs excluded)
-        for clinic in day.pm_clinics:
-            if not clinic.is_supervised:
-                continue
-            candidates = [
-                p for p in pm_pool
-                if p.id not in pm_assigned and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
-            ]
-            if not candidates:
-                break
-            scored = sorted(
-                candidates,
-                key=lambda p: (
-                    fairness.clinic_score(p.id)
-                    + (5.0 if clinic.consultant_id and p.supervisor_id == clinic.consultant_id else 0.0)
-                    + (3.0 if clinic.consultant_team_id and p.team_id == clinic.consultant_team_id else 0.0)
-                ),
-                reverse=True,
-            )
-            chosen = scored[0]
-            results.append(DutyResult(
-                date=day.d, staff_id=chosen.id,
-                session=Session.PM, duty_type=DutyType.SUPERVISED_CLINIC,
-                location=clinic.room, consultant_id=clinic.consultant_id,
-            ))
-            pm_assigned.add(chosen.id)
-            fairness.clinic_sessions[chosen.id] += 1
-
-        # MOPD PM (SSRs and SRs excluded)
-        mopd_pm_pool = [
-            p for p in pm_pool
-            if p.id not in pm_assigned
-            and p.grade != Grade.SENIOR_STAFF_REGISTRAR.value
-            and p.grade != Grade.SENIOR_RESIDENT.value
-        ]
-        supervised_pm_count = sum(1 for c in day.pm_clinics if c.is_supervised)
-        mopd_slots_pm = day.mopd_rooms_pm - supervised_pm_count
-        mopd_to_assign = min(mopd_slots_pm, len(mopd_pm_pool))
-        mopd_to_assign = max(mopd_to_assign, min(day.min_mopd_per_session, len(mopd_pm_pool)))
-
-        mopd_scored = sorted(
-            mopd_pm_pool,
-            key=lambda p: fairness.mopd_score(p.id),
-            reverse=True,
+        _assign_session(
+            day, Session.PM, day.pm_clinics, pm_pool,
+            pm_assigned, fairness, results,
         )
-        for i in range(min(mopd_to_assign, len(mopd_scored))):
-            chosen = mopd_scored[i]
-            results.append(DutyResult(
-                date=day.d, staff_id=chosen.id,
-                session=Session.PM, duty_type=DutyType.MOPD,
-                location=f"MOPD",
-            ))
-            pm_assigned.add(chosen.id)
-            fairness.mopd_sessions[chosen.id] += 1
 
         # Admin PM
         for p in pm_pool:
@@ -332,7 +302,7 @@ def compute_duty_stats(
             continue
         if r.duty_type == DutyType.OT:
             stats[name]["ot_days"] += 1
-        elif r.duty_type == DutyType.SUPERVISED_CLINIC:
+        elif r.duty_type in (DutyType.CLINIC, DutyType.CAT_A):
             stats[name]["supervised_sessions"] += 1
         elif r.duty_type == DutyType.MOPD:
             stats[name]["mopd_sessions"] += 1

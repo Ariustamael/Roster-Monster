@@ -88,7 +88,7 @@ def list_clinic_templates(db: DBSession = Depends(get_db)):
     return [
         ClinicTemplateOut(
             id=r.id, day_of_week=r.day_of_week, session=r.session,
-            room=r.room, is_supervised=r.is_supervised,
+            room=r.room, clinic_type=r.clinic_type, mos_required=r.mos_required,
             consultant_id=r.consultant_id,
             consultant_name=r.consultant.name if r.consultant else None,
         )
@@ -104,7 +104,7 @@ def create_clinic_template(payload: ClinicTemplateCreate, db: DBSession = Depend
     db.refresh(t)
     return ClinicTemplateOut(
         id=t.id, day_of_week=t.day_of_week, session=t.session,
-        room=t.room, is_supervised=t.is_supervised,
+        room=t.room, clinic_type=t.clinic_type, mos_required=t.mos_required,
         consultant_id=t.consultant_id,
         consultant_name=t.consultant.name if t.consultant else None,
     )
@@ -121,7 +121,7 @@ def update_clinic_template(template_id: int, payload: ClinicTemplateCreate, db: 
     db.refresh(t)
     return ClinicTemplateOut(
         id=t.id, day_of_week=t.day_of_week, session=t.session,
-        room=t.room, is_supervised=t.is_supervised,
+        room=t.room, clinic_type=t.clinic_type, mos_required=t.mos_required,
         consultant_id=t.consultant_id,
         consultant_name=t.consultant.name if t.consultant else None,
     )
@@ -213,14 +213,16 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
             for t in clinic_by_dow_session.get((dow, Session.AM.value), []):
                 am_clinics.append(ClinicSlot(
                     room=t.room, session=Session.AM,
-                    is_supervised=t.is_supervised,
+                    clinic_type=t.clinic_type or "Sup",
+                    mos_required=t.mos_required if t.mos_required is not None else 1,
                     consultant_id=t.consultant_id,
                     consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
                 ))
             for t in clinic_by_dow_session.get((dow, Session.PM.value), []):
                 pm_clinics.append(ClinicSlot(
                     room=t.room, session=Session.PM,
-                    is_supervised=t.is_supervised,
+                    clinic_type=t.clinic_type or "Sup",
+                    mos_required=t.mos_required if t.mos_required is not None else 1,
                     consultant_id=t.consultant_id,
                     consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
                 ))
@@ -393,3 +395,96 @@ def get_duties(config_id: int, db: DBSession = Depends(get_db)):
         )
         for r in rows
     ]
+
+
+@router.get("/roster/{config_id}/duties/view", response_model=DutyRosterResponse)
+def view_duties(config_id: int, db: DBSession = Depends(get_db)):
+    config = db.query(MonthlyConfig).get(config_id)
+    if not config:
+        raise HTTPException(404, "Config not found")
+
+    rows = (
+        db.query(DutyAssignment)
+        .filter(DutyAssignment.config_id == config_id)
+        .order_by(DutyAssignment.date, DutyAssignment.session)
+        .all()
+    )
+    if not rows:
+        raise HTTPException(404, "No duty roster generated yet")
+
+    year, month = config.year, config.month
+    num_days = calendar.monthrange(year, month)[1]
+
+    cons_names = {s.id: s.name for s in db.query(Staff).all()}
+    ph_dates = {
+        r.date for r in db.query(PublicHoliday).all()
+        if r.date.year == year and r.date.month == month
+    }
+
+    results_by_date: dict[date, list[DutyAssignment]] = defaultdict(list)
+    for r in rows:
+        results_by_date[r.date].append(r)
+
+    day_rosters: list[DayDutyRoster] = []
+    for day_num in range(1, num_days + 1):
+        d = date(year, month, day_num)
+        is_wknd = d.weekday() >= 5
+        is_ph = d in ph_dates
+
+        day_results = results_by_date.get(d, [])
+        ot_out = []
+        am_clinics_out = []
+        pm_clinics_out = []
+        am_admin = []
+        pm_admin = []
+
+        for r in day_results:
+            out = DutyAssignmentOut(
+                id=r.id, date=r.date, staff_id=r.staff_id,
+                staff_name=r.staff.name, session=r.session,
+                duty_type=r.duty_type, location=r.location,
+                consultant_id=r.consultant_id,
+                consultant_name=cons_names.get(r.consultant_id) if r.consultant_id else None,
+                is_manual_override=r.is_manual_override,
+            )
+            if r.duty_type == DutyType.OT:
+                ot_out.append(out)
+            elif r.session == Session.AM:
+                if r.duty_type == DutyType.ADMIN:
+                    am_admin.append(out.staff_name)
+                else:
+                    am_clinics_out.append(out)
+            elif r.session == Session.PM:
+                if r.duty_type == DutyType.ADMIN:
+                    pm_admin.append(out.staff_name)
+                else:
+                    pm_clinics_out.append(out)
+
+        day_rosters.append(DayDutyRoster(
+            date=d, day_name=d.strftime("%a"),
+            is_weekend=is_wknd, is_ph=is_ph,
+            ot_assignments=ot_out,
+            am_clinics=am_clinics_out,
+            pm_clinics=pm_clinics_out,
+            am_admin=am_admin,
+            pm_admin=pm_admin,
+        ))
+
+    duty_staff = (
+        db.query(Staff)
+        .filter(Staff.active.is_(True), Staff.grade.in_([g.value for g in DUTY_GRADES]))
+        .all()
+    )
+    mo_pool = [PersonInfo(id=s.id, name=s.name) for s in duty_staff]
+    from ..services.duty_solver import DutyResult
+    duty_results = [
+        DutyResult(date=r.date, staff_id=r.staff_id, session=r.session,
+                   duty_type=r.duty_type, location=r.location, consultant_id=r.consultant_id)
+        for r in rows
+    ]
+    duty_stats = compute_duty_stats(duty_results, mo_pool)
+
+    return DutyRosterResponse(
+        year=year, month=month,
+        days=day_rosters, duty_stats=duty_stats,
+    )

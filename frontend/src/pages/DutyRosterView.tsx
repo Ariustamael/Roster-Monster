@@ -9,9 +9,15 @@ export default function DutyRosterView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => { setRoster(null); }, [active?.id]);
-
   const configId = active?.id ?? 0;
+
+  useEffect(() => {
+    setRoster(null);
+    if (!configId) return;
+    api.viewDutyRoster(configId)
+      .then((data) => setRoster(data))
+      .catch(() => {});
+  }, [configId]);
 
   async function generate() {
     if (!configId) return;

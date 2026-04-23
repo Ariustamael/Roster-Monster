@@ -63,6 +63,10 @@ export const api = {
     }),
   deleteTeam: (id: number) =>
     request<{ ok: boolean }>(`/teams/${id}`, { method: "DELETE" }),
+  renameTeam: (id: number, name: string) =>
+    request<import("./types").Team>(`/teams/${id}/rename`, { method: "PUT", body: JSON.stringify({ name }) }),
+  reorderTeams: (order: number[]) =>
+    request<{ ok: boolean }>("/teams/reorder", { method: "PUT", body: JSON.stringify(order) }),
   getAllTeamAssignments: () =>
     request<import("./types").TeamAssignment[]>("/teams/all-assignments"),
   reassignStaff: (staffId: number, teamId: number, supervisorId?: number) =>
@@ -84,10 +88,18 @@ export const api = {
       method: "POST",
     }),
 
+  viewCallRoster: (configId: number) =>
+    request<import("./types").RosterResponse>(`/roster/${configId}/view`),
+
   generateDutyRoster: (configId: number) =>
     request<import("./types").DutyRosterResponse>(
       `/roster/${configId}/generate-duties`,
       { method: "POST" }
+    ),
+
+  viewDutyRoster: (configId: number) =>
+    request<import("./types").DutyRosterResponse>(
+      `/roster/${configId}/duties/view`
     ),
 
   exportRoster: (configId: number, format: "original" | "clean") =>
@@ -149,9 +161,9 @@ export const api = {
   // Clinic Templates
   getClinicTemplates: () =>
     request<import("./types").ClinicTemplate[]>("/templates/clinics"),
-  createClinicTemplate: (data: { day_of_week: number; session: string; room: string; is_supervised?: boolean; consultant_id?: number | null }) =>
+  createClinicTemplate: (data: { day_of_week: number; session: string; room: string; clinic_type?: string; mos_required?: number; consultant_id?: number | null }) =>
     request<import("./types").ClinicTemplate>("/templates/clinics", { method: "POST", body: JSON.stringify(data) }),
-  updateClinicTemplate: (id: number, data: { day_of_week: number; session: string; room: string; is_supervised?: boolean; consultant_id?: number | null }) =>
+  updateClinicTemplate: (id: number, data: { day_of_week: number; session: string; room: string; clinic_type?: string; mos_required?: number; consultant_id?: number | null }) =>
     request<import("./types").ClinicTemplate>(`/templates/clinics/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteClinicTemplate: (id: number) =>
     request<{ ok: boolean }>(`/templates/clinics/${id}`, { method: "DELETE" }),

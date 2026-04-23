@@ -315,25 +315,128 @@ def seed():
         ))
 
     # ── Clinic Templates ─────────────────────────────────────────────
-    supervised_clinics = [
-        (0, Session.AM, "4E-Sup", "James Loh"),
-        (0, Session.PM, "4E-Sup", "Kuo CL"),
-        (1, Session.AM, "4E-Sup1", "Justine Lee"),
-        (1, Session.AM, "4E-Sup2", "Ing How"),
-        (1, Session.PM, "4E-Sup", "Ho Chin"),
-        (2, Session.AM, "4E-Sup", "Kinjal Mehta"),
-        (2, Session.PM, "4E-Sup", "Andy Yeo"),
-        (3, Session.AM, "4E-Sup1", "Raghu"),
-        (3, Session.AM, "4E-Sup2", "Jonathan Gan"),
-        (3, Session.PM, "4E-Sup", "Zhihong"),
-        (4, Session.AM, "4E-Sup", "Wei Sheng"),
-        (4, Session.PM, "4E-Sup", "Charles Kon"),
+    # (day_of_week, session, room, clinic_type, mos_required, consultant_name_or_None)
+    clinic_data = [
+        # ── MONDAY ──
+        (0, Session.AM, "Rm 10-13", "NC",     3, "James Loh"),
+        (0, Session.PM, "Rm 10-13", "Sup",    1, "Kuo CL"),
+        (0, Session.AM, "Rm 3",     "Sup",    1, "Ho Chin"),
+        (0, Session.PM, "Rm 3",     "Sup",    1, None),       # Low BY (not in staff)
+        (0, Session.AM, "Rm 4",     "Sup",    1, "Siti Mastura"),
+        (0, Session.PM, "Rm 5",     "Sup",    1, "David Chua"),
+        (0, Session.AM, "Rm 6",     "NC",     3, "Dalun"),
+        (0, Session.PM, "Rm 6",     "Sup",    1, "Dalun"),
+        (0, Session.AM, "Rm 8",     "Sup",    1, "Kuo CL"),
+        # Monday MOPD
+        (0, Session.AM, "Rm 15",    "MOPD",   1, None),
+        (0, Session.AM, "Rm 16",    "MOPD",   1, None),
+        (0, Session.AM, "Rm 17",    "MOPD",   1, None),
+        (0, Session.AM, "Rm 18",    "MOPD",   1, None),
+        (0, Session.AM, "Rm 19",    "MOPD",   1, None),
+        (0, Session.PM, "Rm 15",    "MOPD",   1, None),
+        (0, Session.PM, "Rm 16",    "MOPD",   1, None),
+        (0, Session.PM, "Rm 17",    "MOPD",   1, None),
+        (0, Session.PM, "Rm 18",    "MOPD",   1, None),
+        (0, Session.PM, "Rm 19",    "MOPD",   1, None),
+        # Monday CAT-A
+        (0, Session.AM, "CAT-A",    "CAT-A",  1, None),
+
+        # ── TUESDAY ──
+        (1, Session.AM, "Rm 10-13", "NC",     3, "Justine Lee"),
+        (1, Session.AM, "Rm 10-13b","NC",     3, "Ing How"),
+        (1, Session.PM, "Rm 10-13", "Sup",    1, "Ho Chin"),
+        (1, Session.AM, "Rm 3",     "NC",     3, "Junren"),
+        (1, Session.AM, "Rm 6",     "NC",     3, "Jonathan Gan"),
+        (1, Session.PM, "Rm 5",     "Sup",    1, "Ing How"),
+        # Tuesday MOPD
+        (1, Session.AM, "Rm 15",    "MOPD",   1, None),
+        (1, Session.AM, "Rm 16",    "MOPD",   1, None),
+        (1, Session.AM, "Rm 17",    "MOPD",   1, None),
+        (1, Session.AM, "Rm 18",    "MOPD",   1, None),
+        (1, Session.AM, "Rm 19",    "MOPD",   1, None),
+        (1, Session.PM, "Rm 15",    "MOPD",   1, None),
+        (1, Session.PM, "Rm 16",    "MOPD",   1, None),
+        (1, Session.PM, "Rm 17",    "MOPD",   1, None),
+        (1, Session.PM, "Rm 18",    "MOPD",   1, None),
+        (1, Session.PM, "Rm 19",    "MOPD",   1, None),
+        # Tuesday CAT-A
+        (1, Session.AM, "CAT-A",    "CAT-A",  1, None),
+
+        # ── WEDNESDAY ──
+        (2, Session.AM, "Rm 10-13", "NC",     3, "Kinjal Mehta"),
+        (2, Session.PM, "Rm 10-13", "Sup",    1, "Andy Yeo"),
+        (2, Session.AM, "Rm 3",     "NC",     3, "Junren"),
+        (2, Session.AM, "Rm 5",     "Sup",    1, "Wei Sheng"),
+        (2, Session.PM, "Rm 5",     "Sup",    1, "Ing How"),
+        (2, Session.PM, "Rm 6",     "Sup",    1, "James Loh"),
+        (2, Session.PM, "Rm 8",     "Sup",    1, "Charles Kon"),
+        # Wednesday MOPD
+        (2, Session.AM, "Rm 15",    "MOPD",   1, None),
+        (2, Session.AM, "Rm 16",    "MOPD",   1, None),
+        (2, Session.AM, "Rm 17",    "MOPD",   1, None),
+        (2, Session.AM, "Rm 18",    "MOPD",   1, None),
+        (2, Session.AM, "Rm 19",    "MOPD",   1, None),
+        (2, Session.PM, "Rm 15",    "MOPD",   1, None),
+        (2, Session.PM, "Rm 16",    "MOPD",   1, None),
+        (2, Session.PM, "Rm 17",    "MOPD",   1, None),
+        (2, Session.PM, "Rm 18",    "MOPD",   1, None),
+        (2, Session.PM, "Rm 19",    "MOPD",   1, None),
+        # Wednesday CAT-A
+        (2, Session.AM, "CAT-A",    "CAT-A",  1, None),
+
+        # ── THURSDAY ──
+        (3, Session.AM, "Rm 10-13", "NC",     3, "Raghu"),
+        (3, Session.AM, "Rm 10-13b","NC",     3, "Jonathan Gan"),
+        (3, Session.PM, "Rm 10-13", "Sup",    1, "Zhihong"),
+        (3, Session.PM, "Rm 3",     "Sup",    1, "Raghu"),
+        (3, Session.AM, "Rm 5",     "Sup",    1, "Shree Dinesh"),
+        (3, Session.PM, "Rm 5",     "Sup",    1, "Zhihong"),
+        (3, Session.AM, "Rm 8",     "NC",     3, "Charles Kon"),
+        # Thursday MOPD
+        (3, Session.AM, "Rm 15",    "MOPD",   1, None),
+        (3, Session.AM, "Rm 16",    "MOPD",   1, None),
+        (3, Session.AM, "Rm 17",    "MOPD",   1, None),
+        (3, Session.AM, "Rm 18",    "MOPD",   1, None),
+        (3, Session.AM, "Rm 19",    "MOPD",   1, None),
+        (3, Session.PM, "Rm 15",    "MOPD",   1, None),
+        (3, Session.PM, "Rm 16",    "MOPD",   1, None),
+        (3, Session.PM, "Rm 17",    "MOPD",   1, None),
+        (3, Session.PM, "Rm 18",    "MOPD",   1, None),
+        (3, Session.PM, "Rm 19",    "MOPD",   1, None),
+        # Thursday CAT-A
+        (3, Session.AM, "CAT-A",    "CAT-A",  1, None),
+
+        # ── FRIDAY ──
+        (4, Session.AM, "Rm 10-13", "NC",     3, "Wei Sheng"),
+        (4, Session.PM, "Rm 10-13", "NC",     3, "Charles Kon"),
+        (4, Session.AM, "Rm 3",     "Hand VC",1, None),       # David Tan (visiting)
+        (4, Session.PM, "Rm 3",     "Sup",    1, None),       # Low BY
+        (4, Session.AM, "Rm 5",     "Sup",    1, "Zhihong"),
+        (4, Session.PM, "Rm 5",     "Sup",    1, "Kinjal Mehta"),
+        (4, Session.AM, "Rm 6",     "Sup",    1, "James Loh"),
+        (4, Session.PM, "Rm 6",     "Sup",    1, "James Loh"),
+        (4, Session.AM, "Rm 8",     "Sup",    1, "Andy Yeo"),
+        (4, Session.PM, "Rm 8",     "Sup",    1, "Ing How"),
+        # Friday MOPD
+        (4, Session.AM, "Rm 15",    "MOPD",   1, None),
+        (4, Session.AM, "Rm 16",    "MOPD",   1, None),
+        (4, Session.AM, "Rm 17",    "MOPD",   1, None),
+        (4, Session.AM, "Rm 18",    "MOPD",   1, None),
+        (4, Session.AM, "Rm 19",    "MOPD",   1, None),
+        (4, Session.PM, "Rm 15",    "MOPD",   1, None),
+        (4, Session.PM, "Rm 16",    "MOPD",   1, None),
+        (4, Session.PM, "Rm 17",    "MOPD",   1, None),
+        (4, Session.PM, "Rm 18",    "MOPD",   1, None),
+        (4, Session.PM, "Rm 19",    "MOPD",   1, None),
+        # Friday CAT-A
+        (4, Session.AM, "CAT-A",    "CAT-A",  1, None),
     ]
 
-    for dow, session, room, cons_name in supervised_clinics:
+    for dow, session, room, ctype, mos, cons_name in clinic_data:
         db.add(ClinicTemplate(
             day_of_week=dow, session=session, room=room,
-            is_supervised=True, consultant_id=staff[cons_name].id,
+            clinic_type=ctype, mos_required=mos,
+            consultant_id=staff[cons_name].id if cons_name else None,
         ))
 
     db.commit()
@@ -353,7 +456,7 @@ def seed():
     print(f"  Evening OT dates: 10")
     print(f"  Stepdown days: 3")
     print(f"  OT templates: {len(ot_template_data)}")
-    print(f"  Supervised clinic templates: {len(supervised_clinics)}")
+    print(f"  Clinic templates: {len(clinic_data)}")
 
 
 if __name__ == "__main__":

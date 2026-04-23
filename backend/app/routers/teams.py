@@ -28,7 +28,7 @@ def _to_out(r: TeamAssignment) -> TeamAssignmentOut:
 
 @router.get("", response_model=list[TeamOut])
 def list_teams(db: Session = Depends(get_db)):
-    return db.query(Team).order_by(Team.name).all()
+    return db.query(Team).order_by(Team.display_order, Team.id).all()
 
 
 @router.post("", response_model=TeamOut)
@@ -36,11 +36,36 @@ def create_team(payload: TeamCreate, db: Session = Depends(get_db)):
     existing = db.query(Team).filter(Team.name == payload.name).first()
     if existing:
         raise HTTPException(409, "Team name already exists")
-    t = Team(name=payload.name)
+    max_order = db.query(Team).count()
+    t = Team(name=payload.name, display_order=max_order)
     db.add(t)
     db.commit()
     db.refresh(t)
     return t
+
+
+@router.put("/{team_id}/rename", response_model=TeamOut)
+def rename_team(team_id: int, payload: TeamCreate, db: Session = Depends(get_db)):
+    t = db.query(Team).get(team_id)
+    if not t:
+        raise HTTPException(404, "Team not found")
+    dup = db.query(Team).filter(Team.name == payload.name, Team.id != team_id).first()
+    if dup:
+        raise HTTPException(409, "Team name already exists")
+    t.name = payload.name
+    db.commit()
+    db.refresh(t)
+    return t
+
+
+@router.put("/reorder")
+def reorder_teams(order: list[int], db: Session = Depends(get_db)):
+    for idx, team_id in enumerate(order):
+        t = db.query(Team).get(team_id)
+        if t:
+            t.display_order = idx
+    db.commit()
+    return {"ok": True}
 
 
 @router.delete("/{team_id}")
