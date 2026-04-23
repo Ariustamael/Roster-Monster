@@ -207,28 +207,25 @@ export default function TeamsView() {
                   )}
                   <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
                     <button
-                      className="btn-add-month"
                       onClick={() => moveTeam(team.id, -1)}
                       disabled={teamIdx === 0}
                       title="Move left"
-                      style={{ width: 20, height: 20, fontSize: 11, opacity: teamIdx === 0 ? 0.3 : 1 }}
+                      style={{ width: 22, height: 22, fontSize: 12, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg)", color: "var(--text)", cursor: "pointer", opacity: teamIdx === 0 ? 0.3 : 1 }}
                     >
                       &#9664;
                     </button>
                     <button
-                      className="btn-add-month"
                       onClick={() => moveTeam(team.id, 1)}
                       disabled={teamIdx === teams.length - 1}
                       title="Move right"
-                      style={{ width: 20, height: 20, fontSize: 11, opacity: teamIdx === teams.length - 1 ? 0.3 : 1 }}
+                      style={{ width: 22, height: 22, fontSize: 12, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg)", color: "var(--text)", cursor: "pointer", opacity: teamIdx === teams.length - 1 ? 0.3 : 1 }}
                     >
                       &#9654;
                     </button>
                     <button
-                      className="btn-add-month"
                       onClick={() => deleteTeam(team.id, team.name)}
                       title="Delete team"
-                      style={{ background: "rgba(220,38,38,0.15)", color: "var(--danger)", width: 20, height: 20, fontSize: 11 }}
+                      style={{ width: 22, height: 22, fontSize: 12, border: "1px solid #fecaca", borderRadius: 4, background: "#fef2f2", color: "var(--danger)", cursor: "pointer" }}
                     >
                       x
                     </button>
