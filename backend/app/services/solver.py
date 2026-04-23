@@ -134,7 +134,9 @@ DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 
 def _day_matches_applicable(day: DayConfig, applicable_days: str) -> bool:
+    """Day-of-week OR logic. Tokens: Mon-Sun + PH (still applies on PH days)."""
     val = applicable_days.strip().lower()
+    # Legacy shorthands kept for backward compat
     if val == "all":
         return True
     if val == "weekday":
@@ -143,33 +145,30 @@ def _day_matches_applicable(day: DayConfig, applicable_days: str) -> bool:
         return day.is_weekend or day.is_ph
     day_label = DAY_LABELS[day.d.weekday()]
     tokens = [t.strip() for t in applicable_days.split(",")]
-    matched = False
     if day_label in tokens:
-        matched = True
+        return True
     if "PH" in tokens and day.is_ph:
-        matched = True
-    if "Stepdown" in tokens and day.is_stepdown:
-        matched = True
-    if "Evening OT" in tokens and day.has_evening_ot:
-        matched = True
-    return matched
+        return True
+    return False
 
 
 def _required_conditions_met(day: DayConfig, required_conditions: str) -> bool:
-    """ALL tokens in required_conditions must be satisfied (AND logic)."""
+    """ALL condition tokens must be satisfied (AND logic).
+    Tokens: Stepdown, Evening OT, PH, Not PH."""
     if not required_conditions or not required_conditions.strip():
         return True
-    day_label = DAY_LABELS[day.d.weekday()]
     for token in [t.strip() for t in required_conditions.split(",")]:
         if not token:
             continue
         if token == "Stepdown" and not day.is_stepdown:
             return False
+        elif token == "Not Stepdown" and day.is_stepdown:
+            return False
         elif token == "PH" and not day.is_ph:
             return False
-        elif token == "Evening OT" and not day.has_evening_ot:
+        elif token == "Not PH" and day.is_ph:
             return False
-        elif token in DAY_LABELS and token != day_label:
+        elif token == "Evening OT" and not day.has_evening_ot:
             return False
     return True
 

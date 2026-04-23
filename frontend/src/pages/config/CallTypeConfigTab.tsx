@@ -10,7 +10,8 @@ const POST_CALL_OPTIONS = [
   { value: "none", label: "None (fully available)" },
 ] as const;
 
-const ALL_DAY_TOKENS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "PH", "Stepdown", "Evening OT"] as const;
+const ALL_DAY_TOKENS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "PH"] as const;
+const CONDITION_TOKENS = ["Stepdown", "Evening OT", "PH", "Not PH"] as const;
 
 function parseDays(str: string): Set<string> {
   return new Set(str.split(",").map((s) => s.trim()).filter(Boolean));
@@ -24,6 +25,18 @@ function toggleDay(current: string, day: string): string {
     set.add(day);
   }
   return ALL_DAY_TOKENS.filter((d) => set.has(d)).join(",");
+}
+
+function parseConditions(str: string | null): Set<string> {
+  if (!str) return new Set();
+  return new Set(str.split(",").map((s) => s.trim()).filter(Boolean));
+}
+
+function toggleCondition(current: string | null, cond: string): string {
+  const set = parseConditions(current);
+  if (set.has(cond)) set.delete(cond);
+  else set.add(cond);
+  return CONDITION_TOKENS.filter((c) => set.has(c)).join(",") || "";
 }
 
 const WEEKDAY_TOKENS = ["Mon", "Tue", "Wed", "Thu", "Fri"] as const;
@@ -51,6 +64,7 @@ interface DraftCallType {
   difficulty_points: number;
   counts_towards_fairness: boolean;
   applicable_days: string;
+  required_conditions: string;
   is_night_float: boolean;
   night_float_run: string | null;
   is_active: boolean;
@@ -93,6 +107,7 @@ export default function CallTypeConfigTab() {
       difficulty_points: ct.difficulty_points,
       counts_towards_fairness: ct.counts_towards_fairness,
       applicable_days: ct.applicable_days,
+      required_conditions: ct.required_conditions ?? "",
       is_night_float: ct.is_night_float,
       night_float_run: ct.night_float_run,
       is_active: ct.is_active,
@@ -113,6 +128,7 @@ export default function CallTypeConfigTab() {
       difficulty_points: 3,
       counts_towards_fairness: true,
       applicable_days: "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH",
+      required_conditions: "",
       is_night_float: false,
       night_float_run: null,
       is_active: true,
@@ -134,6 +150,7 @@ export default function CallTypeConfigTab() {
         difficulty_points: draft.difficulty_points,
         counts_towards_fairness: draft.counts_towards_fairness,
         applicable_days: draft.applicable_days,
+        required_conditions: draft.required_conditions || null,
         is_night_float: draft.is_night_float,
         night_float_run: draft.night_float_run || null,
         is_active: draft.is_active,
@@ -306,22 +323,40 @@ export default function CallTypeConfigTab() {
               </div>
             </div>
 
-            <div className="form-group">
-              <label>Applicable Days</label>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4, alignItems: "center" }}>
-                {ALL_DAY_TOKENS.map((day, i) => (
-                  <span key={day} style={{ display: "inline-flex", alignItems: "center", gap: 0 }}>
-                    {i === 7 && <span style={{ margin: "0 6px", color: "#ccc" }}>|</span>}
-                    <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", fontSize: 13 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+              <div className="form-group" style={{ margin: 0, background: "var(--bg-muted, #f8fafc)", borderRadius: 6, padding: "10px 12px", border: "1px solid var(--border)" }}>
+                <label style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, display: "block" }}>Applicable Days</label>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                  {ALL_DAY_TOKENS.map((day, i) => (
+                    <span key={day} style={{ display: "inline-flex", alignItems: "center", gap: 0 }}>
+                      {i === 7 && <span style={{ margin: "0 4px", color: "#ccc" }}>|</span>}
+                      <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", fontSize: 13 }}>
+                        <input
+                          type="checkbox"
+                          checked={parseDays(draft.applicable_days).has(day)}
+                          onChange={() => setDraft({ ...draft, applicable_days: toggleDay(draft.applicable_days, day) })}
+                        />
+                        {day}
+                      </label>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-group" style={{ margin: 0, background: "var(--bg-muted, #f8fafc)", borderRadius: 6, padding: "10px 12px", border: "1px solid var(--border)" }}>
+                <label style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, display: "block" }}>Required Events <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(all must be true)</span></label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                  {CONDITION_TOKENS.map((cond) => (
+                    <label key={cond} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
                       <input
                         type="checkbox"
-                        checked={parseDays(draft.applicable_days).has(day)}
-                        onChange={() => setDraft({ ...draft, applicable_days: toggleDay(draft.applicable_days, day) })}
+                        checked={parseConditions(draft.required_conditions).has(cond)}
+                        onChange={() => setDraft({ ...draft, required_conditions: toggleCondition(draft.required_conditions, cond) })}
                       />
-                      {day}
+                      {cond}
                     </label>
-                  </span>
-                ))}
+                  ))}
+                </div>
               </div>
             </div>
 
