@@ -3,13 +3,11 @@ import { useConfig } from "../context/ConfigContext";
 import SupplyDemandTab from "./resources/SupplyDemandTab";
 import ResourceTemplatesTab from "./resources/ResourceTemplatesTab";
 import ConsultantRosterTab from "./resources/ConsultantRosterTab";
-import RegistrarRosterTab from "./resources/RegistrarRosterTab";
 
 const TABS = [
   { key: "supply", label: "Supply / Demand", needsConfig: true },
   { key: "resources", label: "Resources", needsConfig: false },
-  { key: "consultant", label: "Consultant Roster", needsConfig: true },
-  { key: "registrar", label: "Registrar Roster", needsConfig: true },
+  { key: "oncall", label: "On-Call Roster", needsConfig: true },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -50,11 +48,8 @@ export default function ResourcesView() {
         <>
           {tab === "supply" && active && <SupplyDemandTab configId={active.id} />}
           {tab === "resources" && <ResourceTemplatesTab />}
-          {tab === "consultant" && active && (
+          {tab === "oncall" && active && (
             <ConsultantRosterTab configId={active.id} year={active.year} month={active.month} />
-          )}
-          {tab === "registrar" && active && (
-            <RegistrarRosterTab configId={active.id} year={active.year} month={active.month} />
           )}
         </>
       )}
