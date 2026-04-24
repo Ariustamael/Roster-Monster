@@ -16,6 +16,7 @@ export default function DutyRosterView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const dragRef = useRef<DragState | null>(null);
+  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
 
   const configId = active?.id ?? 0;
 
@@ -116,10 +117,19 @@ export default function DutyRosterView() {
 
       {roster && (
         <>
-          <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "8px 0" }}>
-            Drag any name tag to reassign. Drop onto a slot header to move there.
-            Right-click (or long-press) a name to remove the assignment.
-          </p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0" }}>
+            <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
+              Drag any name tag to reassign. Right-click to remove.
+            </p>
+            <span style={{ flex: 1 }} />
+            <button className="btn btn-secondary" style={{ fontSize: 11, padding: "2px 8px" }}
+              onClick={() => {
+                const weekdays = roster.days.filter(d => !d.is_weekend && !d.is_ph).map(d => d.date);
+                setCollapsedDays(new Set(weekdays));
+              }}>Collapse All</button>
+            <button className="btn btn-secondary" style={{ fontSize: 11, padding: "2px 8px" }}
+              onClick={() => setCollapsedDays(new Set())}>Expand All</button>
+          </div>
 
           {roster.days
             .filter((d) => !d.is_weekend && !d.is_ph)
@@ -131,6 +141,12 @@ export default function DutyRosterView() {
                 dragRef={dragRef}
                 onDrop={handleDrop}
                 onDelete={handleDelete}
+                collapsed={collapsedDays.has(day.date)}
+                onToggleCollapse={() => setCollapsedDays(prev => {
+                  const next = new Set(prev);
+                  if (next.has(day.date)) next.delete(day.date); else next.add(day.date);
+                  return next;
+                })}
               />
             ))}
 
@@ -176,13 +192,15 @@ export default function DutyRosterView() {
 }
 
 function DayCard({
-  day, callColumns, dragRef, onDrop, onDelete,
+  day, callColumns, dragRef, onDrop, onDelete, collapsed, onToggleCollapse,
 }: {
   day: DayDutyRoster;
   callColumns: string[];
   dragRef: React.MutableRefObject<DragState | null>;
   onDrop: (dutyType: string, session: string, location: string | null, consultantId: number | null, date: string) => void;
   onDelete: (assignmentId: number) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }) {
   const [dragOver, setDragOver] = useState<string | null>(null);
 
@@ -244,7 +262,11 @@ function DayCard({
 
   return (
     <div className="card" style={{ marginBottom: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10 }}>
+      <div
+        style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: collapsed ? 0 : 10, cursor: "pointer" }}
+        onClick={onToggleCollapse}
+      >
+        <span style={{ fontSize: 12, color: "var(--text-muted)", width: 16, textAlign: "center" }}>{collapsed ? "▶" : "▼"}</span>
         <h3 style={{ margin: 0 }}>{day.date.slice(5)} {day.day_name}</h3>
         {day.post_call.length > 0 && (
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
@@ -256,7 +278,7 @@ function DayCard({
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 1fr 1fr", gap: 12 }}>
+      {!collapsed && <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 1fr 1fr", gap: 12 }}>
         {/* Column 1: Call Team */}
         <div>
           <SectionLabel label="Call Team" color="#ede9fe" />
@@ -444,7 +466,7 @@ function DayCard({
             </div>
           </div>
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
