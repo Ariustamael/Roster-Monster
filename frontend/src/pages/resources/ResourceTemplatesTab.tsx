@@ -77,13 +77,51 @@ export default function ResourceTemplatesTab() {
     if (tmpl.resource_type !== targetType) { setDragItem(null); return; }
     if (tmpl.day_of_week === targetDow && tmpl.session === targetSession) {
       setDragItem(null);
-      return;
+      return; // intra-cell reorder handled by card-level drop
     }
     await handleUpdate(id, {
       ...tmpl,
       day_of_week: targetDow,
       session: targetSession,
     });
+    setDragItem(null);
+  }
+
+  async function handleCardReorder(targetId: number) {
+    if (!dragItem) return;
+    const draggedId = dragItem.id;
+    if (draggedId === targetId) return;
+    const dragged = templates.find(t => t.id === draggedId);
+    const target = templates.find(t => t.id === targetId);
+    if (!dragged || !target) return;
+    if (dragged.day_of_week !== target.day_of_week || dragged.session !== target.session || dragged.resource_type !== target.resource_type) return;
+
+    const sorted = templates
+      .filter(t => t.day_of_week === dragged.day_of_week && t.session === dragged.session && t.resource_type === dragged.resource_type)
+      .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+    const reordered = [...sorted];
+    const fromIdx = reordered.findIndex(t => t.id === draggedId);
+    const toIdx = reordered.findIndex(t => t.id === targetId);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    const [moved] = reordered.splice(fromIdx, 1);
+    reordered.splice(toIdx, 0, moved);
+    const cellItems = reordered;
+    const updates = cellItems.map((t, i) => ({ id: t.id, sort_order: i }));
+
+    try {
+      await api.reorderResourceTemplates(updates);
+      setTemplates(prev => {
+        const next = [...prev];
+        for (const u of updates) {
+          const idx = next.findIndex(t => t.id === u.id);
+          if (idx !== -1) next[idx] = { ...next[idx], sort_order: u.sort_order };
+        }
+        return next;
+      });
+    } catch (e: any) {
+      setError(e?.message ?? "Failed to reorder.");
+    }
     setDragItem(null);
   }
 
@@ -183,6 +221,7 @@ export default function ResourceTemplatesTab() {
                             onDragEnd={() => setDragItem(null)}
                             onClick={() => setEditId(t.id)}
                             onDuplicate={() => handleDuplicate(t.id)}
+                            onCardDrop={() => handleCardReorder(t.id)}
                           />
                         ))}
                       </td>
@@ -227,6 +266,7 @@ function ResourceCard({
   onDragEnd,
   onClick,
   onDuplicate,
+  onCardDrop,
 }: {
   template: ResourceTemplate;
   isDragging: boolean;
@@ -234,6 +274,7 @@ function ResourceCard({
   onDragEnd: () => void;
   onClick: () => void;
   onDuplicate: () => void;
+  onCardDrop: () => void;
 }) {
   const defaultColor = t.resource_type === "ot"
     ? (t.is_emergency ? "#fef3c7" : "#dbeafe")
@@ -246,6 +287,8 @@ function ResourceCard({
       style={{ backgroundColor: bg, opacity: t.is_active === false ? 0.45 : 1 }}
       draggable
       onDragStart={onDragStart}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
+      onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onCardDrop(); }}
       onDragEnd={onDragEnd}
       onClick={onClick}
     >
