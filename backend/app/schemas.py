@@ -11,6 +11,8 @@ class StaffCreate(BaseModel):
     rank: str
     active: bool = True
     has_admin_role: bool = False
+    extra_call_type_ids: Optional[str] = None
+    duty_preference: Optional[str] = None
 
 
 class StaffOut(BaseModel):
@@ -19,6 +21,8 @@ class StaffOut(BaseModel):
     rank: str
     active: bool
     has_admin_role: bool
+    extra_call_type_ids: Optional[str] = None
+    duty_preference: Optional[str] = None
     team_name: Optional[str] = None
     supervisor_name: Optional[str] = None
 

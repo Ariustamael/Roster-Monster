@@ -4,6 +4,8 @@ export interface Staff {
   rank: string;
   active: boolean;
   has_admin_role: boolean;
+  extra_call_type_ids: string | null;
+  duty_preference: string | null;
   team_name: string | null;
   supervisor_name: string | null;
 }

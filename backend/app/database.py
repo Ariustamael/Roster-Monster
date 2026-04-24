@@ -373,6 +373,16 @@ def _migrate(engine):
 
             s.commit()
 
+    # ── Add extra_call_type_ids and duty_preference to staff ────────────
+    if "staff" in insp.get_table_names():
+        cols = [c["name"] for c in insp.get_columns("staff")]
+        if "extra_call_type_ids" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE staff ADD COLUMN extra_call_type_ids TEXT"))
+        if "duty_preference" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE staff ADD COLUMN duty_preference VARCHAR(20)"))
+
     # ── Add updated_at timestamps ────────────────────────────────────────
     insp = inspect(engine)
     for tbl in ["resource_template", "staff", "monthly_config"]:

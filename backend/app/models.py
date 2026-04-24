@@ -115,6 +115,8 @@ class Staff(Base):
     rank = Column(String(60), nullable=False)
     active = Column(Boolean, default=True)
     has_admin_role = Column(Boolean, default=False)
+    extra_call_type_ids = Column(String(100), nullable=True)
+    duty_preference = Column(String(20), nullable=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     team_assignments = relationship(

@@ -39,10 +39,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, rank, active, has_admin_role: false }),
     }),
-  updateStaff: (id: number, name: string, rank: string, active: boolean) =>
+  updateStaff: (id: number, data: { name: string; rank: string; active: boolean; has_admin_role?: boolean; extra_call_type_ids?: string | null; duty_preference?: string | null }) =>
     request<import("./types").Staff>(`/staff/${id}`, {
       method: "PUT",
-      body: JSON.stringify({ name, rank, active, has_admin_role: false }),
+      body: JSON.stringify(data),
     }),
   createConfig: (year: number, month: number) =>
     request<import("./types").MonthlyConfig>("/config", {

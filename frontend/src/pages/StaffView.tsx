@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { Staff, Leave, CallPreference } from "../types";
+import type { Staff, Leave, CallPreference, CallTypeConfig } from "../types";
 
 const RANK_ORDER: Record<string, number> = {
   "Senior Consultant": 0,
@@ -36,6 +36,7 @@ export default function StaffView() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
   const [staffUpdatedAt, setStaffUpdatedAt] = useState<string | null>(null);
+  const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
 
   const year = active?.year ?? 2026;
   const month = active?.month ?? 1;
@@ -43,6 +44,7 @@ export default function StaffView() {
   useEffect(() => {
     api.getStaff().then(setStaff).finally(() => setLoading(false));
     api.getTimestamps().then(ts => setStaffUpdatedAt(ts.staff));
+    api.getCallTypes().then(setCallTypes);
   }, []);
 
   useEffect(() => {
@@ -70,8 +72,8 @@ export default function StaffView() {
     setShowAdd(false);
   }
 
-  async function saveEdit(id: number, name: string, grade: string) {
-    const updated = await api.updateStaff(id, name, grade, true);
+  async function saveEdit(id: number, data: { name: string; rank: string; active: boolean; has_admin_role: boolean; extra_call_type_ids: string | null; duty_preference: string | null }) {
+    const updated = await api.updateStaff(id, data);
     setStaff((prev) => prev.map((s) => (s.id === id ? updated : s)));
     setEditing(null);
   }
@@ -175,16 +177,7 @@ export default function StaffView() {
                   const isExpanded = expanded === s.id;
                   const isEditing = editing === s.id;
 
-                  if (isEditing) {
-                    return (
-                      <EditRow
-                        key={s.id}
-                        staff={s}
-                        onSave={saveEdit}
-                        onCancel={() => setEditing(null)}
-                      />
-                    );
-                  }
+                  if (false) { /* EditRow replaced by modal below */ }
 
                   return (
                     <StaffRow
@@ -214,6 +207,19 @@ export default function StaffView() {
       {showAdd && (
         <AddStaffModal onAdd={addStaff} onClose={() => setShowAdd(false)} />
       )}
+
+      {editing != null && (() => {
+        const editStaff = staff.find(s => s.id === editing);
+        if (!editStaff) return null;
+        return (
+          <EditStaffModal
+            staff={editStaff}
+            callTypes={callTypes}
+            onSave={(data) => saveEdit(editing, data)}
+            onClose={() => setEditing(null)}
+          />
+        );
+      })()}
     </>
   );
 }
@@ -310,41 +316,100 @@ function StaffRow({
   );
 }
 
-function EditRow({
+function EditStaffModal({
   staff,
+  callTypes,
   onSave,
-  onCancel,
+  onClose,
 }: {
   staff: Staff;
-  onSave: (id: number, name: string, grade: string) => void;
-  onCancel: () => void;
+  callTypes: CallTypeConfig[];
+  onSave: (data: { name: string; rank: string; active: boolean; has_admin_role: boolean; extra_call_type_ids: string | null; duty_preference: string | null }) => void;
+  onClose: () => void;
 }) {
   const [name, setName] = useState(staff.name);
   const [rank, setRank] = useState(staff.rank);
+  const [active, setActive] = useState(staff.active);
+  const [hasAdmin, setHasAdmin] = useState(staff.has_admin_role);
+  const [extraCallIds, setExtraCallIds] = useState<number[]>(
+    staff.extra_call_type_ids ? staff.extra_call_type_ids.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : []
+  );
+  const [dutyPref, setDutyPref] = useState(staff.duty_preference ?? "");
+
+  function toggleCallType(ctId: number) {
+    setExtraCallIds(prev => prev.includes(ctId) ? prev.filter(id => id !== ctId) : [...prev, ctId]);
+  }
 
   return (
-    <tr>
-      <td></td>
-      <td>
-        <input type="text" value={name} onChange={(e) => setName(e.target.value)}
-          style={{ width: "100%", padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13 }} />
-      </td>
-      <td>
-        <select value={rank} onChange={(e) => setRank(e.target.value)}
-          style={{ padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 4, fontSize: 13 }}>
-          {ALL_RANKS.map((g) => <option key={g} value={g}>{g}</option>)}
-        </select>
-      </td>
-      <td>{staff.team_name || "-"}</td>
-      <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{staff.supervisor_name || "-"}</td>
-      <td colSpan={2}></td>
-      <td>
-        <div className="btn-group">
-          <button className="btn btn-sm btn-primary" onClick={() => onSave(staff.id, name, rank)}>Save</button>
-          <button className="btn btn-sm btn-secondary" onClick={onCancel}>Cancel</button>
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+        <h3>Edit Staff — {staff.name}</h3>
+
+        <div className="form-group">
+          <label>Name</label>
+          <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
         </div>
-      </td>
-    </tr>
+
+        <div className="form-group">
+          <label>Rank</label>
+          <select value={rank} onChange={(e) => setRank(e.target.value)}>
+            {ALL_RANKS.map((g) => <option key={g} value={g}>{g}</option>)}
+          </select>
+        </div>
+
+        <div className="form-group">
+          <label>Duty Preference</label>
+          <select value={dutyPref} onChange={(e) => setDutyPref(e.target.value)}>
+            <option value="">No preference</option>
+            <option value="OT">Prefer OT</option>
+            <option value="Clinic">Prefer Clinic</option>
+          </select>
+        </div>
+
+        <div className="form-group">
+          <label>Extra Eligible Call Types (beyond rank default)</label>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4, maxHeight: 140, overflowY: "auto" }}>
+            {callTypes.filter(ct => ct.is_active).map(ct => (
+              <label key={ct.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
+                <input type="checkbox" checked={extraCallIds.includes(ct.id)} onChange={() => toggleCallType(ct.id)} />
+                {ct.name}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
+            Active
+          </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+            <input type="checkbox" checked={hasAdmin} onChange={(e) => setHasAdmin(e.target.checked)} />
+            Admin Role
+          </label>
+        </div>
+
+        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 12 }}>
+          Team: {staff.team_name || "—"} · Supervisor: {staff.supervisor_name || "—"}
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={() => {
+            if (name.trim()) {
+              onSave({
+                name: name.trim(),
+                rank,
+                active,
+                has_admin_role: hasAdmin,
+                extra_call_type_ids: extraCallIds.length > 0 ? extraCallIds.join(",") : null,
+                duty_preference: dutyPref || null,
+              });
+            }
+          }}>Save</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
