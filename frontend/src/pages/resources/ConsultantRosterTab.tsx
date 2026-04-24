@@ -387,18 +387,9 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
     setDirty(true);
   }
 
-  function addPH(rowIdx: number) {
-    const name = prompt("Public Holiday name:");
-    if (!name || !name.trim()) return;
+  function togglePH(rowIdx: number) {
     setRows((prev) =>
-      prev.map((r, i) => (i === rowIdx ? { ...r, isPH: true, phName: name.trim() } : r))
-    );
-    setDirty(true);
-  }
-
-  function removePH(rowIdx: number) {
-    setRows((prev) =>
-      prev.map((r, i) => (i === rowIdx ? { ...r, isPH: false, phName: "" } : r))
+      prev.map((r, i) => (i === rowIdx ? { ...r, isPH: !r.isPH, phName: r.isPH ? "" : "PH" } : r))
     );
     setDirty(true);
   }
@@ -625,54 +616,15 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                       {/* Row 1: Day number + PH badge + stepdown/eot indicators */}
                       <div style={{ display: "flex", alignItems: "center", gap: 3, marginBottom: 3, minHeight: 18 }}>
                         <span style={{ fontSize: 12, fontWeight: 600 }}>{cell.dayNum}</span>
-                        {cell.isPH ? (
-                          <span
-                            onClick={() => removePH(idx)}
-                            title={`${cell.phName} — click to remove`}
-                            style={{
-                              fontSize: 9,
-                              background: "#f59e0b",
-                              color: "#fff",
-                              borderRadius: 3,
-                              padding: "0 3px",
-                              cursor: "pointer",
-                              fontWeight: 600,
-                              maxWidth: 60,
-                              overflow: "hidden",
-                              textOverflow: "ellipsis",
-                              whiteSpace: "nowrap",
-                              lineHeight: "16px",
-                            }}
-                          >
-                            {cell.phName}
-                          </span>
-                        ) : (
-                          <span
-                            onClick={() => addPH(idx)}
-                            title="Add Public Holiday"
-                            style={{
-                              fontSize: 10,
-                              color: "var(--text-muted)",
-                              cursor: "pointer",
-                              lineHeight: "16px",
-                              width: 14,
-                              height: 14,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              borderRadius: 2,
-                              border: "1px solid var(--border)",
-                            }}
-                          >
-                            +
-                          </span>
-                        )}
                         <span style={{ flex: 1 }} />
+                        {cell.isPH && (
+                          <span style={{ fontSize: 9, background: "#f59e0b", color: "#fff", borderRadius: 3, padding: "0 3px", fontWeight: 600, lineHeight: "16px" }}>PH</span>
+                        )}
                         {cell.isStepdown && (
-                          <span title="Stepdown" style={{ fontSize: 9, color: "#7c3aed", fontWeight: 700 }}>Stepdown</span>
+                          <span title="Stepdown" style={{ fontSize: 9, color: "#7c3aed", fontWeight: 700 }}>SD</span>
                         )}
                         {cell.isEveningOT && (
-                          <span title="Extended OT" style={{ fontSize: 9, color: "#dc2626", fontWeight: 700 }}>Extended OT</span>
+                          <span title="Extended OT" style={{ fontSize: 9, color: "#dc2626", fontWeight: 700 }}>EOT</span>
                         )}
                       </div>
 
@@ -737,8 +689,17 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                         </div>
                       )}
 
-                      {/* Row 4: Stepdown + Evening OT checkboxes */}
-                      <div style={{ display: "flex", gap: 6, marginTop: "auto", paddingTop: 3, fontSize: 9, color: "var(--text-muted)" }}>
+                      {/* Row 4: PH + Stepdown + Evening OT checkboxes */}
+                      <div style={{ display: "flex", gap: 6, marginTop: "auto", paddingTop: 3, fontSize: 9, color: "var(--text-muted)", flexWrap: "wrap" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 2, cursor: "pointer" }} title="Public Holiday">
+                          <input
+                            type="checkbox"
+                            checked={cell.isPH}
+                            onChange={() => togglePH(idx)}
+                            style={{ width: 11, height: 11, margin: 0 }}
+                          />
+                          PH
+                        </label>
                         <label style={{ display: "flex", alignItems: "center", gap: 2, cursor: "pointer" }} title="Stepdown day">
                           <input
                             type="checkbox"
