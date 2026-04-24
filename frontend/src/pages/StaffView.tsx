@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
 import type { Staff, Leave, CallPreference, CallTypeConfig, Team } from "../types";
+import MultiSelectDropdown from "../components/MultiSelectDropdown";
 
 const RANK_ORDER: Record<string, number> = {
   "Senior Consultant": 0,
@@ -303,19 +304,15 @@ function EditStaffModal({
           </select>
         </div>
 
-        <details className="form-group" style={{ marginBottom: 12 }}>
-          <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
-            Extra Eligible Call Types {extraCallIds.length > 0 && <span style={{ color: "var(--primary)", fontSize: 11 }}>({extraCallIds.length} selected)</span>}
-          </summary>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, paddingLeft: 4 }}>
-            {callTypes.filter(ct => ct.is_active).map(ct => (
-              <label key={ct.id} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12 }}>
-                <input type="checkbox" checked={extraCallIds.includes(ct.id)} onChange={() => toggleCallType(ct.id)} />
-                {ct.name}
-              </label>
-            ))}
-          </div>
-        </details>
+        <div className="form-group">
+          <label>Extra Eligible Call Types</label>
+          <MultiSelectDropdown
+            options={callTypes.filter(ct => ct.is_active).map(ct => ({ id: ct.id, label: ct.name }))}
+            selected={extraCallIds}
+            onChange={setExtraCallIds}
+            placeholder="None selected"
+          />
+        </div>
 
         <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
 import type { CallTypeConfig, RankConfig } from "../../types";
+import MultiSelectDropdown from "../../components/MultiSelectDropdown";
 
 const POST_CALL_OPTIONS = [
   { value: "8am", label: "Off from 8am (full day off)" },
@@ -424,40 +425,22 @@ export default function CallTypeConfigTab() {
 
             <div className="form-group">
               <label>Linked To (auto-fill from these call types)</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4, maxHeight: 120, overflowY: "auto" }}>
-                {callTypes.filter(ct => ct.id !== draft.id).map(ct => (
-                  <label key={ct.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                    <input type="checkbox"
-                      checked={draft.linked_to.includes(ct.id)}
-                      onChange={() => {
-                        const ids = draft.linked_to.includes(ct.id)
-                          ? draft.linked_to.filter(id => id !== ct.id)
-                          : [...draft.linked_to, ct.id];
-                        setDraft({ ...draft, linked_to: ids });
-                      }} />
-                    {ct.name}
-                  </label>
-                ))}
-              </div>
+              <MultiSelectDropdown
+                options={callTypes.filter(ct => ct.id !== draft.id).map(ct => ({ id: ct.id, label: ct.name }))}
+                selected={draft.linked_to}
+                onChange={(ids) => setDraft({ ...draft, linked_to: ids })}
+                placeholder="None"
+              />
             </div>
 
             <div className="form-group">
               <label>Mutually Exclusive With</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4, maxHeight: 120, overflowY: "auto" }}>
-                {callTypes.filter(ct => ct.id !== draft.id).map(ct => (
-                  <label key={ct.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                    <input type="checkbox"
-                      checked={draft.mutually_exclusive_with.includes(ct.id)}
-                      onChange={() => {
-                        const ids = draft.mutually_exclusive_with.includes(ct.id)
-                          ? draft.mutually_exclusive_with.filter(id => id !== ct.id)
-                          : [...draft.mutually_exclusive_with, ct.id];
-                        setDraft({ ...draft, mutually_exclusive_with: ids });
-                      }} />
-                    {ct.name}
-                  </label>
-                ))}
-              </div>
+              <MultiSelectDropdown
+                options={callTypes.filter(ct => ct.id !== draft.id).map(ct => ({ id: ct.id, label: ct.name }))}
+                selected={draft.mutually_exclusive_with}
+                onChange={(ids) => setDraft({ ...draft, mutually_exclusive_with: ids })}
+                placeholder="None"
+              />
             </div>
 
             <div className="form-group">
