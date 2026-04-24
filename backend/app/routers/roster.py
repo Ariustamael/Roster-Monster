@@ -10,7 +10,7 @@ from ..database import get_db
 from ..models import (
     MonthlyConfig, Staff, TeamAssignment, Leave, CallPreference, CallAssignment,
     PublicHoliday, PreferenceType,
-    OTTemplate, ClinicTemplate, CallTypeConfig, RankConfig,
+    ResourceTemplate, CallTypeConfig, RankConfig,
 )
 from ..schemas import RosterResponse, DayRoster, CallAssignmentOut, ManualOverrideCreate
 from ..services.solver import (
@@ -395,8 +395,9 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
     year, month = config.year, config.month
     num_days = calendar.monthrange(year, month)[1]
 
-    ot_templates = db.query(OTTemplate).all()
-    clinic_templates = db.query(ClinicTemplate).all()
+    all_templates = db.query(ResourceTemplate).all()
+    ot_templates = [t for t in all_templates if t.resource_type == "ot"]
+    clinic_templates = [t for t in all_templates if t.resource_type == "clinic"]
 
     ph_dates = {
         r.date for r in db.query(PublicHoliday).all()
@@ -458,13 +459,13 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
             for ot in ot_templates:
                 if ot.day_of_week == dow:
                     ot_rooms += 1
-                    ot_assistants += ot.assistants_needed
+                    ot_assistants += ot.staff_required
             for cl in clinic_templates:
                 if cl.day_of_week == dow:
-                    ct = cl.clinic_type or "Sup"
+                    ct = cl.label or "Sup"
                     if ct == "MOPD":
                         clinic_mopd += 1
-                    elif (cl.mos_required or 0) > 0:
+                    elif (cl.staff_required or 0) > 0:
                         clinic_sup += 1
 
         # Count required call slots from config
