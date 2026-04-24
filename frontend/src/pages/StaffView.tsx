@@ -214,7 +214,6 @@ export default function StaffView() {
 }
 
 // StaffRow removed — table rows are now inline, editing is via modal
-}
 
 function EditStaffModal({
   staff, callTypes, teams, allStaff, leaves, prefs, year, month,
