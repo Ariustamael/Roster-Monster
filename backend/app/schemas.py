@@ -250,66 +250,6 @@ class RosterResponse(BaseModel):
     call_type_columns: list[str] = []
 
 
-# ── OT Template ──────────────────────────────────────────────────────────
-
-class OTTemplateCreate(BaseModel):
-    day_of_week: int
-    room: str
-    consultant_id: Optional[int] = None
-    assistants_needed: int = 2
-    registrar_needed: int = 0
-    is_emergency: bool = False
-    linked_call_slot: Optional[str] = None
-    color: Optional[str] = None
-    is_active: bool = True
-    week_of_month: Optional[int] = None
-
-
-class OTTemplateOut(BaseModel):
-    id: int
-    day_of_week: int
-    room: str
-    consultant_id: Optional[int]
-    consultant_name: Optional[str] = None
-    assistants_needed: int
-    registrar_needed: int = 0
-    is_emergency: bool
-    linked_call_slot: Optional[str] = None
-    color: Optional[str] = None
-    is_active: bool = True
-    week_of_month: Optional[int] = None
-
-    model_config = {"from_attributes": True}
-
-
-# ── Clinic Template ──────────────────────────────────────────────────────
-
-class ClinicTemplateCreate(BaseModel):
-    day_of_week: int
-    session: Session
-    room: str
-    clinic_type: str = "Sup"
-    mos_required: int = 1
-    consultant_id: Optional[int] = None
-    color: Optional[str] = None
-    is_active: bool = True
-
-
-class ClinicTemplateOut(BaseModel):
-    id: int
-    day_of_week: int
-    session: Session
-    room: str
-    clinic_type: str
-    mos_required: int
-    consultant_id: Optional[int]
-    consultant_name: Optional[str] = None
-    color: Optional[str] = None
-    is_active: bool = True
-
-    model_config = {"from_attributes": True}
-
-
 # ── Resource Template ────────────────────────────────────────────────────
 
 class ResourceTemplateCreate(BaseModel):

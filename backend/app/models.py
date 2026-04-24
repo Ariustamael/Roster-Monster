@@ -297,44 +297,6 @@ class CallAssignment(Base):
     __table_args__ = (UniqueConstraint("config_id", "date", "call_type"),)
 
 
-# ── OT Templates (weekly recurring) ─────────────────────────────────────
-
-class OTTemplate(Base):
-    __tablename__ = "ot_template"
-
-    id = Column(Integer, primary_key=True)
-    day_of_week = Column(Integer, nullable=False)
-    room = Column(String(20), nullable=False)
-    consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
-    assistants_needed = Column(Integer, default=2)
-    registrar_needed = Column(Integer, default=0)
-    is_emergency = Column(Boolean, default=False)
-    linked_call_slot = Column(String(50), nullable=True)
-    color = Column(String(10), nullable=True)
-    is_active = Column(Boolean, default=True)
-    week_of_month = Column(Integer, nullable=True)
-
-    consultant = relationship("Staff")
-
-
-# ── Clinic Templates (weekly recurring) ──────────────────────────────────
-
-class ClinicTemplate(Base):
-    __tablename__ = "clinic_template"
-
-    id = Column(Integer, primary_key=True)
-    day_of_week = Column(Integer, nullable=False)  # 0=Mon..4=Fri
-    session = Column(SAEnum(Session), nullable=False)  # AM or PM
-    room = Column(String(20), nullable=False)
-    clinic_type = Column(String(20), default="Sup")
-    mos_required = Column(Integer, default=1)
-    consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
-    color = Column(String(10), nullable=True)
-    is_active = Column(Boolean, default=True)
-
-    consultant = relationship("Staff")
-
-
 # ── Resource Templates (unified clinic + OT) ─────────────────────────────
 
 class ResourceTemplate(Base):

@@ -8,13 +8,12 @@ from sqlalchemy.orm import Session as DBSession
 from ..database import get_db
 from ..models import (
     MonthlyConfig, CallAssignment, DutyAssignment, Staff, TeamAssignment,
-    OTTemplate, ClinicTemplate, ResourceTemplate, Leave, PublicHoliday,
+    ResourceTemplate, Leave, PublicHoliday,
     ConsultantOnCall, ACOnCall,
     DutyType, Session, CallTypeConfig, RankConfig,
 )
 from ..schemas import (
     DutyRosterResponse, DayDutyRoster, DutyAssignmentOut,
-    OTTemplateCreate, OTTemplateOut, ClinicTemplateCreate, ClinicTemplateOut,
     ResourceTemplateCreate, ResourceTemplateOut,
     DutyOverrideCreate,
 )
