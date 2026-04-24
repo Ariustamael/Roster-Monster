@@ -30,7 +30,7 @@ export default function StaffView() {
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
-  const [expanded, setExpanded] = useState<number | null>(null);
+  // expanded state removed — editing is via modal
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [prefs, setPrefs] = useState<CallPreference[]>([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -92,33 +92,7 @@ export default function StaffView() {
     }
   }
 
-  async function addLeave(staffId: number) {
-    const dateStr = prompt(`Enter leave date (YYYY-MM-DD):`);
-    if (!dateStr) return;
-    try {
-      const lv = await api.createLeave(staffId, dateStr);
-      setLeaves((prev) => [...prev, lv]);
-    } catch (e: any) {
-      alert(e.message);
-    }
-  }
-
-  async function removeLeave(id: number) {
-    await api.deleteLeave(id);
-    setLeaves((prev) => prev.filter((l) => l.id !== id));
-  }
-
-  async function addPreference(staffId: number, type: "request" | "block") {
-    const dateStr = prompt(`Enter ${type} date (YYYY-MM-DD):`);
-    if (!dateStr) return;
-    const reason = type === "block" ? prompt("Reason (optional):") || undefined : undefined;
-    try {
-      const p = await api.createPreference(staffId, dateStr, type, reason);
-      setPrefs((prev) => [...prev, p]);
-    } catch (e: any) {
-      alert(e.message);
-    }
-  }
+  // Leave and preference management moved to EditStaffModal
 
   async function removePref(id: number) {
     await api.deletePreference(id);
@@ -161,45 +135,30 @@ export default function StaffView() {
             <table>
               <thead>
                 <tr>
-                  <th style={{ width: 20 }}></th>
                   <th>Name</th>
                   <th>Rank</th>
                   <th>Team</th>
                   <th>Supervisor</th>
-                  <th>Leaves</th>
-                  <th>Prefs</th>
+                  <th>Pref</th>
                   <th style={{ width: 120 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((s) => {
-                  const staffLeaves = leaves.filter((l) => l.staff_id === s.id);
-                  const staffPrefs = prefs.filter((p) => p.staff_id === s.id);
-                  const isMO = ALLOCATABLE_RANKS.includes(s.rank);
-                  const isExpanded = expanded === s.id;
-                  const isEditing = editing === s.id;
-
-                  if (false) { /* EditRow replaced by modal below */ }
-
-                  return (
-                    <StaffRow
-                      key={s.id}
-                      staff={s}
-                      isMO={isMO}
-                      isExpanded={isExpanded}
-                      leaves={staffLeaves}
-                      prefs={staffPrefs}
-                      monthLabel={`${MONTH_NAMES[month]} ${year}`}
-                      onToggle={() => setExpanded(isExpanded ? null : s.id)}
-                      onEdit={() => setEditing(s.id)}
-                      onDelete={() => deleteStaffMember(s.id, s.name)}
-                      onAddLeave={() => addLeave(s.id)}
-                      onRemoveLeave={removeLeave}
-                      onAddPref={(type) => addPreference(s.id, type)}
-                      onRemovePref={removePref}
-                    />
-                  );
-                })}
+                {filtered.map((s) => (
+                  <tr key={s.id} style={{ opacity: s.active ? 1 : 0.5 }}>
+                    <td style={{ fontWeight: 500 }}>{s.name}</td>
+                    <td>{s.rank}</td>
+                    <td>{s.team_name || "-"}</td>
+                    <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{s.supervisor_name || "-"}</td>
+                    <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{s.duty_preference || "-"}</td>
+                    <td>
+                      <div className="btn-group">
+                        <button className="btn btn-sm btn-secondary" onClick={() => setEditing(s.id)}>Edit</button>
+                        <button className="btn btn-sm btn-danger" onClick={() => deleteStaffMember(s.id, s.name)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -253,96 +212,7 @@ export default function StaffView() {
   );
 }
 
-function StaffRow({
-  staff: s,
-  isMO,
-  isExpanded,
-  leaves,
-  prefs,
-  monthLabel,
-  onToggle,
-  onEdit,
-  onDelete,
-  onAddLeave,
-  onRemoveLeave,
-  onAddPref,
-  onRemovePref,
-}: {
-  staff: Staff;
-  isMO: boolean;
-  isExpanded: boolean;
-  leaves: Leave[];
-  prefs: CallPreference[];
-  monthLabel: string;
-  onToggle: () => void;
-  onEdit: () => void;
-  onDelete: () => void;
-  onAddLeave: () => void;
-  onRemoveLeave: (id: number) => void;
-  onAddPref: (type: "request" | "block") => void;
-  onRemovePref: (id: number) => void;
-}) {
-  return (
-    <>
-      <tr className={isMO ? "expand-toggle" : ""} onClick={isMO ? onToggle : undefined}>
-        <td style={{ textAlign: "center", fontSize: 11 }}>
-          {isMO ? (isExpanded ? "▼" : "▶") : ""}
-        </td>
-        <td style={{ fontWeight: 500 }}>{s.name}</td>
-        <td>{s.rank}</td>
-        <td>{s.team_name || "-"}</td>
-        <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{s.supervisor_name || "-"}</td>
-        <td>{leaves.length || "-"}</td>
-        <td>{prefs.length || "-"}</td>
-        <td>
-          <div className="btn-group" onClick={(e) => e.stopPropagation()}>
-            <button className="btn btn-sm btn-secondary" onClick={onEdit}>Edit</button>
-            <button className="btn btn-sm btn-danger" onClick={onDelete}>Delete</button>
-          </div>
-        </td>
-      </tr>
-      {isExpanded && (
-        <tr className="staff-detail">
-          <td colSpan={8}>
-            <div style={{ display: "flex", gap: 32, flexWrap: "wrap" }}>
-              <div>
-                <strong style={{ fontSize: 12 }}>Leaves ({monthLabel})</strong>
-                <div className="detail-section" style={{ marginTop: 6 }}>
-                  {leaves.map((l) => (
-                    <span key={l.id} className="chip leave">
-                      {l.date.slice(5)} ({l.leave_type})
-                      <span className="remove" onClick={(e) => { e.stopPropagation(); onRemoveLeave(l.id); }}>&times;</span>
-                    </span>
-                  ))}
-                  <button className="btn btn-sm btn-secondary" onClick={(e) => { e.stopPropagation(); onAddLeave(); }}>
-                    + Leave
-                  </button>
-                </div>
-              </div>
-              <div>
-                <strong style={{ fontSize: 12 }}>Preferences ({monthLabel})</strong>
-                <div className="detail-section" style={{ marginTop: 6 }}>
-                  {prefs.map((p) => (
-                    <span key={p.id} className={`chip ${p.preference_type}`}>
-                      {p.date.slice(5)} {p.preference_type}
-                      {p.reason ? ` - ${p.reason}` : ""}
-                      <span className="remove" onClick={(e) => { e.stopPropagation(); onRemovePref(p.id); }}>&times;</span>
-                    </span>
-                  ))}
-                  <button className="btn btn-sm btn-secondary" onClick={(e) => { e.stopPropagation(); onAddPref("request"); }}>
-                    + Request
-                  </button>
-                  <button className="btn btn-sm btn-secondary" onClick={(e) => { e.stopPropagation(); onAddPref("block"); }}>
-                    + Block
-                  </button>
-                </div>
-              </div>
-            </div>
-          </td>
-        </tr>
-      )}
-    </>
-  );
+// StaffRow removed — table rows are now inline, editing is via modal
 }
 
 function EditStaffModal({
@@ -377,7 +247,8 @@ function EditStaffModal({
   const [supervisorId, setSupervisorId] = useState<number | "">(
     allStaff.find(s => s.name === staff.supervisor_name)?.id ?? ""
   );
-  const [newLeaveDate, setNewLeaveDate] = useState("");
+  const [leaveStart, setLeaveStart] = useState("");
+  const [leaveEnd, setLeaveEnd] = useState("");
   const [newPrefDate, setNewPrefDate] = useState("");
   const [newPrefType, setNewPrefType] = useState<"request" | "block">("request");
 
@@ -432,9 +303,11 @@ function EditStaffModal({
           </select>
         </div>
 
-        <div className="form-group">
-          <label>Extra Eligible Call Types</label>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+        <details className="form-group" style={{ marginBottom: 12 }}>
+          <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 500 }}>
+            Extra Eligible Call Types {extraCallIds.length > 0 && <span style={{ color: "var(--primary)", fontSize: 11 }}>({extraCallIds.length} selected)</span>}
+          </summary>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6, paddingLeft: 4 }}>
             {callTypes.filter(ct => ct.is_active).map(ct => (
               <label key={ct.id} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12 }}>
                 <input type="checkbox" checked={extraCallIds.includes(ct.id)} onChange={() => toggleCallType(ct.id)} />
@@ -442,7 +315,7 @@ function EditStaffModal({
               </label>
             ))}
           </div>
-        </div>
+        </details>
 
         <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
@@ -467,12 +340,22 @@ function EditStaffModal({
             ))}
             {leaves.length === 0 && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>No leaves</span>}
           </div>
-          <div style={{ display: "flex", gap: 4, marginTop: 6, alignItems: "center" }}>
-            <input type="date" value={newLeaveDate} onChange={(e) => setNewLeaveDate(e.target.value)}
+          <div style={{ display: "flex", gap: 4, marginTop: 6, alignItems: "center", flexWrap: "wrap" }}>
+            <input type="date" value={leaveStart} onChange={(e) => { setLeaveStart(e.target.value); if (!leaveEnd) setLeaveEnd(e.target.value); }}
+              style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 4 }} />
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>to</span>
+            <input type="date" value={leaveEnd} onChange={(e) => setLeaveEnd(e.target.value)}
               style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 4 }} />
             <button className="btn btn-sm btn-secondary" onClick={async () => {
-              if (newLeaveDate) { await onAddLeave(newLeaveDate); setNewLeaveDate(""); }
-            }}>+ Leave</button>
+              if (!leaveStart) return;
+              const end = leaveEnd || leaveStart;
+              const start = new Date(leaveStart);
+              const finish = new Date(end);
+              for (let d = new Date(start); d <= finish; d.setDate(d.getDate() + 1)) {
+                await onAddLeave(d.toISOString().slice(0, 10));
+              }
+              setLeaveStart(""); setLeaveEnd("");
+            }}>+ Add</button>
           </div>
         </div>
 
