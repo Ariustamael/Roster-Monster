@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { Staff, Leave, CallPreference, CallTypeConfig } from "../types";
+import type { Staff, Leave, CallPreference, CallTypeConfig, Team } from "../types";
 
 const RANK_ORDER: Record<string, number> = {
   "Senior Consultant": 0,
@@ -37,6 +37,7 @@ export default function StaffView() {
   const [editing, setEditing] = useState<number | null>(null);
   const [staffUpdatedAt, setStaffUpdatedAt] = useState<string | null>(null);
   const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
+  const [teams, setTeams] = useState<Team[]>([]);
 
   const year = active?.year ?? 2026;
   const month = active?.month ?? 1;
@@ -45,6 +46,7 @@ export default function StaffView() {
     api.getStaff().then(setStaff).finally(() => setLoading(false));
     api.getTimestamps().then(ts => setStaffUpdatedAt(ts.staff));
     api.getCallTypes().then(setCallTypes);
+    api.getTeams().then(setTeams);
   }, []);
 
   useEffect(() => {
@@ -215,8 +217,35 @@ export default function StaffView() {
           <EditStaffModal
             staff={editStaff}
             callTypes={callTypes}
+            teams={teams}
+            allStaff={staff}
+            leaves={leaves.filter(l => l.staff_id === editing)}
+            prefs={prefs.filter(p => p.staff_id === editing)}
+            year={year}
+            month={month}
             onSave={(data) => saveEdit(editing, data)}
             onClose={() => setEditing(null)}
+            onAddLeave={async (date) => {
+              const lv = await api.createLeave(editing, date);
+              setLeaves(prev => [...prev, lv]);
+            }}
+            onRemoveLeave={async (id) => {
+              await api.deleteLeave(id);
+              setLeaves(prev => prev.filter(l => l.id !== id));
+            }}
+            onAddPref={async (date, type, reason) => {
+              const p = await api.createPreference(editing, date, type, reason);
+              setPrefs(prev => [...prev, p]);
+            }}
+            onRemovePref={async (id) => {
+              await api.deletePreference(id);
+              setPrefs(prev => prev.filter(p => p.id !== id));
+            }}
+            onReassign={async (teamId, supervisorId) => {
+              await api.reassignStaff(editing, teamId, supervisorId);
+              const updated = await api.getStaff();
+              setStaff(updated);
+            }}
           />
         );
       })()}
@@ -317,15 +346,24 @@ function StaffRow({
 }
 
 function EditStaffModal({
-  staff,
-  callTypes,
-  onSave,
-  onClose,
+  staff, callTypes, teams, allStaff, leaves, prefs, year, month,
+  onSave, onClose, onAddLeave, onRemoveLeave, onAddPref, onRemovePref, onReassign,
 }: {
   staff: Staff;
   callTypes: CallTypeConfig[];
+  teams: Team[];
+  allStaff: Staff[];
+  leaves: Leave[];
+  prefs: CallPreference[];
+  year: number;
+  month: number;
   onSave: (data: { name: string; rank: string; active: boolean; has_admin_role: boolean; extra_call_type_ids: string | null; duty_preference: string | null }) => void;
   onClose: () => void;
+  onAddLeave: (date: string) => Promise<void>;
+  onRemoveLeave: (id: number) => Promise<void>;
+  onAddPref: (date: string, type: string, reason?: string) => Promise<void>;
+  onRemovePref: (id: number) => Promise<void>;
+  onReassign: (teamId: number, supervisorId?: number) => Promise<void>;
 }) {
   const [name, setName] = useState(staff.name);
   const [rank, setRank] = useState(staff.rank);
@@ -335,6 +373,16 @@ function EditStaffModal({
     staff.extra_call_type_ids ? staff.extra_call_type_ids.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : []
   );
   const [dutyPref, setDutyPref] = useState(staff.duty_preference ?? "");
+  const [teamId, setTeamId] = useState<number | "">(teams.find(t => t.name === staff.team_name)?.id ?? "");
+  const [supervisorId, setSupervisorId] = useState<number | "">(
+    allStaff.find(s => s.name === staff.supervisor_name)?.id ?? ""
+  );
+  const [newLeaveDate, setNewLeaveDate] = useState("");
+  const [newPrefDate, setNewPrefDate] = useState("");
+  const [newPrefType, setNewPrefType] = useState<"request" | "block">("request");
+
+  const consultants = allStaff.filter(s => ["Senior Consultant", "Consultant"].includes(s.rank) && s.active);
+  const monthName = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month];
 
   function toggleCallType(ctId: number) {
     setExtraCallIds(prev => prev.includes(ctId) ? prev.filter(id => id !== ctId) : [...prev, ctId]);
@@ -342,19 +390,37 @@ function EditStaffModal({
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 480 }}>
+      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 560, maxHeight: "90vh", overflowY: "auto" }}>
         <h3>Edit Staff — {staff.name}</h3>
 
-        <div className="form-group">
-          <label>Name</label>
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Name</label>
+            <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Rank</label>
+            <select value={rank} onChange={(e) => setRank(e.target.value)}>
+              {ALL_RANKS.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
         </div>
 
-        <div className="form-group">
-          <label>Rank</label>
-          <select value={rank} onChange={(e) => setRank(e.target.value)}>
-            {ALL_RANKS.map((g) => <option key={g} value={g}>{g}</option>)}
-          </select>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Team</label>
+            <select value={teamId} onChange={(e) => setTeamId(e.target.value ? Number(e.target.value) : "")}>
+              <option value="">— None —</option>
+              {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label>Supervisor</label>
+            <select value={supervisorId} onChange={(e) => setSupervisorId(e.target.value ? Number(e.target.value) : "")}>
+              <option value="">— None —</option>
+              {consultants.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
         </div>
 
         <div className="form-group">
@@ -367,10 +433,10 @@ function EditStaffModal({
         </div>
 
         <div className="form-group">
-          <label>Extra Eligible Call Types (beyond rank default)</label>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4, maxHeight: 140, overflowY: "auto" }}>
+          <label>Extra Eligible Call Types</label>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
             {callTypes.filter(ct => ct.is_active).map(ct => (
-              <label key={ct.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
+              <label key={ct.id} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 12 }}>
                 <input type="checkbox" checked={extraCallIds.includes(ct.id)} onChange={() => toggleCallType(ct.id)} />
                 {ct.name}
               </label>
@@ -379,24 +445,79 @@ function EditStaffModal({
         </div>
 
         <div style={{ display: "flex", gap: 16, marginBottom: 12 }}>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
             <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />
             Active
           </label>
-          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
             <input type="checkbox" checked={hasAdmin} onChange={(e) => setHasAdmin(e.target.checked)} />
             Admin Role
           </label>
         </div>
 
-        <div style={{ fontSize: 11, color: "var(--text-muted)", marginBottom: 12 }}>
-          Team: {staff.team_name || "—"} · Supervisor: {staff.supervisor_name || "—"}
+        {/* Leave management */}
+        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginBottom: 10 }}>
+          <strong style={{ fontSize: 12 }}>Leaves — {monthName} {year}</strong>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+            {leaves.map(l => (
+              <span key={l.id} className="chip leave" style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, padding: "2px 6px", background: "#fef3c7", borderRadius: 4 }}>
+                {l.date.slice(5)} ({l.leave_type})
+                <span style={{ cursor: "pointer", color: "#b91c1c", fontWeight: 700 }} onClick={() => onRemoveLeave(l.id)}>&times;</span>
+              </span>
+            ))}
+            {leaves.length === 0 && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>No leaves</span>}
+          </div>
+          <div style={{ display: "flex", gap: 4, marginTop: 6, alignItems: "center" }}>
+            <input type="date" value={newLeaveDate} onChange={(e) => setNewLeaveDate(e.target.value)}
+              style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 4 }} />
+            <button className="btn btn-sm btn-secondary" onClick={async () => {
+              if (newLeaveDate) { await onAddLeave(newLeaveDate); setNewLeaveDate(""); }
+            }}>+ Leave</button>
+          </div>
+        </div>
+
+        {/* Preference management */}
+        <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginBottom: 10 }}>
+          <strong style={{ fontSize: 12 }}>Call Preferences — {monthName} {year}</strong>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 6 }}>
+            {prefs.map(p => (
+              <span key={p.id} style={{
+                display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, padding: "2px 6px", borderRadius: 4,
+                background: p.preference_type === "request" ? "#d1fae5" : "#fee2e2",
+                color: p.preference_type === "request" ? "#065f46" : "#991b1b",
+              }}>
+                {p.date.slice(5)} {p.preference_type}{p.reason ? ` - ${p.reason}` : ""}
+                <span style={{ cursor: "pointer", fontWeight: 700 }} onClick={() => onRemovePref(p.id)}>&times;</span>
+              </span>
+            ))}
+            {prefs.length === 0 && <span style={{ fontSize: 11, color: "var(--text-muted)" }}>No preferences</span>}
+          </div>
+          <div style={{ display: "flex", gap: 4, marginTop: 6, alignItems: "center" }}>
+            <input type="date" value={newPrefDate} onChange={(e) => setNewPrefDate(e.target.value)}
+              style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 4 }} />
+            <select value={newPrefType} onChange={(e) => setNewPrefType(e.target.value as "request" | "block")}
+              style={{ fontSize: 12, padding: "3px 6px", border: "1px solid var(--border)", borderRadius: 4 }}>
+              <option value="request">Request</option>
+              <option value="block">Block</option>
+            </select>
+            <button className="btn btn-sm btn-secondary" onClick={async () => {
+              if (newPrefDate) { await onAddPref(newPrefDate, newPrefType); setNewPrefDate(""); }
+            }}>+ Pref</button>
+          </div>
         </div>
 
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => {
+          <button className="btn btn-primary" onClick={async () => {
             if (name.trim()) {
+              if (teamId && teamId !== (teams.find(t => t.name === staff.team_name)?.id ?? "")) {
+                await onReassign(teamId as number, supervisorId ? supervisorId as number : undefined);
+              } else if (supervisorId && supervisorId !== (allStaff.find(s => s.name === staff.supervisor_name)?.id ?? "")) {
+                await onReassign(
+                  teams.find(t => t.name === staff.team_name)?.id ?? (teamId as number),
+                  supervisorId as number
+                );
+              }
               onSave({
                 name: name.trim(),
                 rank,
