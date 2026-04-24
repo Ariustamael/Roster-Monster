@@ -161,17 +161,17 @@ export default function StaffView() {
       ) : (
         <div className="card">
           <div className="table-wrap">
-            <table>
+            <table style={{ width: "100%", minWidth: 900 }}>
               <thead>
                 <tr>
                   <th>Name</th>
                   <th>Rank</th>
                   <th>Team</th>
                   <th>Supervisor</th>
-                  <th>Leaves</th>
-                  <th>Preferences</th>
-                  <th>Extra Call Types</th>
-                  <th style={{ width: 120 }}></th>
+                  <th style={{ width: 130 }}>Leaves</th>
+                  <th style={{ width: 130 }}>Preferences</th>
+                  <th style={{ width: 100 }}>Extra Call Types</th>
+                  <th style={{ width: 100 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -180,16 +180,16 @@ export default function StaffView() {
                   const staffPrefs = prefs.filter(p => p.staff_id === s.id);
                   return (
                   <tr key={s.id} style={{ opacity: s.active ? 1 : 0.5 }}>
-                    <td style={{ fontWeight: 500 }}>{s.name}</td>
-                    <td>{s.rank}</td>
-                    <td>{s.team_name || "-"}</td>
-                    <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{s.supervisor_name || "-"}</td>
-                    <td style={{ fontSize: 10, color: "#b45309" }}>
+                    <td style={{ fontWeight: 500, whiteSpace: "nowrap" }}>{s.name}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{s.rank}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{s.team_name || "-"}</td>
+                    <td style={{ color: "var(--text-muted)", fontSize: 12, whiteSpace: "nowrap" }}>{s.supervisor_name || "-"}</td>
+                    <td style={{ fontSize: 10, color: "#b45309", wordWrap: "break-word", overflowWrap: "break-word" }}>
                       {staffLeaves.length > 0
                         ? consolidateDates(staffLeaves.map(l => l.date))
                         : <span style={{ color: "var(--text-muted)" }}>-</span>}
                     </td>
-                    <td style={{ fontSize: 10 }}>
+                    <td style={{ fontSize: 10, wordWrap: "break-word", overflowWrap: "break-word" }}>
                       {staffPrefs.length > 0
                         ? (() => {
                             const blocks = staffPrefs.filter(p => p.preference_type === "block");
@@ -203,7 +203,7 @@ export default function StaffView() {
                           })()
                         : <span style={{ color: "var(--text-muted)" }}>-</span>}
                     </td>
-                    <td style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                    <td style={{ fontSize: 10, color: "var(--text-muted)", wordWrap: "break-word", overflowWrap: "break-word" }}>
                       {s.extra_call_type_ids
                         ? s.extra_call_type_ids.split(",").map(id => callTypes.find(ct => ct.id === parseInt(id))?.name).filter(Boolean).join(", ")
                         : "-"}
