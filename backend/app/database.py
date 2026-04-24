@@ -308,9 +308,8 @@ def _migrate(engine):
             cols = [c["name"] for c in insp.get_columns(tbl)]
             if "updated_at" not in cols:
                 with engine.begin() as conn:
-                    conn.execute(text(
-                        f"ALTER TABLE {tbl} ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-                    ))
+                    conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN updated_at TIMESTAMP"))
+                    conn.execute(text(f"UPDATE {tbl} SET updated_at = datetime('now')"))
 
 
 def init_db():
