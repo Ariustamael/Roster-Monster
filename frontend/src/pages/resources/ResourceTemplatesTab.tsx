@@ -351,16 +351,15 @@ function ResourceFormModal({
         </div>
 
         <div className="form-group">
+          <label>Resource Label</label>
+          <input type="text" value={label} onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. NC, Sup, MOPD, Trauma" />
+        </div>
+
+        <div className="form-group">
           <label>Room</label>
           <input type="text" value={room} onChange={(e) => setRoom(e.target.value)}
             placeholder={isOT ? "e.g. OT1, EOT" : "e.g. 4E-Rm3"} />
-        </div>
-
-        <div className="form-group" style={{ opacity: isOT ? 0.4 : 1 }}>
-          <label>Resource Label</label>
-          <input type="text" value={label} onChange={(e) => setLabel(e.target.value)}
-            placeholder="e.g. NC, Sup, MOPD, Trauma"
-            disabled={isOT} />
         </div>
 
         <div className="form-group" style={{ opacity: isEmergency ? 0.4 : 1 }}>
@@ -462,7 +461,7 @@ function ResourceFormModal({
                   day_of_week: dow,
                   session,
                   room: room.trim(),
-                  label: isOT ? "" : label.trim(),
+                  label: label.trim(),
                   consultant_id: isEmergency ? null : consId,
                   staff_required: staffRequired,
                   is_emergency: isOT ? isEmergency : false,
