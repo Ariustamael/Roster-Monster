@@ -149,15 +149,28 @@ export default function StaffView() {
               </thead>
               <tbody>
                 {filtered.map((s) => {
-                  const staffLeaveCount = leaves.filter(l => l.staff_id === s.id).length;
+                  const staffLeaves = leaves.filter(l => l.staff_id === s.id);
+                  const staffPrefs = prefs.filter(p => p.staff_id === s.id);
                   return (
                   <tr key={s.id} style={{ opacity: s.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 500 }}>{s.name}</td>
                     <td>{s.rank}</td>
                     <td>{s.team_name || "-"}</td>
                     <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{s.supervisor_name || "-"}</td>
-                    <td style={{ fontSize: 11, color: staffLeaveCount > 0 ? "#b45309" : "var(--text-muted)" }}>{staffLeaveCount || "-"}</td>
-                    <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{s.duty_preference || "-"}</td>
+                    <td style={{ fontSize: 10, color: "#b45309" }}>
+                      {staffLeaves.length > 0
+                        ? staffLeaves.map(l => l.date.slice(5)).join(", ")
+                        : <span style={{ color: "var(--text-muted)" }}>-</span>}
+                    </td>
+                    <td style={{ fontSize: 10 }}>
+                      {staffPrefs.length > 0
+                        ? staffPrefs.map(p => (
+                            <span key={p.id} style={{ color: p.preference_type === "request" ? "#065f46" : "#991b1b", marginRight: 4 }}>
+                              {p.date.slice(5)} {p.preference_type === "request" ? "R" : "B"}
+                            </span>
+                          ))
+                        : <span style={{ color: "var(--text-muted)" }}>-</span>}
+                    </td>
                     <td style={{ fontSize: 10, color: "var(--text-muted)" }}>
                       {s.extra_call_type_ids
                         ? s.extra_call_type_ids.split(",").map(id => callTypes.find(ct => ct.id === parseInt(id))?.name).filter(Boolean).join(", ")
