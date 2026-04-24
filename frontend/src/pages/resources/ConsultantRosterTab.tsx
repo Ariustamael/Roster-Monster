@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "../../api";
-import type { ConsultantOnCall, ACOnCall, Staff, PublicHoliday, StepdownDay, EveningOTDate } from "../../types";
-import { CONS_RANKS, AC_RANKS } from "./constants";
+import type { ConsultantOnCall, ACOnCall, Staff, PublicHoliday, StepdownDay, EveningOTDate, CallTypeConfig, RegistrarDuty } from "../../types";
+import { CONS_RANKS, AC_RANKS, REG_RANKS } from "./constants";
 
 interface DayRow {
   date: string;
@@ -16,9 +16,10 @@ interface DayRow {
   isEveningOT: boolean;
   isPH: boolean;
   phName: string;
+  registrarSlots: Record<string, number | "">;
 }
 
-type SlotType = "consultant" | "supervising" | "ac";
+type SlotType = "consultant" | "supervising" | "ac" | `reg:${string}`;
 
 interface DragPayload {
   staffId: number;
@@ -27,11 +28,14 @@ interface DragPayload {
 function StaffCard({
   staff,
   onDragStart,
+  color,
 }: {
   staff: Staff;
   onDragStart: (payload: DragPayload) => void;
+  color?: string;
 }) {
   const isAC = AC_RANKS.includes(staff.rank);
+  const borderColor = color ?? (isAC ? "#10b981" : "#3b82f6");
   return (
     <div
       className="team-card"
@@ -41,7 +45,7 @@ function StaffCard({
       style={{
         marginBottom: 4,
         cursor: "grab",
-        borderLeft: `3px solid ${isAC ? "#10b981" : "#3b82f6"}`,
+        borderLeft: `3px solid ${borderColor}`,
       }}
     >
       <span className="card-name">{staff.name}</span>
@@ -75,16 +79,20 @@ function DropSlot({
 }) {
   const isOver = dragOverSlot === slotKey;
   const isFilled = !!filledName;
+  const isReg = slotType.startsWith("reg:");
 
   let bg = "transparent";
   if (isFilled) {
-    if (slotType === "consultant") bg = "#dbeafe";
+    if (isReg) bg = "#fef3c7";
+    else if (slotType === "consultant") bg = "#dbeafe";
     else if (slotType === "supervising") bg = "#eff6ff";
     else bg = "#d1fae5";
   }
-  if (isOver) bg = slotType === "ac" ? "#a7f3d0" : "#bfdbfe";
+  if (isOver) bg = isReg ? "#fde68a" : slotType === "ac" ? "#a7f3d0" : "#bfdbfe";
 
   if (disabled) return null;
+
+  const filledTextColor = isReg ? "#92400e" : slotType === "ac" ? "#065f46" : "#1e40af";
 
   return (
     <div
@@ -111,7 +119,7 @@ function DropSlot({
     >
       {isFilled ? (
         <>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, color: slotType === "ac" ? "#065f46" : "#1e40af", fontWeight: 500 }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, color: filledTextColor, fontWeight: 500 }}>
             {filledName}
           </span>
           <span style={{ color: "var(--text-muted)", fontSize: 10, flexShrink: 0 }}>✕</span>
@@ -123,12 +131,49 @@ function DropSlot({
   );
 }
 
+// Filter R call types visible for a given day
+function getVisibleRegSlots(row: DayRow, rTypes: CallTypeConfig[]): CallTypeConfig[] {
+  return rTypes.filter(ct => {
+    // Check applicable_days
+    if (ct.applicable_days) {
+      const days = ct.applicable_days.split(",").map(d => d.trim());
+      if (!days.includes(row.dayName) && !(row.isPH && days.includes("PH"))) return false;
+    }
+    // Check required_conditions
+    if (ct.required_conditions) {
+      for (const cond of ct.required_conditions.split(",").map(c => c.trim())) {
+        if (cond === "Not Stepdown" && row.isStepdown) return false;
+        if (cond === "Stepdown" && !row.isStepdown) return false;
+        if (cond === "PH" && !row.isPH) return false;
+        if (cond === "Not PH" && row.isPH) return false;
+      }
+    }
+    return true;
+  });
+}
+
+// Apply mutual exclusivity: R1+2 vs R1+R2
+function getActiveRegSlots(row: DayRow, rTypes: CallTypeConfig[]): CallTypeConfig[] {
+  const visible = getVisibleRegSlots(row, rTypes);
+  const r1 = visible.find(ct => ct.name === "R1");
+  const r2 = visible.find(ct => ct.name === "R2");
+  const r12 = visible.find(ct => ct.name === "R1+2");
+  if (!r12) return visible;
+  const r1Filled = r1 && row.registrarSlots["R1"] !== "";
+  const r2Filled = r2 && row.registrarSlots["R2"] !== "";
+  const r12Filled = r12 && row.registrarSlots["R1+2"] !== "";
+  if (r12Filled) return visible.filter(ct => ct.name !== "R1" && ct.name !== "R2");
+  if (r1Filled && r2Filled) return visible.filter(ct => ct.name !== "R1+2");
+  return visible;
+}
+
 const DOW_HEADERS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
 export default function ConsultantRosterTab({ configId, year, month }: { configId: number; year: number; month: number }) {
   const [rows, setRows] = useState<DayRow[]>([]);
   const [publicHolidays, setPublicHolidays] = useState<PublicHoliday[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -139,16 +184,19 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [consRows, acRows, allStaff, stepdownDays, eveningOTDates, holidays] = await Promise.all([
+    const [consRows, acRows, allStaff, stepdownDays, eveningOTDates, holidays, ctRows, regRows] = await Promise.all([
       api.getConsultantOnCall(configId),
       api.getACOnCall(configId),
       api.getStaff(),
       api.getStepdownDays(configId),
       api.getEveningOTDates(configId),
       api.getPublicHolidays(),
+      api.getCallTypes(),
+      api.getRegistrarDuties(configId),
     ]);
     setStaff(allStaff);
     setPublicHolidays(holidays);
+    setCallTypes(ctRows);
 
     const consMap = new Map<string, ConsultantOnCall>();
     for (const r of consRows) consMap.set(r.date, r);
@@ -159,6 +207,11 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
     const phMap = new Map<string, PublicHoliday>();
     for (const h of holidays) phMap.set(h.date, h);
 
+    const rCallTypes = ctRows.filter((ct: CallTypeConfig) => ct.is_active && ct.name.startsWith("R"));
+
+    const regMap = new Map<string, number>();
+    for (const r of regRows as RegistrarDuty[]) regMap.set(`${r.date}:${r.duty_type}`, r.registrar_id);
+
     const dayRows: DayRow[] = [];
     for (let d = 1; d <= numDays; d++) {
       const dt = new Date(year, month - 1, d);
@@ -166,6 +219,12 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
       const cons = consMap.get(dateStr);
       const ac = acMap.get(dateStr);
       const ph = phMap.get(dateStr);
+
+      const registrarSlots: Record<string, number | ""> = {};
+      for (const ct of rCallTypes) {
+        registrarSlots[ct.name] = regMap.get(`${dateStr}:${ct.name}`) ?? "";
+      }
+
       dayRows.push({
         date: dateStr,
         dayName: dt.toLocaleDateString("en", { weekday: "short" }),
@@ -179,6 +238,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
         isEveningOT: eotSet.has(dateStr),
         isPH: !!ph,
         phName: ph?.name ?? "",
+        registrarSlots,
       });
     }
     setRows(dayRows);
@@ -190,7 +250,11 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
 
   // One unified list: all consultant-tier staff (SC, C, AC)
   const allConsultantTier = staff.filter((s) => CONS_RANKS.includes(s.rank));
+  const registrarStaff = staff.filter((s) => REG_RANKS.includes(s.rank) && s.active);
   const staffById = new Map<number, Staff>(staff.map((s) => [s.id, s]));
+
+  // Compute rCallTypes once in the component body
+  const rCallTypes = callTypes.filter(ct => ct.is_active && ct.name.startsWith("R"));
 
   function handleDragStart(payload: DragPayload) {
     dragPayload.current = payload;
@@ -218,6 +282,25 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
     setDragOverSlot(null);
     const payload = dragPayload.current;
     if (!payload) return;
+
+    // Handle registrar slots
+    if (slotType.startsWith("reg:")) {
+      const callType = slotType.slice(4);
+      const droppedStaff = staffById.get(payload.staffId);
+      if (!droppedStaff || !REG_RANKS.includes(droppedStaff.rank)) return;
+      setRows(prev => prev.map((r, i) => {
+        if (i !== rowIdx) return r;
+        const newSlots = { ...r.registrarSlots, [callType]: payload.staffId };
+        if (callType === "R1+2") { newSlots["R1"] = ""; newSlots["R2"] = ""; }
+        if ((callType === "R1" || callType === "R2") && newSlots["R1"] !== "" && newSlots["R2"] !== "") {
+          newSlots["R1+2"] = "";
+        }
+        return { ...r, registrarSlots: newSlots };
+      }));
+      setDirty(true);
+      dragPayload.current = null;
+      return;
+    }
 
     const droppedStaff = staffById.get(payload.staffId);
     if (!droppedStaff) return;
@@ -256,6 +339,17 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
   }
 
   function clearSlot(rowIdx: number, slotType: SlotType) {
+    // Handle registrar slots
+    if (slotType.startsWith("reg:")) {
+      const callType = slotType.slice(4);
+      setRows(prev => prev.map((r, i) => {
+        if (i !== rowIdx) return r;
+        return { ...r, registrarSlots: { ...r.registrarSlots, [callType]: "" } };
+      }));
+      setDirty(true);
+      return;
+    }
+
     setRows((prev) =>
       prev.map((r, i) => {
         if (i !== rowIdx) return r;
@@ -356,11 +450,29 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
         }
       }
 
+      // Build registrar duty entries
+      const regEntries: { date: string; registrar_id: number; duty_type: string; shift: string }[] = [];
+      for (const r of rows) {
+        for (const [callType, staffId] of Object.entries(r.registrarSlots)) {
+          if (staffId !== "") {
+            const ct = rCallTypes.find(c => c.name === callType);
+            const shift = ct?.is_overnight ? (callType.includes("+") ? "combined" : "night") : "day";
+            regEntries.push({
+              date: r.date,
+              registrar_id: staffId as number,
+              duty_type: callType,
+              shift,
+            });
+          }
+        }
+      }
+
       await Promise.all([
         api.setConsultantOnCall(configId, consEntries),
         api.setACOnCall(configId, acEntries),
         api.setStepdownDays(configId, stepdownEntries),
         api.setEveningOTDates(configId, eotEntries),
+        api.setRegistrarDuties(configId, regEntries),
         ...phToDelete.map((id) => api.deletePublicHoliday(id)),
         ...phToCreate.map((ph) => api.createPublicHoliday(ph.date, ph.name)),
       ]);
@@ -416,6 +528,16 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
             <StaffCard key={s.id} staff={s} onDragStart={handleDragStart} />
           ))}
         </div>
+
+        <div className="card" style={{ marginBottom: 12 }}>
+          <h3 style={{ fontSize: 11, marginBottom: 8, textTransform: "uppercase", letterSpacing: 1 }}>Registrar Staff</h3>
+          {registrarStaff.length === 0 && (
+            <div className="team-empty">No registrar-tier staff</div>
+          )}
+          {registrarStaff.map((s) => (
+            <StaffCard key={s.id} staff={s} onDragStart={handleDragStart} color="#f59e0b" />
+          ))}
+        </div>
       </div>
 
       {/* Calendar grid */}
@@ -460,7 +582,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                           border: "1px solid var(--border)",
                           verticalAlign: "top",
                           padding: 4,
-                          height: 120,
+                          minHeight: 140,
                         }}
                       />
                     );
@@ -471,6 +593,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                   const acName = cell.acId ? staffById.get(cell.acId as number)?.name : undefined;
 
                   const secondaryType = getSecondarySlotType(cell);
+                  const activeRegSlots = getActiveRegSlots(cell, rCallTypes);
 
                   return (
                     <td
@@ -484,7 +607,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                         border: "1px solid var(--border)",
                         verticalAlign: "top",
                         padding: 4,
-                        height: 120,
+                        minHeight: 140,
                       }}
                     >
                       {/* Row 1: Day number + PH badge + stepdown/eot indicators */}
@@ -541,9 +664,9 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                         )}
                       </div>
 
-                      {/* Row 2: Primary On-Call slot */}
+                      {/* Row 2: Primary CIC slot */}
                       <DropSlot
-                        label="On Call"
+                        label="CIC"
                         slotType="consultant"
                         filledName={primaryName}
                         slotKey={`${cell.date}:consultant`}
@@ -580,6 +703,26 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                           onDrop={(st, e) => handleDrop(idx, st, e)}
                           onClear={() => clearSlot(idx, "ac")}
                         />
+                      )}
+
+                      {/* Row 3b: Registrar slots */}
+                      {activeRegSlots.length > 0 && (
+                        <div style={{ borderTop: "1px solid var(--border)", marginTop: 2, paddingTop: 2 }}>
+                          {activeRegSlots.map((ct) => (
+                            <DropSlot
+                              key={ct.name}
+                              label={ct.name}
+                              slotType={`reg:${ct.name}` as SlotType}
+                              filledName={cell.registrarSlots[ct.name] ? staffById.get(cell.registrarSlots[ct.name] as number)?.name : undefined}
+                              slotKey={`${cell.date}:reg:${ct.name}`}
+                              dragOverSlot={dragOverSlot}
+                              onDragOver={handleDragOver}
+                              onDragLeave={handleDragLeave}
+                              onDrop={(st, e) => handleDrop(idx, st, e)}
+                              onClear={() => clearSlot(idx, `reg:${ct.name}` as SlotType)}
+                            />
+                          ))}
+                        </div>
                       )}
 
                       {/* Row 4: Stepdown + Evening OT checkboxes */}
