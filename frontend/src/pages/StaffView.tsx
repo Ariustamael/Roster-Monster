@@ -76,8 +76,9 @@ export default function StaffView() {
   }
 
   async function saveEdit(id: number, data: { name: string; rank: string; active: boolean; has_admin_role: boolean; extra_call_type_ids: string | null; duty_preference: string | null }) {
-    const updated = await api.updateStaff(id, data);
-    setStaff((prev) => prev.map((s) => (s.id === id ? updated : s)));
+    await api.updateStaff(id, data);
+    const refreshed = await api.getStaff();
+    setStaff(refreshed);
     setEditing(null);
   }
 
@@ -140,18 +141,28 @@ export default function StaffView() {
                   <th>Rank</th>
                   <th>Team</th>
                   <th>Supervisor</th>
-                  <th>Pref</th>
+                  <th>Leaves</th>
+                  <th>Preferences</th>
+                  <th>Extra Call Types</th>
                   <th style={{ width: 120 }}></th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((s) => (
+                {filtered.map((s) => {
+                  const staffLeaveCount = leaves.filter(l => l.staff_id === s.id).length;
+                  return (
                   <tr key={s.id} style={{ opacity: s.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 500 }}>{s.name}</td>
                     <td>{s.rank}</td>
                     <td>{s.team_name || "-"}</td>
                     <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{s.supervisor_name || "-"}</td>
+                    <td style={{ fontSize: 11, color: staffLeaveCount > 0 ? "#b45309" : "var(--text-muted)" }}>{staffLeaveCount || "-"}</td>
                     <td style={{ fontSize: 11, color: "var(--text-muted)" }}>{s.duty_preference || "-"}</td>
+                    <td style={{ fontSize: 10, color: "var(--text-muted)" }}>
+                      {s.extra_call_type_ids
+                        ? s.extra_call_type_ids.split(",").map(id => callTypes.find(ct => ct.id === parseInt(id))?.name).filter(Boolean).join(", ")
+                        : "-"}
+                    </td>
                     <td>
                       <div className="btn-group">
                         <button className="btn btn-sm btn-secondary" onClick={() => setEditing(s.id)}>Edit</button>
@@ -159,7 +170,8 @@ export default function StaffView() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
