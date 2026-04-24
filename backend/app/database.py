@@ -237,6 +237,70 @@ def _migrate(engine):
                                     "INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"
                                 ), {"ct": ct_id, "r": sr_id})
 
+    # ── Merge clinic_template + ot_template → resource_template ──────────
+    # Guard: run when resource_template is empty but source tables have data
+    # (create_all already created the table; we only need to backfill once)
+    insp = inspect(engine)
+    if "resource_template" in insp.get_table_names():
+        with engine.connect() as _chk:
+            _rt_count = _chk.execute(text("SELECT COUNT(*) FROM resource_template")).scalar()
+            _ct_count = _chk.execute(text("SELECT COUNT(*) FROM clinic_template")).scalar() if "clinic_template" in insp.get_table_names() else 0
+            _ot_count = _chk.execute(text("SELECT COUNT(*) FROM ot_template")).scalar() if "ot_template" in insp.get_table_names() else 0
+        _needs_migration = _rt_count == 0 and (_ct_count > 0 or _ot_count > 0)
+    else:
+        _needs_migration = True
+
+    if _needs_migration:
+        if "resource_template" not in insp.get_table_names():
+            from .models import ResourceTemplate
+            ResourceTemplate.__table__.create(bind=engine)
+
+        with SessionLocal() as s:
+            # Migrate clinic templates
+            for row in s.execute(text("SELECT * FROM clinic_template")).mappings():
+                s.execute(text("""
+                    INSERT INTO resource_template
+                    (resource_type, day_of_week, session, room, label,
+                     consultant_id, staff_required, is_emergency,
+                     linked_manpower, weeks, color, is_active, sort_order)
+                    VALUES ('clinic', :dow, :session, :room, :label,
+                            :cons_id, :staff_req, 0,
+                            NULL, NULL, :color, :is_active, 0)
+                """), {
+                    "dow": row["day_of_week"],
+                    "session": row["session"],
+                    "room": row["room"],
+                    "label": row.get("clinic_type", "Sup") or "Sup",
+                    "cons_id": row.get("consultant_id"),
+                    "staff_req": row.get("mos_required", 1) or 1,
+                    "color": row.get("color"),
+                    "is_active": row.get("is_active", True),
+                })
+
+            # Migrate OT templates
+            for row in s.execute(text("SELECT * FROM ot_template")).mappings():
+                week_val = row.get("week_of_month")
+                s.execute(text("""
+                    INSERT INTO resource_template
+                    (resource_type, day_of_week, session, room, label,
+                     consultant_id, staff_required, is_emergency,
+                     linked_manpower, weeks, color, is_active, sort_order)
+                    VALUES ('ot', :dow, 'AM', :room, '',
+                            :cons_id, :staff_req, :is_emerg,
+                            :linked, :weeks, :color, :is_active, 0)
+                """), {
+                    "dow": row["day_of_week"],
+                    "room": row["room"],
+                    "cons_id": row.get("consultant_id"),
+                    "staff_req": row.get("assistants_needed", 2) or 2,
+                    "is_emerg": row.get("is_emergency", False),
+                    "linked": row.get("linked_call_slot"),
+                    "weeks": str(week_val) if week_val is not None else None,
+                    "color": row.get("color"),
+                    "is_active": row.get("is_active", True),
+                })
+            s.commit()
+
 
 def init_db():
     from . import models  # noqa: F401 — ensure all models registered with Base

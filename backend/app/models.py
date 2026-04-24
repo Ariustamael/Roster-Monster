@@ -335,6 +335,29 @@ class ClinicTemplate(Base):
     consultant = relationship("Staff")
 
 
+# ── Resource Templates (unified clinic + OT) ─────────────────────────────
+
+class ResourceTemplate(Base):
+    __tablename__ = "resource_template"
+
+    id = Column(Integer, primary_key=True)
+    resource_type = Column(String(10), nullable=False)  # "clinic" or "ot"
+    day_of_week = Column(Integer, nullable=False)
+    session = Column(SAEnum(Session), nullable=False)
+    room = Column(String(40), nullable=False)
+    label = Column(String(40), default="")
+    consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
+    staff_required = Column(Integer, default=1)
+    is_emergency = Column(Boolean, default=False)
+    linked_manpower = Column(String(100), nullable=True)
+    weeks = Column(String(20), nullable=True)  # e.g. "1,3,5" or null=every week
+    color = Column(String(10), nullable=True)
+    is_active = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+
+    consultant = relationship("Staff")
+
+
 # ── Duty Assignments (output) ────────────────────────────────────────────
 
 class DutyAssignment(Base):
