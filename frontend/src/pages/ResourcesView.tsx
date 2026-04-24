@@ -7,7 +7,7 @@ import ConsultantRosterTab from "./resources/ConsultantRosterTab";
 const TABS = [
   { key: "supply", label: "Supply / Demand", needsConfig: true },
   { key: "resources", label: "Resources", needsConfig: false },
-  { key: "oncall", label: "On-Call Roster", needsConfig: true },
+  { key: "oncall", label: "Con/Reg Roster", needsConfig: true },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
