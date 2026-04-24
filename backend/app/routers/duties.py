@@ -164,16 +164,19 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     for ta in db.query(TeamAssignment).filter(TeamAssignment.role == "consultant").all():
         consultant_team[ta.staff_id] = ta.team_id
 
-    ot_templates = db.query(OTTemplate).filter(OTTemplate.is_active.is_(True)).all()
-    clinic_templates = db.query(ClinicTemplate).filter(ClinicTemplate.is_active.is_(True)).all()
+    all_templates = db.query(ResourceTemplate).filter(ResourceTemplate.is_active.is_(True)).all()
 
-    ot_by_dow_week: dict[tuple[int, int | None], list[OTTemplate]] = defaultdict(list)
-    for t in ot_templates:
-        ot_by_dow_week[(t.day_of_week, t.week_of_month)].append(t)
-
-    clinic_by_dow_session: dict[tuple[int, str], list[ClinicTemplate]] = defaultdict(list)
-    for t in clinic_templates:
-        clinic_by_dow_session[(t.day_of_week, t.session.value)].append(t)
+    ot_by_dow_week: dict[tuple[int, int | None], list[ResourceTemplate]] = defaultdict(list)
+    clinic_by_dow_session: dict[tuple[int, str], list[ResourceTemplate]] = defaultdict(list)
+    for t in all_templates:
+        if t.resource_type == "ot":
+            if t.weeks:
+                for w in t.weeks.split(","):
+                    ot_by_dow_week[(t.day_of_week, int(w.strip()))].append(t)
+            else:
+                ot_by_dow_week[(t.day_of_week, None)].append(t)
+        else:
+            clinic_by_dow_session[(t.day_of_week, t.session.value)].append(t)
 
     call_rows = db.query(CallAssignment).filter(
         CallAssignment.config_id == config.id,
@@ -234,18 +237,18 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                     room=t.room,
                     consultant_id=t.consultant_id,
                     consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
-                    assistants_needed=t.assistants_needed,
-                    registrar_needed=t.registrar_needed or 0,
+                    assistants_needed=t.staff_required,
+                    registrar_needed=0,
                     is_emergency=True,
-                    linked_call_slot=t.linked_call_slot,
+                    linked_call_slot=t.linked_manpower,
                 ))
             elif not is_wknd and not is_ph:
                 ot_slots.append(OTSlot(
                     room=t.room,
                     consultant_id=t.consultant_id,
                     consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
-                    assistants_needed=t.assistants_needed,
-                    registrar_needed=t.registrar_needed or 0,
+                    assistants_needed=t.staff_required,
+                    registrar_needed=0,
                 ))
 
         am_clinics = []
@@ -254,16 +257,16 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
             for t in clinic_by_dow_session.get((dow, Session.AM.value), []):
                 am_clinics.append(ClinicSlot(
                     room=t.room, session=Session.AM,
-                    clinic_type=t.clinic_type or "Sup",
-                    mos_required=t.mos_required if t.mos_required is not None else 1,
+                    clinic_type=t.label or "Sup",
+                    mos_required=t.staff_required if t.staff_required is not None else 1,
                     consultant_id=t.consultant_id,
                     consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
                 ))
             for t in clinic_by_dow_session.get((dow, Session.PM.value), []):
                 pm_clinics.append(ClinicSlot(
                     room=t.room, session=Session.PM,
-                    clinic_type=t.clinic_type or "Sup",
-                    mos_required=t.mos_required if t.mos_required is not None else 1,
+                    clinic_type=t.label or "Sup",
+                    mos_required=t.staff_required if t.staff_required is not None else 1,
                     consultant_id=t.consultant_id,
                     consultant_team_id=consultant_team.get(t.consultant_id) if t.consultant_id else None,
                 ))
@@ -367,8 +370,8 @@ def _build_day_rosters(
         ac_oncall_by_date[r.date] = all_staff_names.get(r.ac_id, f"ID:{r.ac_id}")
 
     clinic_type_lookup: dict[tuple[str, str], str] = {}
-    for ct in db.query(ClinicTemplate).all():
-        clinic_type_lookup[(ct.room, ct.session.value)] = ct.clinic_type or "Sup"
+    for ct in db.query(ResourceTemplate).filter(ResourceTemplate.resource_type == "clinic").all():
+        clinic_type_lookup[(ct.room, ct.session.value)] = ct.label or "Sup"
 
     ct_configs = db.query(CallTypeConfig).filter(CallTypeConfig.is_active.is_(True)).order_by(CallTypeConfig.display_order).all()
     ct_columns = [ct.name for ct in ct_configs]
