@@ -78,9 +78,17 @@ export default function DutyRosterView() {
     dragRef.current = null;
   }
 
-  async function handleDelete(assignmentId: number) {
+  async function handleRemoveToAdmin(assignmentId: number, staffId: number, date: string, currentSession: string) {
     try {
-      await api.deleteDutyOverride(configId, assignmentId);
+      await api.setDutyOverride(configId, {
+        date,
+        staff_id: staffId,
+        session: currentSession,
+        duty_type: "Admin",
+        location: null,
+        consultant_id: null,
+        old_assignment_id: assignmentId,
+      });
       const data = await api.viewDutyRoster(configId);
       setRoster(data);
     } catch (e: any) {
@@ -140,7 +148,7 @@ export default function DutyRosterView() {
                 callColumns={callColumns}
                 dragRef={dragRef}
                 onDrop={handleDrop}
-                onDelete={handleDelete}
+                onRemove={handleRemoveToAdmin}
                 collapsed={collapsedDays.has(day.date)}
                 onToggleCollapse={() => setCollapsedDays(prev => {
                   const next = new Set(prev);
@@ -192,13 +200,13 @@ export default function DutyRosterView() {
 }
 
 function DayCard({
-  day, callColumns, dragRef, onDrop, onDelete, collapsed, onToggleCollapse,
+  day, callColumns, dragRef, onDrop, onRemove, collapsed, onToggleCollapse,
 }: {
   day: DayDutyRoster;
   callColumns: string[];
   dragRef: React.MutableRefObject<DragState | null>;
   onDrop: (dutyType: string, session: string, location: string | null, consultantId: number | null, date: string) => void;
-  onDelete: (assignmentId: number) => void;
+  onRemove: (assignmentId: number, staffId: number, date: string, session: string) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
 }) {
@@ -305,7 +313,7 @@ function DayCard({
               <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>Ward MO </span>
               <div {...dropProps("ward_mo", "Ward MO", "AM", null, null)} style={{ display: "inline-flex", flexWrap: "wrap", gap: 4 }}>
                 {wardMo.map((a) => (
-                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                     color={{ bg: "#fef3c7", fg: "#92400e" }} />
                 ))}
               </div>
@@ -316,7 +324,7 @@ function DayCard({
               <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>EOT MO </span>
               <div {...dropProps("eot_mo", "EOT MO", "Full Day", null, null)} style={{ display: "inline-flex", flexWrap: "wrap", gap: 4 }}>
                 {eotMo.map((a) => (
-                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                     color={{ bg: "#fed7aa", fg: "#c2410c" }} />
                 ))}
               </div>
@@ -339,7 +347,7 @@ function DayCard({
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {g.staff.map((a) => (
-                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                     color={{ bg: undefined, fg: undefined }} className="duty-tag ot" />
                 ))}
               </div>
@@ -355,7 +363,7 @@ function DayCard({
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {g.staff.map((a) => (
-                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                  <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                     color={{ bg: "#fef3c7", fg: "#92400e" }} />
                 ))}
               </div>
@@ -379,7 +387,7 @@ function DayCard({
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {staff.map((a) => (
-                      <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                      <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                         color={{ bg: undefined, fg: undefined }} className="duty-tag clinic" />
                     ))}
                   </div>
@@ -396,7 +404,7 @@ function DayCard({
                 MOPD
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {mopdAm.map((a) => <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                {mopdAm.map((a) => <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                   color={{ bg: undefined, fg: undefined }} className="duty-tag mopd" />)}
               </div>
             </div>
@@ -411,7 +419,7 @@ function DayCard({
             {day.am_admin.length === 0 && <EmptyNote />}
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {day.am_admin.map((a) => (
-                <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                   color={{ bg: undefined, fg: undefined }} className="duty-tag admin" />
               ))}
             </div>
@@ -434,7 +442,7 @@ function DayCard({
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                     {staff.map((a) => (
-                      <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                      <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                         color={{ bg: undefined, fg: undefined }} className="duty-tag clinic" />
                     ))}
                   </div>
@@ -451,7 +459,7 @@ function DayCard({
                 MOPD
               </div>
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {mopdPm.map((a) => <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                {mopdPm.map((a) => <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                   color={{ bg: undefined, fg: undefined }} className="duty-tag mopd" />)}
               </div>
             </div>
@@ -466,7 +474,7 @@ function DayCard({
             {day.pm_admin.length === 0 && <EmptyNote />}
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
               {day.pm_admin.map((a) => (
-                <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
                   color={{ bg: undefined, fg: undefined }} className="duty-tag admin" />
               ))}
             </div>
@@ -483,10 +491,11 @@ function DragTag({
   a: DutyAssignment;
   date: string;
   dragRef: React.MutableRefObject<DragState | null>;
-  onDelete: (id: number) => void;
+  onRemove: (id: number, staffId: number, date: string, session: string) => void;
   color: { bg?: string; fg?: string };
   className?: string;
 }) {
+  const session = a.session ?? "AM";
   return (
     <span
       draggable
@@ -507,11 +516,9 @@ function DragTag({
       }}
       onContextMenu={(e) => {
         e.preventDefault();
-        if (window.confirm(`Remove ${a.staff_name} from this slot?`)) {
-          onDelete(a.id);
-        }
+        onRemove(a.id, a.staff_id, date, session);
       }}
-      title="Drag to move · Right-click to remove"
+      title="Drag to move · Right-click to send to Admin"
     >
       {a.staff_name}
       {a.is_manual_override && <sup style={{ fontSize: 8, color: "#6366f1" }}>✎</sup>}
