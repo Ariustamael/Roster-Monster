@@ -69,6 +69,9 @@ interface DraftCallType {
   night_float_run: string | null;
   is_active: boolean;
   eligible_rank_ids: number[];
+  is_duty_only: boolean;
+  linked_to: number[];
+  mutually_exclusive_with: number[];
 }
 
 export default function CallTypeConfigTab() {
@@ -78,6 +81,8 @@ export default function CallTypeConfigTab() {
   const [editId, setEditId] = useState<number | "new" | null>(null);
   const [draft, setDraft] = useState<DraftCallType | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dragCtId, setDragCtId] = useState<number | null>(null);
+  const [dragOverCtId, setDragOverCtId] = useState<number | null>(null);
 
   async function load() {
     setLoading(true);
@@ -112,6 +117,9 @@ export default function CallTypeConfigTab() {
       night_float_run: ct.night_float_run,
       is_active: ct.is_active,
       eligible_rank_ids: ct.eligible_rank_ids,
+      is_duty_only: ct.is_duty_only ?? false,
+      linked_to: ct.linked_to ? ct.linked_to.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [],
+      mutually_exclusive_with: ct.mutually_exclusive_with ? ct.mutually_exclusive_with.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : [],
     });
   }
 
@@ -133,6 +141,9 @@ export default function CallTypeConfigTab() {
       night_float_run: null,
       is_active: true,
       eligible_rank_ids: ranks.filter((r) => r.is_call_eligible).map((r) => r.id),
+      is_duty_only: false,
+      linked_to: [],
+      mutually_exclusive_with: [],
     });
   }
 
@@ -155,6 +166,9 @@ export default function CallTypeConfigTab() {
         night_float_run: draft.night_float_run || null,
         is_active: draft.is_active,
         eligible_rank_ids: draft.eligible_rank_ids,
+        is_duty_only: draft.is_duty_only,
+        linked_to: draft.linked_to.length > 0 ? draft.linked_to.join(",") : null,
+        mutually_exclusive_with: draft.mutually_exclusive_with.length > 0 ? draft.mutually_exclusive_with.join(",") : null,
       };
       if (draft.id != null) {
         await api.updateCallType(draft.id, payload);
@@ -211,7 +225,7 @@ export default function CallTypeConfigTab() {
           <table className="config-table">
             <thead>
               <tr>
-                <th>Order</th>
+                <th style={{ width: 30 }}></th>
                 <th>Name</th>
                 <th>Overnight</th>
                 <th>Night Float</th>
@@ -222,13 +236,37 @@ export default function CallTypeConfigTab() {
                 <th>Days</th>
                 <th>Eligible Ranks</th>
                 <th>Active</th>
+                <th>Duty Only</th>
                 <th style={{ width: 60 }}></th>
               </tr>
             </thead>
             <tbody>
               {callTypes.map((ct) => (
-                <tr key={ct.id} style={{ opacity: ct.is_active ? 1 : 0.5 }}>
-                  <td>{ct.display_order}</td>
+                <tr
+                  key={ct.id}
+                  draggable
+                  onDragStart={() => setDragCtId(ct.id)}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverCtId(ct.id); }}
+                  onDragLeave={() => setDragOverCtId(null)}
+                  onDrop={async () => {
+                    if (dragCtId === null || dragCtId === ct.id) { setDragCtId(null); setDragOverCtId(null); return; }
+                    const ordered = [...callTypes];
+                    const fromIdx = ordered.findIndex(c => c.id === dragCtId);
+                    const toIdx = ordered.findIndex(c => c.id === ct.id);
+                    const [moved] = ordered.splice(fromIdx, 1);
+                    ordered.splice(toIdx, 0, moved);
+                    for (let i = 0; i < ordered.length; i++) {
+                      if (ordered[i].display_order !== i) {
+                        await api.updateCallType(ordered[i].id, { ...ordered[i], display_order: i, eligible_rank_ids: ordered[i].eligible_rank_ids });
+                      }
+                    }
+                    setDragCtId(null);
+                    setDragOverCtId(null);
+                    await load();
+                  }}
+                  style={{ opacity: ct.is_active ? 1 : 0.5, outline: dragOverCtId === ct.id ? "2px dashed var(--primary)" : undefined }}
+                >
+                  <td style={{ cursor: "grab", textAlign: "center" }}>☰</td>
                   <td style={{ fontWeight: 600 }}>{ct.name}</td>
                   <td>{ct.is_overnight ? "Yes" : "No"}</td>
                   <td>{ct.is_night_float ? <span style={{ color: "#6366f1", fontSize: 11, fontWeight: 600 }}>NF{ct.night_float_run ? ` (${ct.night_float_run})` : ""}</span> : "-"}</td>
@@ -241,13 +279,14 @@ export default function CallTypeConfigTab() {
                     {ct.eligible_rank_ids.map((id) => rankById.get(id)?.abbreviation ?? `#${id}`).join(", ")}
                   </td>
                   <td>{ct.is_active ? "Yes" : "No"}</td>
+                  <td>{ct.is_duty_only ? "Yes" : "-"}</td>
                   <td>
                     <button className="btn btn-sm btn-secondary" onClick={() => startEdit(ct)}>Edit</button>
                   </td>
                 </tr>
               ))}
               {callTypes.length === 0 && (
-                <tr><td colSpan={12} style={{ textAlign: "center", color: "var(--text-muted)" }}>No call types configured.</td></tr>
+                <tr><td colSpan={13} style={{ textAlign: "center", color: "var(--text-muted)" }}>No call types configured.</td></tr>
               )}
             </tbody>
           </table>
@@ -263,15 +302,19 @@ export default function CallTypeConfigTab() {
               <label>Name</label>
               <input type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. MO1" />
             </div>
-            <div className="form-group">
-              <label>Display Order</label>
-              <input type="number" value={draft.display_order} onChange={(e) => setDraft({ ...draft, display_order: Number(e.target.value) })} />
-            </div>
 
             <div className="form-group">
               <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <input type="checkbox" checked={draft.is_overnight} onChange={(e) => setDraft({ ...draft, is_overnight: e.target.checked })} />
                 Overnight (24h) call
+              </label>
+            </div>
+
+            <div className="form-group">
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input type="checkbox" checked={draft.is_duty_only}
+                  onChange={(e) => setDraft({ ...draft, is_duty_only: e.target.checked })} />
+                Duty only (appears in Duty Roster, not Call/Con-Reg Roster)
               </label>
             </div>
 
@@ -374,6 +417,44 @@ export default function CallTypeConfigTab() {
                   <label key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
                     <input type="checkbox" checked={draft.eligible_rank_ids.includes(r.id)} onChange={() => toggleRank(r.id)} />
                     {r.name} ({r.abbreviation})
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Linked To (auto-fill from these call types)</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4, maxHeight: 120, overflowY: "auto" }}>
+                {callTypes.filter(ct => ct.id !== draft.id).map(ct => (
+                  <label key={ct.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                    <input type="checkbox"
+                      checked={draft.linked_to.includes(ct.id)}
+                      onChange={() => {
+                        const ids = draft.linked_to.includes(ct.id)
+                          ? draft.linked_to.filter(id => id !== ct.id)
+                          : [...draft.linked_to, ct.id];
+                        setDraft({ ...draft, linked_to: ids });
+                      }} />
+                    {ct.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Mutually Exclusive With</label>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4, maxHeight: 120, overflowY: "auto" }}>
+                {callTypes.filter(ct => ct.id !== draft.id).map(ct => (
+                  <label key={ct.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                    <input type="checkbox"
+                      checked={draft.mutually_exclusive_with.includes(ct.id)}
+                      onChange={() => {
+                        const ids = draft.mutually_exclusive_with.includes(ct.id)
+                          ? draft.mutually_exclusive_with.filter(id => id !== ct.id)
+                          : [...draft.mutually_exclusive_with, ct.id];
+                        setDraft({ ...draft, mutually_exclusive_with: ids });
+                      }} />
+                    {ct.name}
                   </label>
                 ))}
               </div>
