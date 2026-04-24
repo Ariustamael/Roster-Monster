@@ -227,6 +227,7 @@ export interface RankConfig {
   is_call_eligible: boolean;
   is_duty_eligible: boolean;
   is_consultant_tier: boolean;
+  is_registrar_tier: boolean;
   is_active: boolean;
 }
 

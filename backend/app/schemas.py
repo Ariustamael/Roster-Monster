@@ -350,6 +350,7 @@ class RankConfigCreate(BaseModel):
     is_call_eligible: bool = False
     is_duty_eligible: bool = False
     is_consultant_tier: bool = False
+    is_registrar_tier: bool = False
     is_active: bool = True
 
 
@@ -361,6 +362,7 @@ class RankConfigOut(BaseModel):
     is_call_eligible: bool
     is_duty_eligible: bool
     is_consultant_tier: bool
+    is_registrar_tier: bool
     is_active: bool
 
     model_config = {"from_attributes": True}

@@ -301,6 +301,14 @@ def _migrate(engine):
                 })
             s.commit()
 
+    # ── Add is_registrar_tier to rank_config ──────────────────────────────
+    if "rank_config" in insp.get_table_names():
+        cols = [c["name"] for c in insp.get_columns("rank_config")]
+        if "is_registrar_tier" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE rank_config ADD COLUMN is_registrar_tier BOOLEAN DEFAULT 0"))
+                conn.execute(text("UPDATE rank_config SET is_registrar_tier = 1 WHERE name IN ('Senior Staff Registrar', 'Senior Resident')"))
+
     # ── Add updated_at timestamps ────────────────────────────────────────
     insp = inspect(engine)
     for tbl in ["resource_template", "staff", "monthly_config"]:

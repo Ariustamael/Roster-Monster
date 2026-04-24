@@ -55,6 +55,7 @@ class RankConfig(Base):
     is_call_eligible = Column(Boolean, default=False)
     is_duty_eligible = Column(Boolean, default=False)
     is_consultant_tier = Column(Boolean, default=False)
+    is_registrar_tier = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
 
     eligible_call_types = relationship(
