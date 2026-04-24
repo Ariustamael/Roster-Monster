@@ -83,6 +83,9 @@ class CallTypeConfig(Base):
     is_night_float = Column(Boolean, default=False)
     night_float_run = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True)
+    is_duty_only = Column(Boolean, default=False)
+    linked_to = Column(String(100), nullable=True)
+    mutually_exclusive_with = Column(String(100), nullable=True)
 
     eligible_ranks = relationship(
         "CallTypeEligibleRank", back_populates="call_type", cascade="all, delete-orphan",

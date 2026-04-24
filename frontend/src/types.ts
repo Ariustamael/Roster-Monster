@@ -247,5 +247,8 @@ export interface CallTypeConfig {
   is_night_float: boolean;
   night_float_run: string | null;
   is_active: boolean;
+  is_duty_only: boolean;
+  linked_to: string | null;
+  mutually_exclusive_with: string | null;
   eligible_rank_ids: number[];
 }

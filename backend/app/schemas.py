@@ -385,6 +385,9 @@ class CallTypeConfigCreate(BaseModel):
     is_night_float: bool = False
     night_float_run: Optional[str] = None
     is_active: bool = True
+    is_duty_only: bool = False
+    linked_to: Optional[str] = None
+    mutually_exclusive_with: Optional[str] = None
     eligible_rank_ids: list[int] = []
 
 
@@ -404,6 +407,9 @@ class CallTypeConfigOut(BaseModel):
     is_night_float: bool = False
     night_float_run: Optional[str] = None
     is_active: bool
+    is_duty_only: bool = False
+    linked_to: Optional[str] = None
+    mutually_exclusive_with: Optional[str] = None
     eligible_rank_ids: list[int] = []
 
     model_config = {"from_attributes": True}

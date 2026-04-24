@@ -309,6 +309,70 @@ def _migrate(engine):
                 conn.execute(text("ALTER TABLE rank_config ADD COLUMN is_registrar_tier BOOLEAN DEFAULT 0"))
                 conn.execute(text("UPDATE rank_config SET is_registrar_tier = 1 WHERE name IN ('Senior Staff Registrar', 'Senior Resident')"))
 
+    # ── Add is_duty_only, linked_to, mutually_exclusive_with to call_type_config ──
+    if "call_type_config" in insp.get_table_names():
+        cols = [c["name"] for c in insp.get_columns("call_type_config")]
+        for col_name, col_def in [
+            ("is_duty_only", "BOOLEAN DEFAULT 0"),
+            ("linked_to", "TEXT"),
+            ("mutually_exclusive_with", "TEXT"),
+        ]:
+            if col_name not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(f"ALTER TABLE call_type_config ADD COLUMN {col_name} {col_def}"))
+
+    # ── Seed Ward MO, EOT MO as is_duty_only call types; set R1+2 mutual exclusivity ──
+    if "call_type_config" in insp.get_table_names():
+        with SessionLocal() as s:
+            existing = {r[0] for r in s.execute(text("SELECT name FROM call_type_config")).fetchall()}
+
+            if "Ward MO" not in existing:
+                mo1_id = s.execute(text("SELECT id FROM call_type_config WHERE name = 'MO1'")).scalar()
+                s.execute(text("""
+                    INSERT INTO call_type_config
+                    (name, display_order, is_overnight, post_call_type, max_consecutive_days,
+                     min_gap_days, difficulty_points, counts_towards_fairness,
+                     applicable_days, is_active, is_duty_only, linked_to)
+                    VALUES ('Ward MO', 10, 0, 'none', 1, 0, 0, 0,
+                            'Mon,Tue,Wed,Thu,Fri', 1, 1, :linked)
+                """), {"linked": str(mo1_id) if mo1_id else None})
+
+            if "EOT MO" not in existing:
+                mo2_id = s.execute(text("SELECT id FROM call_type_config WHERE name = 'MO2'")).scalar()
+                s.execute(text("""
+                    INSERT INTO call_type_config
+                    (name, display_order, is_overnight, post_call_type, max_consecutive_days,
+                     min_gap_days, difficulty_points, counts_towards_fairness,
+                     applicable_days, is_active, is_duty_only, linked_to)
+                    VALUES ('EOT MO', 11, 0, 'none', 1, 0, 0, 0,
+                            'Mon,Tue,Wed,Thu,Fri', 1, 1, :linked)
+                """), {"linked": str(mo2_id) if mo2_id else None})
+
+            # Set R1+2 mutually exclusive with R1 and R2
+            r1_id = s.execute(text("SELECT id FROM call_type_config WHERE name = 'R1'")).scalar()
+            r2_id = s.execute(text("SELECT id FROM call_type_config WHERE name = 'R2'")).scalar()
+            r12_id = s.execute(text("SELECT id FROM call_type_config WHERE name = 'R1+2'")).scalar()
+            if r12_id and r1_id and r2_id:
+                current_val = s.execute(text("SELECT mutually_exclusive_with FROM call_type_config WHERE id = :id"), {"id": r12_id}).scalar()
+                if not current_val:
+                    s.execute(text(
+                        "UPDATE call_type_config SET mutually_exclusive_with = :val WHERE id = :id"
+                    ), {"val": f"{r1_id},{r2_id}", "id": r12_id})
+
+            # Set eligible ranks for Ward MO and EOT MO (SMO + MO)
+            smo_id = s.execute(text("SELECT id FROM rank_config WHERE abbreviation = 'SMO'")).scalar()
+            mo_rank_id = s.execute(text("SELECT id FROM rank_config WHERE abbreviation = 'MO'")).scalar()
+            for ct_name in ["Ward MO", "EOT MO"]:
+                ct_id = s.execute(text("SELECT id FROM call_type_config WHERE name = :n"), {"n": ct_name}).scalar()
+                if ct_id:
+                    existing_ranks = {r[0] for r in s.execute(text("SELECT rank_id FROM call_type_eligible_rank WHERE call_type_id = :ct"), {"ct": ct_id}).fetchall()}
+                    if smo_id and smo_id not in existing_ranks:
+                        s.execute(text("INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"), {"ct": ct_id, "r": smo_id})
+                    if mo_rank_id and mo_rank_id not in existing_ranks:
+                        s.execute(text("INSERT INTO call_type_eligible_rank (call_type_id, rank_id) VALUES (:ct, :r)"), {"ct": ct_id, "r": mo_rank_id})
+
+            s.commit()
+
     # ── Add updated_at timestamps ────────────────────────────────────────
     insp = inspect(engine)
     for tbl in ["resource_template", "staff", "monthly_config"]:
