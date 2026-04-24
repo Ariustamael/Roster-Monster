@@ -329,8 +329,8 @@ class DayDutyRoster(BaseModel):
     eot_assignments: list[DutyAssignmentOut]
     am_clinics: list[DutyAssignmentOut]
     pm_clinics: list[DutyAssignmentOut]
-    am_admin: list[str]
-    pm_admin: list[str]
+    am_admin: list[DutyAssignmentOut]
+    pm_admin: list[DutyAssignmentOut]
 
 
 class DutyRosterResponse(BaseModel):

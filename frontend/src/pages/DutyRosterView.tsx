@@ -410,7 +410,10 @@ function DayCard({
             </div>
             {day.am_admin.length === 0 && <EmptyNote />}
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {day.am_admin.map((n) => <span key={n} className="duty-tag admin">{n}</span>)}
+              {day.am_admin.map((a) => (
+                <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                  color={{ bg: undefined, fg: undefined }} className="duty-tag admin" />
+              ))}
             </div>
           </div>
         </div>
@@ -462,7 +465,10 @@ function DayCard({
             </div>
             {day.pm_admin.length === 0 && <EmptyNote />}
             <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-              {day.pm_admin.map((n) => <span key={n} className="duty-tag admin">{n}</span>)}
+              {day.pm_admin.map((a) => (
+                <DragTag key={a.id} a={a} date={day.date} dragRef={dragRef} onDelete={onDelete}
+                  color={{ bg: undefined, fg: undefined }} className="duty-tag admin" />
+              ))}
             </div>
           </div>
         </div>

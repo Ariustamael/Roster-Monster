@@ -422,12 +422,12 @@ def _build_day_rosters(
                 ot_out.append(out)
             elif r.session == Session.AM:
                 if r.duty_type == DutyType.ADMIN:
-                    am_admin.append(out.staff_name)
+                    am_admin.append(out)
                 else:
                     am_clinics_out.append(out)
             elif r.session == Session.PM:
                 if r.duty_type == DutyType.ADMIN:
-                    pm_admin.append(out.staff_name)
+                    pm_admin.append(out)
                 else:
                     pm_clinics_out.append(out)
 

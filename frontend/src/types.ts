@@ -69,8 +69,8 @@ export interface DayDutyRoster {
   eot_assignments: DutyAssignment[];
   am_clinics: DutyAssignment[];
   pm_clinics: DutyAssignment[];
-  am_admin: string[];
-  pm_admin: string[];
+  am_admin: DutyAssignment[];
+  pm_admin: DutyAssignment[];
 }
 
 export interface DutyRosterResponse {
