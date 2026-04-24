@@ -163,25 +163,19 @@ export const api = {
   deleteDutyOverride: (configId: number, assignmentId: number) =>
     request<{ ok: boolean }>(`/roster/${configId}/duty-override/${assignmentId}`, { method: "DELETE" }),
 
-  // OT Templates
-  getOTTemplates: () =>
-    request<import("./types").OTTemplate[]>("/templates/ot"),
-  createOTTemplate: (data: { day_of_week: number; room: string; consultant_id?: number | null; assistants_needed?: number; is_emergency?: boolean; linked_call_slot?: string | null; color?: string | null }) =>
-    request<import("./types").OTTemplate>("/templates/ot", { method: "POST", body: JSON.stringify(data) }),
-  updateOTTemplate: (id: number, data: { day_of_week: number; room: string; consultant_id?: number | null; assistants_needed?: number; is_emergency?: boolean; linked_call_slot?: string | null; color?: string | null }) =>
-    request<import("./types").OTTemplate>(`/templates/ot/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  deleteOTTemplate: (id: number) =>
-    request<{ ok: boolean }>(`/templates/ot/${id}`, { method: "DELETE" }),
-
-  // Clinic Templates
-  getClinicTemplates: () =>
-    request<import("./types").ClinicTemplate[]>("/templates/clinics"),
-  createClinicTemplate: (data: { day_of_week: number; session: string; room: string; clinic_type?: string; mos_required?: number; consultant_id?: number | null; color?: string | null }) =>
-    request<import("./types").ClinicTemplate>("/templates/clinics", { method: "POST", body: JSON.stringify(data) }),
-  updateClinicTemplate: (id: number, data: { day_of_week: number; session: string; room: string; clinic_type?: string; mos_required?: number; consultant_id?: number | null; color?: string | null }) =>
-    request<import("./types").ClinicTemplate>(`/templates/clinics/${id}`, { method: "PUT", body: JSON.stringify(data) }),
-  deleteClinicTemplate: (id: number) =>
-    request<{ ok: boolean }>(`/templates/clinics/${id}`, { method: "DELETE" }),
+  // Resource Templates
+  getResourceTemplates: () =>
+    request<import("./types").ResourceTemplate[]>("/templates/resources"),
+  createResourceTemplate: (data: Omit<import("./types").ResourceTemplate, "id" | "consultant_name">) =>
+    request<import("./types").ResourceTemplate>("/templates/resources", { method: "POST", body: JSON.stringify(data) }),
+  updateResourceTemplate: (id: number, data: Omit<import("./types").ResourceTemplate, "id" | "consultant_name">) =>
+    request<import("./types").ResourceTemplate>(`/templates/resources/${id}`, { method: "PUT", body: JSON.stringify(data) }),
+  deleteResourceTemplate: (id: number) =>
+    request<{ ok: boolean }>(`/templates/resources/${id}`, { method: "DELETE" }),
+  duplicateResourceTemplate: (id: number) =>
+    request<import("./types").ResourceTemplate>(`/templates/resources/${id}/duplicate`, { method: "POST" }),
+  reorderResourceTemplates: (updates: { id: number; sort_order: number; day_of_week?: number; session?: string }[]) =>
+    request<{ ok: boolean }>("/templates/resources/reorder", { method: "PUT", body: JSON.stringify(updates) }),
 
   // Consultant On-Call
   getConsultantOnCall: (configId: number) =>

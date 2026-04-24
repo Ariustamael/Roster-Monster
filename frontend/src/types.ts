@@ -135,32 +135,22 @@ export interface TeamAssignment {
   effective_to: string | null;
 }
 
-export interface OTTemplate {
+export interface ResourceTemplate {
   id: number;
-  day_of_week: number;
-  room: string;
-  consultant_id: number | null;
-  consultant_name: string | null;
-  assistants_needed: number;
-  registrar_needed: number;
-  is_emergency: boolean;
-  linked_call_slot: string | null;
-  color: string | null;
-  is_active: boolean;
-  week_of_month: number | null;
-}
-
-export interface ClinicTemplate {
-  id: number;
+  resource_type: "clinic" | "ot";
   day_of_week: number;
   session: string;
   room: string;
-  clinic_type: string;
-  mos_required: number;
+  label: string;
   consultant_id: number | null;
   consultant_name: string | null;
+  staff_required: number;
+  is_emergency: boolean;
+  linked_manpower: string | null;
+  weeks: string | null;
   color: string | null;
   is_active: boolean;
+  sort_order: number;
 }
 
 export interface ConsultantOnCall {
