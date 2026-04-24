@@ -260,7 +260,19 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
     dragPayload.current = payload;
   }
 
+  function isDragEligible(slotType: SlotType): boolean {
+    const payload = dragPayload.current;
+    if (!payload) return false;
+    const s = staffById.get(payload.staffId);
+    if (!s) return false;
+    const isReg = REG_RANKS.includes(s.rank);
+    if (slotType.startsWith("reg:")) return isReg;
+    return !isReg;
+  }
+
   function handleDragOver(slotKey: string, e: React.DragEvent) {
+    const slotType = slotKey.split(":").slice(1).join(":") as SlotType;
+    if (!isDragEligible(slotType)) return;
     e.preventDefault();
     setDragOverSlot(slotKey);
   }
@@ -304,10 +316,10 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
 
     const droppedStaff = staffById.get(payload.staffId);
     if (!droppedStaff) return;
+    if (REG_RANKS.includes(droppedStaff.rank)) return;
     const isAC = AC_RANKS.includes(droppedStaff.rank);
 
     if (slotType === "consultant") {
-      // Primary slot: accept any consultant-tier staff
       setRows((prev) =>
         prev.map((r, i) => {
           if (i !== rowIdx) return r;
