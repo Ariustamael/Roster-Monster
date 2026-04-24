@@ -21,6 +21,33 @@ const ALL_RANKS = [
 
 const ALLOCATABLE_RANKS = ["Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer"];
 
+function toDDMM(dateStr: string): string {
+  const [, m, d] = dateStr.split("-");
+  return `${d}/${m}`;
+}
+
+function consolidateDates(dates: string[]): string {
+  if (dates.length === 0) return "";
+  const sorted = [...dates].sort();
+  const ranges: string[] = [];
+  let start = sorted[0];
+  let prev = sorted[0];
+  for (let i = 1; i < sorted.length; i++) {
+    const prevDate = new Date(prev);
+    const currDate = new Date(sorted[i]);
+    const diffDays = (currDate.getTime() - prevDate.getTime()) / 86400000;
+    if (diffDays === 1) {
+      prev = sorted[i];
+    } else {
+      ranges.push(start === prev ? toDDMM(start) : `${toDDMM(start)}-${toDDMM(prev)}`);
+      start = sorted[i];
+      prev = sorted[i];
+    }
+  }
+  ranges.push(start === prev ? toDDMM(start) : `${toDDMM(start)}-${toDDMM(prev)}`);
+  return ranges.join(", ");
+}
+
 const MONTH_NAMES = [
   "", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
@@ -159,16 +186,21 @@ export default function StaffView() {
                     <td style={{ color: "var(--text-muted)", fontSize: 12 }}>{s.supervisor_name || "-"}</td>
                     <td style={{ fontSize: 10, color: "#b45309" }}>
                       {staffLeaves.length > 0
-                        ? staffLeaves.map(l => l.date.slice(5)).join(", ")
+                        ? consolidateDates(staffLeaves.map(l => l.date))
                         : <span style={{ color: "var(--text-muted)" }}>-</span>}
                     </td>
                     <td style={{ fontSize: 10 }}>
                       {staffPrefs.length > 0
-                        ? staffPrefs.map(p => (
-                            <span key={p.id} style={{ color: p.preference_type === "request" ? "#065f46" : "#991b1b", marginRight: 4 }}>
-                              {p.date.slice(5)} {p.preference_type === "request" ? "R" : "B"}
-                            </span>
-                          ))
+                        ? (() => {
+                            const blocks = staffPrefs.filter(p => p.preference_type === "block");
+                            const requests = staffPrefs.filter(p => p.preference_type === "request");
+                            return (
+                              <>
+                                {blocks.length > 0 && <span style={{ color: "#991b1b", marginRight: 6 }}>B: {blocks.map(p => toDDMM(p.date)).join(", ")}</span>}
+                                {requests.length > 0 && <span style={{ color: "#065f46" }}>R: {requests.map(p => toDDMM(p.date)).join(", ")}</span>}
+                              </>
+                            );
+                          })()
                         : <span style={{ color: "var(--text-muted)" }}>-</span>}
                     </td>
                     <td style={{ fontSize: 10, color: "var(--text-muted)" }}>
