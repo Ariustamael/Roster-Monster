@@ -590,3 +590,24 @@ def get_assignments(config_id: int, db: Session = Depends(get_db)):
         )
         for r in rows
     ]
+
+
+@router.get("/timestamps")
+def get_timestamps(db: Session = Depends(get_db)):
+    from sqlalchemy import func as sa_func
+    resource_ts = db.query(sa_func.max(ResourceTemplate.updated_at)).scalar()
+    staff_ts = db.query(sa_func.max(Staff.updated_at)).scalar()
+    return {
+        "resources": resource_ts.isoformat() if resource_ts else None,
+        "staff": staff_ts.isoformat() if staff_ts else None,
+    }
+
+
+@router.get("/timestamps/{config_id}")
+def get_config_timestamp(config_id: int, db: Session = Depends(get_db)):
+    config = db.query(MonthlyConfig).get(config_id)
+    if not config:
+        raise HTTPException(404)
+    return {
+        "roster": config.updated_at.isoformat() if config.updated_at else None,
+    }

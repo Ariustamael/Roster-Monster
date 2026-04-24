@@ -1,6 +1,6 @@
 from sqlalchemy import (
-    Column, Integer, String, Date, Boolean, ForeignKey, Enum as SAEnum,
-    UniqueConstraint, Text,
+    Column, Integer, String, Date, DateTime, Boolean, ForeignKey, Enum as SAEnum,
+    UniqueConstraint, Text, func,
 )
 from sqlalchemy.orm import relationship
 import enum
@@ -111,6 +111,7 @@ class Staff(Base):
     rank = Column(String(60), nullable=False)
     active = Column(Boolean, default=True)
     has_admin_role = Column(Boolean, default=False)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     team_assignments = relationship(
         "TeamAssignment", back_populates="staff",
@@ -199,6 +200,7 @@ class MonthlyConfig(Base):
     year = Column(Integer, nullable=False)
     month = Column(Integer, nullable=False)
     status = Column(String(20), default="draft")
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     consultant_oncalls = relationship("ConsultantOnCall", back_populates="config", cascade="all, delete-orphan")
     ac_oncalls = relationship("ACOnCall", back_populates="config", cascade="all, delete-orphan")
@@ -316,6 +318,7 @@ class ResourceTemplate(Base):
     color = Column(String(10), nullable=True)
     is_active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     consultant = relationship("Staff")
 

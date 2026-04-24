@@ -14,6 +14,7 @@ export default function ResourceTemplatesTab() {
   const [editId, setEditId] = useState<number | null>(null);
   const [dragItem, setDragItem] = useState<{ id: number; type: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([api.getResourceTemplates(), api.getStaff(), api.getCallTypes()]).then(([t, s, ct]) => {
@@ -22,6 +23,7 @@ export default function ResourceTemplatesTab() {
       setCallTypes(ct);
       setLoading(false);
     });
+    api.getTimestamps().then(ts => setLastUpdated(ts.resources));
   }, []);
 
   const consultants = staff.filter((s) => CONS_RANKS.includes(s.rank));
@@ -130,6 +132,11 @@ export default function ResourceTemplatesTab() {
 
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
         <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Resource</button>
+        {lastUpdated && (
+          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+            Last updated: {new Date(lastUpdated).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+          </span>
+        )}
       </div>
 
       <div className="resource-grid-container">

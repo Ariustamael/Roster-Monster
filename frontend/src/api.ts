@@ -234,4 +234,9 @@ export const api = {
     request<import("./types").CallTypeConfig>(`/config/call-types/${id}`, { method: "PUT", body: JSON.stringify(data) }),
   deleteCallType: (id: number) =>
     request<{ ok: boolean }>(`/config/call-types/${id}`, { method: "DELETE" }),
+
+  getTimestamps: () =>
+    request<{ resources: string | null; staff: string | null }>("/roster/timestamps"),
+  getConfigTimestamp: (configId: number) =>
+    request<{ roster: string | null }>(`/roster/timestamps/${configId}`),
 };

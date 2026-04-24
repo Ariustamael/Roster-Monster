@@ -301,6 +301,17 @@ def _migrate(engine):
                 })
             s.commit()
 
+    # ── Add updated_at timestamps ────────────────────────────────────────
+    insp = inspect(engine)
+    for tbl in ["resource_template", "staff", "monthly_config"]:
+        if tbl in insp.get_table_names():
+            cols = [c["name"] for c in insp.get_columns(tbl)]
+            if "updated_at" not in cols:
+                with engine.begin() as conn:
+                    conn.execute(text(
+                        f"ALTER TABLE {tbl} ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                    ))
+
 
 def init_db():
     from . import models  # noqa: F401 — ensure all models registered with Base

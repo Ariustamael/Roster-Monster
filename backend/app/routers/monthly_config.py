@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func as sa_func
 
 from ..database import get_db
 from ..models import (
@@ -115,6 +116,7 @@ def set_consultant_oncall(
             consultant_id=e.consultant_id,
             supervising_consultant_id=e.supervising_consultant_id,
         ))
+    cfg.updated_at = sa_func.now()
     db.commit()
     return {"ok": True, "count": len(entries)}
 
@@ -156,6 +158,7 @@ def set_ac_oncall(
     db.query(ACOnCall).filter(ACOnCall.config_id == config_id).delete()
     for e in entries:
         db.add(ACOnCall(config_id=config_id, date=e.date, ac_id=e.ac_id))
+    cfg.updated_at = sa_func.now()
     db.commit()
     return {"ok": True, "count": len(entries)}
 
@@ -191,6 +194,7 @@ def set_registrar_duties(
             config_id=config_id, date=e.date,
             registrar_id=e.registrar_id, duty_type=e.duty_type, shift=e.shift,
         ))
+    cfg.updated_at = sa_func.now()
     db.commit()
     return {"ok": True, "count": len(entries)}
 
@@ -229,6 +233,7 @@ def set_stepdown_days(
     db.query(StepdownDay).filter(StepdownDay.config_id == config_id).delete()
     for e in entries:
         db.add(StepdownDay(config_id=config_id, date=e.date))
+    cfg.updated_at = sa_func.now()
     db.commit()
     return {"ok": True, "count": len(entries)}
 
@@ -258,6 +263,7 @@ def set_evening_ot_dates(
     db.query(EveningOTDate).filter(EveningOTDate.config_id == config_id).delete()
     for e in entries:
         db.add(EveningOTDate(config_id=config_id, date=e.date))
+    cfg.updated_at = sa_func.now()
     db.commit()
     return {"ok": True, "count": len(entries)}
 
