@@ -1,15 +1,13 @@
 import { useState } from "react";
 import { useConfig } from "../context/ConfigContext";
 import SupplyDemandTab from "./resources/SupplyDemandTab";
-import OTTemplatesTab from "./resources/OTTemplatesTab";
-import ClinicTemplatesTab from "./resources/ClinicTemplatesTab";
+import ResourceTemplatesTab from "./resources/ResourceTemplatesTab";
 import ConsultantRosterTab from "./resources/ConsultantRosterTab";
 import RegistrarRosterTab from "./resources/RegistrarRosterTab";
 
 const TABS = [
   { key: "supply", label: "Supply / Demand", needsConfig: true },
-  { key: "ot", label: "OT Templates", needsConfig: false },
-  { key: "clinics", label: "Clinic Templates", needsConfig: false },
+  { key: "resources", label: "Resources", needsConfig: false },
   { key: "consultant", label: "Consultant Roster", needsConfig: true },
   { key: "registrar", label: "Registrar Roster", needsConfig: true },
 ] as const;
@@ -51,8 +49,7 @@ export default function ResourcesView() {
       ) : (
         <>
           {tab === "supply" && active && <SupplyDemandTab configId={active.id} />}
-          {tab === "ot" && <OTTemplatesTab />}
-          {tab === "clinics" && <ClinicTemplatesTab />}
+          {tab === "resources" && <ResourceTemplatesTab />}
           {tab === "consultant" && active && (
             <ConsultantRosterTab configId={active.id} year={active.year} month={active.month} />
           )}

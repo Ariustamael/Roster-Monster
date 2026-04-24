@@ -717,73 +717,96 @@ td.override {
   color: var(--text);
 }
 
-/* ── Clinic Grid ─────────────────────────────────────── */
-
-.clinic-grid-container {
+/* ── Resource Grid ────────────────────────────────────────────────────── */
+.resource-grid-container {
   overflow-x: auto;
 }
 
-.clinic-grid {
+.resource-grid {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
 
-.clinic-grid th {
+.resource-grid th {
   text-align: center;
-  padding: 10px;
+  padding: 8px 4px;
   background: #f0f1f5;
   font-weight: 600;
   font-size: 14px;
+  border: 1px solid var(--border);
 }
 
-.clinic-grid .session-label {
+.resource-grid th.sub-col-header {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 4px;
+  background: #f7f8fa;
+}
+
+.resource-grid .session-label {
   text-align: center;
   font-weight: 700;
   font-size: 13px;
   color: var(--text-muted);
   vertical-align: top;
   padding-top: 12px;
-  width: 60px;
+  width: 50px;
 }
 
-.clinic-cell {
+.resource-cell {
   vertical-align: top;
-  padding: 6px;
+  padding: 4px;
   min-height: 80px;
   border: 1px solid var(--border);
   white-space: normal;
 }
 
-.clinic-card {
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  padding: 5px 8px;
-  margin-bottom: 4px;
-  cursor: pointer;
-  transition: box-shadow 0.15s, transform 0.1s;
-  font-size: 11px;
-  line-height: 1.4;
+.resource-cell.drop-highlight {
+  background: #f0f4ff;
 }
 
-.clinic-card:hover {
+.resource-card {
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 4px 6px;
+  margin-bottom: 3px;
+  cursor: grab;
+  transition: box-shadow 0.15s, transform 0.1s;
+  font-size: 10px;
+  line-height: 1.4;
+  position: relative;
+}
+
+.resource-card:hover {
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
   transform: translateY(-1px);
 }
 
-.clinic-card-type {
+.resource-card.dragging {
+  opacity: 0.4;
+}
+
+.resource-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.resource-card-label {
   font-weight: 700;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.3px;
 }
 
-.clinic-card-room {
-  font-size: 11px;
+.resource-card-room {
+  font-size: 10px;
   color: var(--text);
 }
 
-.clinic-card-cons {
+.resource-card-cons {
   font-size: 10px;
   color: var(--text-muted);
   white-space: nowrap;
@@ -791,20 +814,34 @@ td.override {
   text-overflow: ellipsis;
 }
 
-.clinic-card-mo {
+.resource-card-staff {
   font-size: 10px;
   font-weight: 600;
   color: var(--primary);
 }
 
-.clinic-cell.drop-highlight {
-  background: #f0f4ff;
+.resource-card-weeks {
+  font-size: 9px;
+  color: #6b7280;
+  font-style: italic;
 }
 
-.clinic-card.dragging {
-  opacity: 0.4;
+.resource-card-dup {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: #aaa;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
 }
 
-.clinic-grid td.clinic-cell:nth-child(n+7) {
-  background: #fdf8f0;
+.resource-card:hover .resource-card-dup {
+  opacity: 1;
+}
+
+.resource-card-dup:hover {
+  color: var(--primary);
 }
