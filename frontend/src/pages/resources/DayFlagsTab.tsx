@@ -77,7 +77,7 @@ export default function DayFlagsTab({ configId, year, month }: { configId: numbe
       </div>
       <p style={{ fontSize: 12, color: "var(--text-muted)", marginBottom: 8 }}>
         <strong>Stepdown:</strong> MO3 becomes 24h overnight on these days (weekends get MO3 only if stepdown).
-        <strong> Evening OT:</strong> MO4 + MO5 are added on these weekdays.
+        <strong> Extended OT:</strong> MO4 + MO5 are added on these weekdays.
       </p>
       <div className="card">
         <div className="table-wrap">
@@ -87,7 +87,7 @@ export default function DayFlagsTab({ configId, year, month }: { configId: numbe
                 <th style={{ width: 70 }}>Date</th>
                 <th style={{ width: 40 }}>Day</th>
                 <th style={{ width: 100 }}>Stepdown</th>
-                <th style={{ width: 100 }}>Evening OT</th>
+                <th style={{ width: 100 }}>Extended OT</th>
               </tr>
             </thead>
             <tbody>

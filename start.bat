@@ -5,26 +5,33 @@ title Roster Monster Launcher
 for %%I in ("%~dp0.") do set "ROOT=%%~sI"
 cd /d "%ROOT%"
 
+set "VENV_PY=%ROOT%\backend\venv\Scripts\python.exe"
+
 echo ========================================
 echo   Roster Monster - Starting...
 echo   Path: %ROOT%
 echo ========================================
 echo.
 
-:: Check if venv exists
-if not exist "%ROOT%\backend\venv\Scripts\activate.bat" (
-    echo [!] Backend venv not found. Running first-time setup...
-    echo     Creating Python 3.13 virtual environment...
+:: Check if venv exists and its python.exe actually works
+set "NEED_VENV=0"
+if not exist "%VENV_PY%" set "NEED_VENV=1"
+if "%NEED_VENV%"=="0" (
+    "%VENV_PY%" --version >nul 2>&1
+    if errorlevel 1 set "NEED_VENV=1"
+)
+
+if "%NEED_VENV%"=="1" (
+    echo [!] Backend venv missing or stale. Rebuilding...
+    if exist "%ROOT%\backend\venv" rmdir /s /q "%ROOT%\backend\venv"
     py -3.13 -m venv "%ROOT%\backend\venv"
-    call "%ROOT%\backend\venv\Scripts\activate.bat"
-    pip install -r "%ROOT%\backend\requirements.txt"
+    if errorlevel 1 (
+        echo [ERROR] Failed to create venv. Is Python 3.13 installed?
+        pause
+        exit /b 1
+    )
+    "%VENV_PY%" -m pip install -r "%ROOT%\backend\requirements.txt"
     echo.
-    echo     Seeding database...
-    cd /d "%ROOT%\backend"
-    python seed_april.py
-    cd /d "%ROOT%"
-) else (
-    call "%ROOT%\backend\venv\Scripts\activate.bat"
 )
 
 :: Check if node_modules exists
@@ -35,13 +42,13 @@ if not exist "%ROOT%\frontend\node_modules" (
     cd /d "%ROOT%"
 )
 
-:: Start backend in a hidden window
+:: Start backend (use venv python directly — no activate needed)
 echo [1/3] Starting backend server...
-start /min "Roster Monster - Backend" cmd /c "cd /d %ROOT%\backend && %ROOT%\backend\venv\Scripts\activate.bat && uvicorn app.main:app --host 127.0.0.1 --reload"
+start /min "Roster Monster - Backend" cmd /k "cd /d %ROOT%\backend && "%VENV_PY%" -m uvicorn app.main:app --host 127.0.0.1 --reload"
 
-:: Start frontend in a hidden window
+:: Start frontend in a minimized window
 echo [2/3] Starting frontend server...
-start /min "Roster Monster - Frontend" cmd /c "cd /d %ROOT%\frontend && npx --yes vite --host 127.0.0.1"
+start /min "Roster Monster - Frontend" cmd /k "cd /d %ROOT%\frontend && npx --yes vite --host 127.0.0.1"
 
 :: Wait for servers to start, then open browser
 echo [3/3] Waiting for servers to start...

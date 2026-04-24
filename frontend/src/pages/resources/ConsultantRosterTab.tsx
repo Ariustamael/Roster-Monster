@@ -624,7 +624,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                           <span title="Stepdown" style={{ fontSize: 9, color: "#7c3aed", fontWeight: 700 }}>SD</span>
                         )}
                         {cell.isEveningOT && (
-                          <span title="Extended OT" style={{ fontSize: 9, color: "#dc2626", fontWeight: 700 }}>EOT</span>
+                          <span title="Extended OT" style={{ fontSize: 9, color: "#dc2626", fontWeight: 700 }}>ExtOT</span>
                         )}
                       </div>
 
@@ -689,7 +689,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                         </div>
                       )}
 
-                      {/* Row 4: PH + Stepdown + Evening OT checkboxes */}
+                      {/* Row 4: PH + Stepdown + Extended OT checkboxes */}
                       <div style={{ display: "flex", gap: 6, marginTop: "auto", paddingTop: 3, fontSize: 9, color: "var(--text-muted)", flexWrap: "wrap" }}>
                         <label style={{ display: "flex", alignItems: "center", gap: 2, cursor: "pointer" }} title="Public Holiday">
                           <input
@@ -716,7 +716,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                             onChange={() => toggleEveningOT(idx)}
                             style={{ width: 11, height: 11, margin: 0 }}
                           />
-                          Extended OT
+                          ExtOT
                         </label>
                       </div>
                     </td>

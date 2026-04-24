@@ -34,7 +34,7 @@ export default function RulesView() {
           <div className="rule">
             <div className="rule-title">Call slots per day</div>
             <div className="rule-body">
-              <strong>Weekdays:</strong> MO1, MO2, MO3 are always assigned. MO4 and MO5 are added on days with evening OT.
+              <strong>Weekdays:</strong> MO1, MO2, MO3 are always assigned. MO4 and MO5 are added on days with Extended OT.
               <br/>
               <strong>Weekends / Public Holidays:</strong> MO1 and MO2 only. MO3 is added only on stepdown days. No MO4/MO5.
             </div>
@@ -62,7 +62,7 @@ export default function RulesView() {
             <div className="rule-body">
               MO1 and MO2 are always overnight (24h) calls.
               MO3 is overnight only on stepdown days; otherwise it is a daytime-only referral duty.
-              MO4 and MO5 are evening OT duties only (not overnight).
+              MO4 and MO5 are Extended OT duties only (not overnight).
             </div>
           </div>
 
@@ -399,7 +399,7 @@ export default function RulesView() {
               Tokens are comma-separated and case-sensitive:
               <br/>- <strong>Stepdown</strong> — day is a stepdown day
               <br/>- <strong>PH</strong> — day is a public holiday
-              <br/>- <strong>Evening OT</strong> — day has evening OT scheduled
+              <br/>- <strong>Evening OT</strong> — day has Extended OT scheduled
               <br/>- <strong>Mon, Tue, Wed, Thu, Fri, Sat, Sun</strong> — specific day of week
             </div>
           </div>

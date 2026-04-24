@@ -154,7 +154,7 @@ def _day_matches_applicable(day: DayConfig, applicable_days: str) -> bool:
 
 def _required_conditions_met(day: DayConfig, required_conditions: str) -> bool:
     """ALL condition tokens must be satisfied (AND logic).
-    Tokens: Stepdown, Evening OT, PH, Not PH."""
+    Tokens: Stepdown, Extended OT, PH, Not PH."""
     if not required_conditions or not required_conditions.strip():
         return True
     for token in [t.strip() for t in required_conditions.split(",")]:
@@ -168,7 +168,7 @@ def _required_conditions_met(day: DayConfig, required_conditions: str) -> bool:
             return False
         elif token == "Not PH" and day.is_ph:
             return False
-        elif token == "Evening OT" and not day.has_evening_ot:
+        elif token in ("Extended OT", "Evening OT") and not day.has_evening_ot:
             return False
     return True
 

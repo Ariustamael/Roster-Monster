@@ -11,7 +11,7 @@ const POST_CALL_OPTIONS = [
 ] as const;
 
 const ALL_DAY_TOKENS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun", "PH"] as const;
-const CONDITION_TOKENS = ["Stepdown", "Evening OT", "PH", "Not PH"] as const;
+const CONDITION_TOKENS = ["Stepdown", "Extended OT", "PH", "Not PH"] as const;
 
 function parseDays(str: string): Set<string> {
   return new Set(str.split(",").map((s) => s.trim()).filter(Boolean));
