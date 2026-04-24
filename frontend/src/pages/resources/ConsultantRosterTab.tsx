@@ -569,7 +569,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                   key={d}
                   style={{
                     background: i >= 5 ? "var(--weekend)" : "#f0f1f5",
-                    border: "1px solid var(--border)",
+                    border: "2px solid #cbd5e1",
                     padding: "6px 4px",
                     textAlign: "center",
                     fontSize: 12,
@@ -591,9 +591,9 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                         key={ci}
                         style={{
                           background: "#f8f9fa",
-                          border: "1px solid var(--border)",
+                          border: "2px solid #cbd5e1",
                           verticalAlign: "top",
-                          padding: 4,
+                          padding: 5,
                           minHeight: 140,
                         }}
                       />
@@ -616,9 +616,9 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
                           : cell.isWeekend
                             ? "var(--weekend)"
                             : "var(--surface)",
-                        border: "1px solid var(--border)",
+                        border: "2px solid #cbd5e1",
                         verticalAlign: "top",
-                        padding: 4,
+                        padding: 5,
                         minHeight: 140,
                       }}
                     >
