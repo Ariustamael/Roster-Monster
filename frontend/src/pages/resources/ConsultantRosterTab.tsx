@@ -177,6 +177,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [rosterUpdatedAt, setRosterUpdatedAt] = useState<string | null>(null);
   const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
   const dragPayload = useRef<DragPayload | null>(null);
 
@@ -244,6 +245,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
     setRows(dayRows);
     setDirty(false);
     setLoading(false);
+    api.getConfigTimestamp(configId).then(ts => setRosterUpdatedAt(ts.roster));
   }, [configId, year, month, numDays]);
 
   useEffect(() => { load(); }, [load]);
@@ -550,6 +552,11 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
             {saving ? <><span className="spinner" /> Saving...</> : "Save Changes"}
           </button>
           {dirty && <span style={{ fontSize: 12, color: "var(--warning)" }}>Unsaved changes</span>}
+          {!dirty && rosterUpdatedAt && (
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+              Last updated: {new Date(rosterUpdatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
         </div>
 
         <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed" }}>

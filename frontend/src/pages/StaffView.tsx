@@ -35,12 +35,14 @@ export default function StaffView() {
   const [prefs, setPrefs] = useState<CallPreference[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+  const [staffUpdatedAt, setStaffUpdatedAt] = useState<string | null>(null);
 
   const year = active?.year ?? 2026;
   const month = active?.month ?? 1;
 
   useEffect(() => {
     api.getStaff().then(setStaff).finally(() => setLoading(false));
+    api.getTimestamps().then(ts => setStaffUpdatedAt(ts.staff));
   }, []);
 
   useEffect(() => {
@@ -122,7 +124,13 @@ export default function StaffView() {
   return (
     <>
       <div className="page-header">
-        <h2>Staff ({staff.length} total, {moCount} MOs)</h2>
+        <h2>Staff ({staff.length} total, {moCount} MOs)
+          {staffUpdatedAt && (
+            <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-muted)", marginLeft: 12 }}>
+              Last updated: {new Date(staffUpdatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </h2>
         <div className="btn-group">
           <input
             type="text"
