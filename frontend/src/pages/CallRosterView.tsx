@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { RosterResponse, Staff, CallAssignment, DayRoster, CallTypeConfig } from "../types";
+import type { RosterResponse, Staff, CallAssignment, DayRoster, CallTypeConfig, RankConfig } from "../types";
 
 export default function CallRosterView() {
   const { active } = useConfig();
@@ -11,11 +11,13 @@ export default function CallRosterView() {
   const [allStaff, setAllStaff] = useState<Staff[]>([]);
   const [assignments, setAssignments] = useState<CallAssignment[]>([]);
   const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
+  const [ranks, setRanks] = useState<RankConfig[]>([]);
   const [editCell, setEditCell] = useState<{ date: string; slot: string } | null>(null);
 
   useEffect(() => {
     api.getMOStaff().then(setAllStaff);
     api.getCallTypes().then(setCallTypes);
+    api.getRanks().then(setRanks);
   }, []);
 
   const configId = active?.id ?? 0;
@@ -108,19 +110,15 @@ export default function CallRosterView() {
     setEditCell(null);
   }
 
-  // Get staff filtered by eligible ranks for the currently selected slot
   function filteredStaff(): Staff[] {
     if (!editCell) return allStaff;
     const ct = callTypes.find((c) => c.name === editCell.slot);
     if (!ct || ct.eligible_rank_ids.length === 0) return allStaff;
-    // We need rank names — load from the staff rank field directly
-    // The staff list has rank names; call type has rank IDs.
-    // We match by checking if ANY eligible rank corresponds to the staff rank.
-    // Since we don't have a rank-id-to-name map here, fall back to showing all.
-    // Better: use api.getRanks() cached in state — but for simplicity, filter
-    // by checking if the staff appears in allStaff (already active-only).
-    // TODO: integrate rank ID filtering when rank list is loaded.
-    return allStaff;
+    const eligibleRankNames = new Set(
+      ranks.filter((r) => ct.eligible_rank_ids.includes(r.id)).map((r) => r.name)
+    );
+    if (eligibleRankNames.size === 0) return allStaff;
+    return allStaff.filter((s) => eligibleRankNames.has(s.rank));
   }
 
   if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
