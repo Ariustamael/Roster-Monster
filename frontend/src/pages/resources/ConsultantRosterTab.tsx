@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { api } from "../../api";
-import type { ConsultantOnCall, ACOnCall, Staff, PublicHoliday, StepdownDay, EveningOTDate, CallTypeConfig, RegistrarDuty } from "../../types";
-import { CONS_RANKS, AC_RANKS, REG_RANKS } from "./constants";
+import type { ConsultantOnCall, ACOnCall, Staff, PublicHoliday, StepdownDay, EveningOTDate, CallTypeConfig, RegistrarDuty, RankConfig } from "../../types";
+import { CONS_RANKS, AC_RANKS } from "./constants";
 
 interface DayRow {
   date: string;
@@ -152,19 +152,29 @@ function getVisibleRegSlots(row: DayRow, rTypes: CallTypeConfig[]): CallTypeConf
   });
 }
 
-// Apply mutual exclusivity: R1+2 vs R1+R2
+// Apply mutual exclusivity: config-driven
 function getActiveRegSlots(row: DayRow, rTypes: CallTypeConfig[]): CallTypeConfig[] {
   const visible = getVisibleRegSlots(row, rTypes);
-  const r1 = visible.find(ct => ct.name === "R1");
-  const r2 = visible.find(ct => ct.name === "R2");
-  const r12 = visible.find(ct => ct.name === "R1+2");
-  if (!r12) return visible;
-  const r1Filled = r1 && row.registrarSlots["R1"] !== "";
-  const r2Filled = r2 && row.registrarSlots["R2"] !== "";
-  const r12Filled = r12 && row.registrarSlots["R1+2"] !== "";
-  if (r12Filled) return visible.filter(ct => ct.name !== "R1" && ct.name !== "R2");
-  if (r1Filled && r2Filled) return visible.filter(ct => ct.name !== "R1+2");
-  return visible;
+  const filledIds = new Set(
+    visible.filter(ct => row.registrarSlots[ct.name] !== "").map(ct => ct.id)
+  );
+
+  const hiddenIds = new Set<number>();
+  for (const ct of visible) {
+    if (!filledIds.has(ct.id)) continue;
+    if (!ct.mutually_exclusive_with) continue;
+    const exclusiveIds = ct.mutually_exclusive_with.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+    for (const exId of exclusiveIds) {
+      hiddenIds.add(exId);
+    }
+  }
+
+  // Don't hide types that are already filled
+  for (const ct of visible) {
+    if (filledIds.has(ct.id)) hiddenIds.delete(ct.id);
+  }
+
+  return visible.filter(ct => !hiddenIds.has(ct.id));
 }
 
 const DOW_HEADERS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
@@ -174,6 +184,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
   const [publicHolidays, setPublicHolidays] = useState<PublicHoliday[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
+  const [ranks, setRanks] = useState<RankConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -185,7 +196,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [consRows, acRows, allStaff, stepdownDays, eveningOTDates, holidays, ctRows, regRows] = await Promise.all([
+    const [consRows, acRows, allStaff, stepdownDays, eveningOTDates, holidays, ctRows, regRows, rankRows] = await Promise.all([
       api.getConsultantOnCall(configId),
       api.getACOnCall(configId),
       api.getStaff(),
@@ -194,10 +205,12 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
       api.getPublicHolidays(),
       api.getCallTypes(),
       api.getRegistrarDuties(configId),
+      api.getRanks(),
     ]);
     setStaff(allStaff);
     setPublicHolidays(holidays);
     setCallTypes(ctRows);
+    setRanks(rankRows);
 
     const consMap = new Map<string, ConsultantOnCall>();
     for (const r of consRows) consMap.set(r.date, r);
@@ -208,7 +221,13 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
     const phMap = new Map<string, PublicHoliday>();
     for (const h of holidays) phMap.set(h.date, h);
 
-    const rCallTypes = ctRows.filter((ct: CallTypeConfig) => ct.is_active && ct.name.startsWith("R"));
+    const registrarRankIdsLocal = new Set(rankRows.filter((r: RankConfig) => r.is_registrar_tier).map((r: RankConfig) => r.id));
+    const rCallTypes = ctRows.filter((ct: CallTypeConfig) =>
+      ct.is_active &&
+      !ct.is_duty_only &&
+      ct.eligible_rank_ids.length > 0 &&
+      ct.eligible_rank_ids.every((id: number) => registrarRankIdsLocal.has(id))
+    );
 
     const regMap = new Map<string, number>();
     for (const r of regRows as RegistrarDuty[]) regMap.set(`${r.date}:${r.duty_type}`, r.registrar_id);
@@ -250,13 +269,22 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
 
   useEffect(() => { load(); }, [load]);
 
+  // Config-driven registrar tier detection
+  const registrarRankIds = new Set(ranks.filter(r => r.is_registrar_tier).map(r => r.id));
+  const registrarRankNames = new Set(ranks.filter(r => r.is_registrar_tier).map(r => r.name));
+
   // One unified list: all consultant-tier staff (SC, C, AC)
   const allConsultantTier = staff.filter((s) => CONS_RANKS.includes(s.rank));
-  const registrarStaff = staff.filter((s) => REG_RANKS.includes(s.rank) && s.active);
+  const registrarStaff = staff.filter((s) => registrarRankNames.has(s.rank) && s.active);
   const staffById = new Map<number, Staff>(staff.map((s) => [s.id, s]));
 
-  // Compute rCallTypes once in the component body
-  const rCallTypes = callTypes.filter(ct => ct.is_active && ct.name.startsWith("R"));
+  // Compute rCallTypes once in the component body (config-driven)
+  const rCallTypes = callTypes.filter(ct =>
+    ct.is_active &&
+    !ct.is_duty_only &&
+    ct.eligible_rank_ids.length > 0 &&
+    ct.eligible_rank_ids.every(id => registrarRankIds.has(id))
+  );
 
   function handleDragStart(payload: DragPayload) {
     dragPayload.current = payload;
@@ -267,7 +295,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
     if (!payload) return false;
     const s = staffById.get(payload.staffId);
     if (!s) return false;
-    const isReg = REG_RANKS.includes(s.rank);
+    const isReg = registrarRankNames.has(s.rank);
     if (slotType.startsWith("reg:")) return isReg;
     return !isReg;
   }
@@ -301,13 +329,27 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
     if (slotType.startsWith("reg:")) {
       const callType = slotType.slice(4);
       const droppedStaff = staffById.get(payload.staffId);
-      if (!droppedStaff || !REG_RANKS.includes(droppedStaff.rank)) return;
+      if (!droppedStaff || !registrarRankNames.has(droppedStaff.rank)) return;
       setRows(prev => prev.map((r, i) => {
         if (i !== rowIdx) return r;
         const newSlots = { ...r.registrarSlots, [callType]: payload.staffId };
-        if (callType === "R1+2") { newSlots["R1"] = ""; newSlots["R2"] = ""; }
-        if ((callType === "R1" || callType === "R2") && newSlots["R1"] !== "" && newSlots["R2"] !== "") {
-          newSlots["R1+2"] = "";
+        const droppedCt = rCallTypes.find(ct => ct.name === callType);
+        // Clear slots that are mutually exclusive with the dropped type
+        if (droppedCt?.mutually_exclusive_with) {
+          const exIds = droppedCt.mutually_exclusive_with.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+          for (const ct of rCallTypes) {
+            if (exIds.includes(ct.id)) newSlots[ct.name] = "";
+          }
+        }
+        // If filling a slot, check if all slots in someone else's exclusive list are now filled — clear the excluder
+        for (const ct of rCallTypes) {
+          if (!ct.mutually_exclusive_with || ct.name === callType) continue;
+          const exIds = ct.mutually_exclusive_with.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+          const allExFilled = exIds.every(exId => {
+            const exCt = rCallTypes.find(c => c.id === exId);
+            return exCt && newSlots[exCt.name] !== "";
+          });
+          if (allExFilled) newSlots[ct.name] = "";
         }
         return { ...r, registrarSlots: newSlots };
       }));
@@ -318,7 +360,7 @@ export default function ConsultantRosterTab({ configId, year, month }: { configI
 
     const droppedStaff = staffById.get(payload.staffId);
     if (!droppedStaff) return;
-    if (REG_RANKS.includes(droppedStaff.rank)) return;
+    if (registrarRankNames.has(droppedStaff.rank)) return;
     const isAC = AC_RANKS.includes(droppedStaff.rank);
 
     if (slotType === "consultant") {
