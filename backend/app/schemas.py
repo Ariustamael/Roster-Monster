@@ -310,6 +310,44 @@ class ClinicTemplateOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ── Resource Template ────────────────────────────────────────────────────
+
+class ResourceTemplateCreate(BaseModel):
+    resource_type: str  # "clinic" or "ot"
+    day_of_week: int
+    session: Session
+    room: str
+    label: str = ""
+    consultant_id: Optional[int] = None
+    staff_required: int = 1
+    is_emergency: bool = False
+    linked_manpower: Optional[str] = None
+    weeks: Optional[str] = None
+    color: Optional[str] = None
+    is_active: bool = True
+    sort_order: int = 0
+
+
+class ResourceTemplateOut(BaseModel):
+    id: int
+    resource_type: str
+    day_of_week: int
+    session: Session
+    room: str
+    label: str
+    consultant_id: Optional[int]
+    consultant_name: Optional[str] = None
+    staff_required: int
+    is_emergency: bool
+    linked_manpower: Optional[str] = None
+    weeks: Optional[str] = None
+    color: Optional[str] = None
+    is_active: bool = True
+    sort_order: int = 0
+
+    model_config = {"from_attributes": True}
+
+
 # ── Duty Assignment (output) ─────────────────────────────────────────────
 
 class DutyOverrideCreate(BaseModel):

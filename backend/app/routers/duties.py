@@ -8,13 +8,14 @@ from sqlalchemy.orm import Session as DBSession
 from ..database import get_db
 from ..models import (
     MonthlyConfig, CallAssignment, DutyAssignment, Staff, TeamAssignment,
-    OTTemplate, ClinicTemplate, Leave, PublicHoliday,
+    OTTemplate, ClinicTemplate, ResourceTemplate, Leave, PublicHoliday,
     ConsultantOnCall, ACOnCall,
     DutyType, Session, CallTypeConfig, RankConfig,
 )
 from ..schemas import (
     DutyRosterResponse, DayDutyRoster, DutyAssignmentOut,
     OTTemplateCreate, OTTemplateOut, ClinicTemplateCreate, ClinicTemplateOut,
+    ResourceTemplateCreate, ResourceTemplateOut,
     DutyOverrideCreate,
 )
 from ..services.duty_solver import (
@@ -26,53 +27,62 @@ from ..services.validators import is_overnight, get_post_call_type
 router = APIRouter(prefix="/api", tags=["duties"])
 
 
-# ── OT Templates ────────────────────────────────────────────────────────
+# ── Resource Templates ──────────────────────────────────────────────────
 
-def _ot_out(r: OTTemplate) -> OTTemplateOut:
-    return OTTemplateOut(
-        id=r.id, day_of_week=r.day_of_week, room=r.room,
+def _resource_out(r: ResourceTemplate) -> ResourceTemplateOut:
+    return ResourceTemplateOut(
+        id=r.id,
+        resource_type=r.resource_type,
+        day_of_week=r.day_of_week,
+        session=r.session,
+        room=r.room,
+        label=r.label or "",
         consultant_id=r.consultant_id,
         consultant_name=r.consultant.name if r.consultant else None,
-        assistants_needed=r.assistants_needed,
-        registrar_needed=r.registrar_needed or 0,
+        staff_required=r.staff_required if r.staff_required is not None else 1,
         is_emergency=r.is_emergency or False,
-        linked_call_slot=r.linked_call_slot,
+        linked_manpower=r.linked_manpower,
+        weeks=r.weeks,
         color=r.color,
         is_active=r.is_active if r.is_active is not None else True,
-        week_of_month=r.week_of_month,
+        sort_order=r.sort_order or 0,
     )
 
 
-@router.get("/templates/ot", response_model=list[OTTemplateOut])
-def list_ot_templates(db: DBSession = Depends(get_db)):
-    rows = db.query(OTTemplate).order_by(OTTemplate.day_of_week, OTTemplate.room).all()
-    return [_ot_out(r) for r in rows]
+@router.get("/templates/resources", response_model=list[ResourceTemplateOut])
+def list_resource_templates(db: DBSession = Depends(get_db)):
+    rows = (
+        db.query(ResourceTemplate)
+        .order_by(ResourceTemplate.day_of_week, ResourceTemplate.session, ResourceTemplate.sort_order, ResourceTemplate.room)
+        .all()
+    )
+    return [_resource_out(r) for r in rows]
 
 
-@router.post("/templates/ot", response_model=OTTemplateOut)
-def create_ot_template(payload: OTTemplateCreate, db: DBSession = Depends(get_db)):
-    t = OTTemplate(**payload.model_dump())
+@router.post("/templates/resources", response_model=ResourceTemplateOut)
+def create_resource_template(payload: ResourceTemplateCreate, db: DBSession = Depends(get_db)):
+    t = ResourceTemplate(**payload.model_dump())
     db.add(t)
     db.commit()
     db.refresh(t)
-    return _ot_out(t)
+    return _resource_out(t)
 
 
-@router.put("/templates/ot/{template_id}", response_model=OTTemplateOut)
-def update_ot_template(template_id: int, payload: OTTemplateCreate, db: DBSession = Depends(get_db)):
-    t = db.query(OTTemplate).get(template_id)
+@router.put("/templates/resources/{template_id}", response_model=ResourceTemplateOut)
+def update_resource_template(template_id: int, payload: ResourceTemplateCreate, db: DBSession = Depends(get_db)):
+    t = db.query(ResourceTemplate).get(template_id)
     if not t:
         raise HTTPException(404)
     for k, v in payload.model_dump().items():
         setattr(t, k, v)
     db.commit()
     db.refresh(t)
-    return _ot_out(t)
+    return _resource_out(t)
 
 
-@router.delete("/templates/ot/{template_id}")
-def delete_ot_template(template_id: int, db: DBSession = Depends(get_db)):
-    t = db.query(OTTemplate).get(template_id)
+@router.delete("/templates/resources/{template_id}")
+def delete_resource_template(template_id: int, db: DBSession = Depends(get_db)):
+    t = db.query(ResourceTemplate).get(template_id)
     if not t:
         raise HTTPException(404)
     db.delete(t)
@@ -80,67 +90,42 @@ def delete_ot_template(template_id: int, db: DBSession = Depends(get_db)):
     return {"ok": True}
 
 
-# ── Clinic Templates ────────────────────────────────────────────────────
-
-@router.get("/templates/clinics", response_model=list[ClinicTemplateOut])
-def list_clinic_templates(db: DBSession = Depends(get_db)):
-    rows = db.query(ClinicTemplate).order_by(
-        ClinicTemplate.day_of_week, ClinicTemplate.session, ClinicTemplate.room,
-    ).all()
-    return [
-        ClinicTemplateOut(
-            id=r.id, day_of_week=r.day_of_week, session=r.session,
-            room=r.room, clinic_type=r.clinic_type, mos_required=r.mos_required,
-            consultant_id=r.consultant_id,
-            consultant_name=r.consultant.name if r.consultant else None,
-            color=r.color,
-            is_active=r.is_active if r.is_active is not None else True,
-        )
-        for r in rows
-    ]
-
-
-@router.post("/templates/clinics", response_model=ClinicTemplateOut)
-def create_clinic_template(payload: ClinicTemplateCreate, db: DBSession = Depends(get_db)):
-    t = ClinicTemplate(**payload.model_dump())
-    db.add(t)
-    db.commit()
-    db.refresh(t)
-    return ClinicTemplateOut(
-        id=t.id, day_of_week=t.day_of_week, session=t.session,
-        room=t.room, clinic_type=t.clinic_type, mos_required=t.mos_required,
-        consultant_id=t.consultant_id,
-        consultant_name=t.consultant.name if t.consultant else None,
-        color=t.color,
-        is_active=t.is_active if t.is_active is not None else True,
-    )
-
-
-@router.put("/templates/clinics/{template_id}", response_model=ClinicTemplateOut)
-def update_clinic_template(template_id: int, payload: ClinicTemplateCreate, db: DBSession = Depends(get_db)):
-    t = db.query(ClinicTemplate).get(template_id)
-    if not t:
+@router.post("/templates/resources/{template_id}/duplicate", response_model=ResourceTemplateOut)
+def duplicate_resource_template(template_id: int, db: DBSession = Depends(get_db)):
+    src = db.query(ResourceTemplate).get(template_id)
+    if not src:
         raise HTTPException(404)
-    for k, v in payload.model_dump().items():
-        setattr(t, k, v)
-    db.commit()
-    db.refresh(t)
-    return ClinicTemplateOut(
-        id=t.id, day_of_week=t.day_of_week, session=t.session,
-        room=t.room, clinic_type=t.clinic_type, mos_required=t.mos_required,
-        consultant_id=t.consultant_id,
-        consultant_name=t.consultant.name if t.consultant else None,
-        color=t.color,
-        is_active=t.is_active if t.is_active is not None else True,
+    dup = ResourceTemplate(
+        resource_type=src.resource_type,
+        day_of_week=src.day_of_week,
+        session=src.session,
+        room=src.room,
+        label=src.label,
+        consultant_id=src.consultant_id,
+        staff_required=src.staff_required,
+        is_emergency=src.is_emergency,
+        linked_manpower=src.linked_manpower,
+        weeks=src.weeks,
+        color=src.color,
+        is_active=src.is_active,
+        sort_order=(src.sort_order or 0) + 1,
     )
+    db.add(dup)
+    db.commit()
+    db.refresh(dup)
+    return _resource_out(dup)
 
 
-@router.delete("/templates/clinics/{template_id}")
-def delete_clinic_template(template_id: int, db: DBSession = Depends(get_db)):
-    t = db.query(ClinicTemplate).get(template_id)
-    if not t:
-        raise HTTPException(404)
-    db.delete(t)
+@router.put("/templates/resources/reorder")
+def reorder_resource_templates(updates: list[dict], db: DBSession = Depends(get_db)):
+    for u in updates:
+        t = db.query(ResourceTemplate).get(u["id"])
+        if t:
+            t.sort_order = u["sort_order"]
+            if "day_of_week" in u:
+                t.day_of_week = u["day_of_week"]
+            if "session" in u:
+                t.session = u["session"]
     db.commit()
     return {"ok": True}
 
