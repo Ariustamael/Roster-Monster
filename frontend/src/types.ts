@@ -71,6 +71,7 @@ export interface DayDutyRoster {
   pm_clinics: DutyAssignment[];
   am_admin: DutyAssignment[];
   pm_admin: DutyAssignment[];
+  unavailable: { staff_id: number; staff_name: string; reason: string }[];
 }
 
 export interface DutyRosterResponse {

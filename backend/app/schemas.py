@@ -331,6 +331,7 @@ class DayDutyRoster(BaseModel):
     pm_clinics: list[DutyAssignmentOut]
     am_admin: list[DutyAssignmentOut]
     pm_admin: list[DutyAssignmentOut]
+    unavailable: list[dict] = []
 
 
 class DutyRosterResponse(BaseModel):

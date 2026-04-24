@@ -385,6 +385,14 @@ def _build_day_rosters(
         pc_ids = postcall_dates.get(d, set())
         post_call_names = sorted([all_staff_names.get(pid, f"ID:{pid}") for pid in pc_ids])
 
+        # Build unavailable pool (post-call + on-leave)
+        unavailable = []
+        for pid in pc_ids:
+            unavailable.append({"staff_id": pid, "staff_name": all_staff_names.get(pid, f"ID:{pid}"), "reason": "Post-call"})
+        leave_rows = db.query(Leave).filter(Leave.date == d).all()
+        for lv in leave_rows:
+            unavailable.append({"staff_id": lv.staff_id, "staff_name": all_staff_names.get(lv.staff_id, f"ID:{lv.staff_id}"), "reason": lv.leave_type or "Leave"})
+
         call_team = call_by_date.get(d, {})
         call_slots: dict[str, str | None] = {}
         for ctype, name in call_team.items():
@@ -444,6 +452,7 @@ def _build_day_rosters(
             pm_clinics=pm_clinics_out,
             am_admin=am_admin,
             pm_admin=pm_admin,
+            unavailable=unavailable,
         ))
 
     return day_rosters, ct_columns

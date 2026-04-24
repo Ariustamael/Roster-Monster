@@ -276,17 +276,12 @@ function DayCard({
       >
         <span style={{ fontSize: 12, color: "var(--text-muted)", width: 16, textAlign: "center" }}>{collapsed ? "▶" : "▼"}</span>
         <h3 style={{ margin: 0 }}>{day.date.slice(5)} {day.day_name}</h3>
-        {day.post_call.length > 0 && (
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Post-call:</span>
-            {day.post_call.map((n) => (
-              <span key={n} className="duty-tag" style={{ background: "#fee2e2", color: "#991b1b" }}>{n}</span>
-            ))}
-          </div>
+        {day.unavailable.length > 0 && (
+          <span style={{ fontSize: 10, color: "#991b1b", fontWeight: 600 }}>{day.unavailable.length} unavailable</span>
         )}
       </div>
 
-      {!collapsed && <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 1fr 1fr", gap: 12 }}>
+      {!collapsed && <div style={{ display: "grid", gridTemplateColumns: "180px 1fr 1fr 1fr 140px", gap: 12 }}>
         {/* Column 1: Call Team */}
         <div>
           <SectionLabel label="Call Team" color="#ede9fe" />
@@ -480,13 +475,41 @@ function DayCard({
             </div>
           </div>
         </div>
+
+        {/* Column 5: Unavailable */}
+        <div>
+          <SectionLabel label="Unavailable" color="#fee2e2" />
+          {day.unavailable.length === 0 && <EmptyNote />}
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+            {day.unavailable.map((u) => (
+              <span
+                key={`${u.staff_id}-${u.reason}`}
+                className="duty-tag"
+                draggable
+                style={{ background: "#fecaca", color: "#991b1b", cursor: "grab", userSelect: "none" }}
+                onDragStart={() => {
+                  dragRef.current = {
+                    assignmentId: 0,
+                    staffId: u.staff_id,
+                    staffName: u.staff_name,
+                    date: day.date,
+                  };
+                }}
+                title={u.reason}
+              >
+                {u.staff_name}
+                <sup style={{ fontSize: 8, marginLeft: 2 }}>{u.reason === "Post-call" ? "PC" : "L"}</sup>
+              </span>
+            ))}
+          </div>
+        </div>
       </div>}
     </div>
   );
 }
 
 function DragTag({
-  a, date, dragRef, onDelete, color, className,
+  a, date, dragRef, onRemove, color, className,
 }: {
   a: DutyAssignment;
   date: string;
