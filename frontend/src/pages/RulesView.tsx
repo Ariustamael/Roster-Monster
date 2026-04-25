@@ -212,30 +212,31 @@ export default function RulesView() {
           </div>
 
           <div className="rule">
-            <div className="rule-title">Duty assignment priority</div>
+            <div className="rule-title">Resource priority</div>
             <div className="rule-body">
-              Each weekday, the solver assigns duties in this sequence:
-              <br /><strong>1. OT (full day):</strong> Fills OT assistant slots first. Each OT room needs staff as configured.
-              <br /><strong>2. Supervised Clinics (AM then PM):</strong> One MO per supervised clinic session, matched to the clinic's consultant.
-              <br /><strong>3. MOPD (AM then PM):</strong> Fills remaining clinic capacity.
-              <br /><strong>4. Admin (AM then PM):</strong> Anyone not assigned to the above gets admin duty.
+              Resources (OT lists, clinics, sessions) are not split into fixed type buckets — the dedicated MOPD and CAT-A duty types have been retired.
+              Each resource carries a <strong>priority 1–10</strong> (set in the Resources page).
+              The solver fills them in priority order — <strong>P1 first, P10 last</strong> — and stops when staff run out.
+              <br /><br />
+              Anyone left unfilled lands in <strong>Admin</strong>, which is auto-derived from "free duty-eligible MOs not assigned anywhere else and not unavailable".
             </div>
           </div>
 
           <div className="rule">
             <div className="rule-title">Excluded from daytime duties</div>
             <div className="rule-body">
-              On call, post-call, on leave, or assigned to a daytime-only call type (e.g. weekday MO3 referral).
-              No duties on weekends or public holidays.
+              On call, post-call, on leave, or assigned to a daytime-only call type.
+              <br />
+              Weekends and public holidays are now <em>editable</em> on the duty roster — the solver still skips them, but you can manually drop assignments onto weekend cards (e.g. emergency OT).
             </div>
           </div>
 
           <div className="rule">
             <div className="rule-title">Duty scoring</div>
             <div className="rule-body">
-              <strong>OT:</strong> Fairness (up to +10.0), supervisor match (+5.0), team match (+3.0), SR bonus (+3.0).
-              <br /><strong>Clinics:</strong> Fairness (up to +5.0), supervisor match (+5.0), team match (+3.0).
-              <br /><strong>MOPD:</strong> Fairness (up to +3.0). Only SMO and MO eligible.
+              <strong>OT:</strong> Fairness (up to +10.0), supervisor match (+5.0), team match (+3.0), registrar-tier bonus (+3.0).
+              <br /><strong>Clinic / general daytime:</strong> Fairness (up to +5.0), supervisor match (+5.0), team match (+3.0), staff <strong>duty_preference</strong> bonus (+2.0).
+              <br />Eligibility per resource is governed by per-staff <strong>can_do_clinic / can_do_ot</strong> flags and rank-level eligibility.
             </div>
           </div>
 
@@ -252,13 +253,15 @@ export default function RulesView() {
           <h3>Anchor Duties (Ward MO / EOT MO)</h3>
 
           <div className="rule">
-            <div className="rule-title">Linked call types</div>
+            <div className="rule-title">Linked manpower</div>
             <div className="rule-body">
-              Duty-only call types with <strong>linked_to</strong> configured are auto-filled from the linked call type's assignee.
+              Each resource template can declare <strong>linked_manpower</strong> — a list of call types whose holders
+              are pre-assigned to that resource.
               <br />
-              <strong>Ward MO → MO1:</strong> The MO1 holder covers ward admissions during the day.
+              Common examples: <strong>Ward MO ← MO1</strong> (MO1 holder also mans the ward),
+              <strong> EOT ← MO2 / R1 / R2</strong> (overnight call holders also staff the evening OT).
               <br />
-              <strong>EOT MO → MO2:</strong> The MO2 holder covers the Emergency OT during the day.
+              Linked assignments are not flagged as conflicts on the duty roster, even though the staff are also on call.
             </div>
           </div>
 
@@ -284,10 +287,17 @@ export default function RulesView() {
           <div className="rule">
             <div className="rule-title">Duty roster</div>
             <div className="rule-body">
-              Drag name tags to reassign within the same day.
-              Right-click sends the person to Admin (not deleted).
+              Drag name tags to reassign within the same day. Drops always apply — constraint violations
+              (post-call, leave, eligibility, double-booking) appear as inline <strong>⚠ COMMENTS</strong> on the day card,
+              not as a popup.
+              <br />
+              Click <strong>×</strong> to clear an assignment. Free duty-eligible MOs are auto-derived back into the Admin column.
+              Drag the <strong>⧉</strong> handle to duplicate (multi-roster).
               Overridden assignments show a ✎ marker.
-              Unavailable staff (post-call, leave) are shown in a separate pool and can be dragged into duty slots for override.
+              Unavailable staff (post-call, leave) appear in the Unavailable column.
+              <br />
+              Linked-manpower assignments (Ward MO ↔ MO1, EOT ↔ MO2/R1/R2, etc., set per resource template) are silent —
+              warnings only fire when someone is doing a linked role they aren't on call for.
             </div>
           </div>
         </section>

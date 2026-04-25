@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../../api";
 import type { CallTypeConfig, RankConfig } from "../../types";
 import MultiSelectDropdown from "../../components/MultiSelectDropdown";
+import { useEscClose } from "../../hooks/useEscClose";
 
 const POST_CALL_OPTIONS = [
   { value: "8am", label: "Off from 8am (full day off)" },
@@ -40,7 +41,7 @@ function toggleCondition(current: string | null, cond: string): string {
   return CONDITION_TOKENS.filter((c) => set.has(c)).join(",") || "";
 }
 
-const WEEKDAY_TOKENS = ["Mon", "Tue", "Wed", "Thu", "Fri"] as const;
+const RUN_DAY_TOKENS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
 function parseRunDays(str: string | null): Set<string> {
   if (!str) return new Set();
@@ -51,7 +52,7 @@ function toggleRunDay(current: string | null, day: string): string {
   const set = parseRunDays(current);
   if (set.has(day)) set.delete(day);
   else set.add(day);
-  return WEEKDAY_TOKENS.filter((d) => set.has(d)).join(",");
+  return RUN_DAY_TOKENS.filter((d) => set.has(d)).join(",");
 }
 
 interface DraftCallType {
@@ -61,13 +62,16 @@ interface DraftCallType {
   is_overnight: boolean;
   post_call_type: string;
   max_consecutive_days: number;
+  min_consecutive_days: number;
   min_gap_days: number;
+  switch_window_days: number;
   difficulty_points: number;
   counts_towards_fairness: boolean;
   applicable_days: string;
   required_conditions: string;
   is_night_float: boolean;
   night_float_run: string | null;
+  uses_consultant_affinity: boolean;
   is_active: boolean;
   eligible_rank_ids: number[];
   is_duty_only: boolean;
@@ -84,6 +88,9 @@ export default function CallTypeConfigTab() {
   const [error, setError] = useState<string | null>(null);
   const [dragCtId, setDragCtId] = useState<number | null>(null);
   const [dragOverCtId, setDragOverCtId] = useState<number | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+
+  useEscClose(() => { setEditId(null); setDraft(null); }, editId != null);
 
   async function load() {
     setLoading(true);
@@ -109,13 +116,16 @@ export default function CallTypeConfigTab() {
       is_overnight: ct.is_overnight,
       post_call_type: ct.post_call_type,
       max_consecutive_days: ct.max_consecutive_days,
+      min_consecutive_days: ct.min_consecutive_days ?? 1,
       min_gap_days: ct.min_gap_days,
+      switch_window_days: ct.switch_window_days ?? 5,
       difficulty_points: ct.difficulty_points,
       counts_towards_fairness: ct.counts_towards_fairness,
       applicable_days: ct.applicable_days,
       required_conditions: ct.required_conditions ?? "",
       is_night_float: ct.is_night_float,
       night_float_run: ct.night_float_run,
+      uses_consultant_affinity: ct.uses_consultant_affinity ?? false,
       is_active: ct.is_active,
       eligible_rank_ids: ct.eligible_rank_ids,
       is_duty_only: ct.is_duty_only ?? false,
@@ -133,13 +143,16 @@ export default function CallTypeConfigTab() {
       is_overnight: true,
       post_call_type: "8am",
       max_consecutive_days: 1,
+      min_consecutive_days: 1,
       min_gap_days: 2,
+      switch_window_days: 5,
       difficulty_points: 3,
       counts_towards_fairness: true,
       applicable_days: "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH",
       required_conditions: "",
       is_night_float: false,
       night_float_run: null,
+      uses_consultant_affinity: false,
       is_active: true,
       eligible_rank_ids: ranks.filter((r) => r.is_call_eligible).map((r) => r.id),
       is_duty_only: false,
@@ -158,13 +171,16 @@ export default function CallTypeConfigTab() {
         is_overnight: draft.is_overnight,
         post_call_type: draft.post_call_type,
         max_consecutive_days: draft.max_consecutive_days,
+        min_consecutive_days: draft.min_consecutive_days,
         min_gap_days: draft.min_gap_days,
+        switch_window_days: draft.switch_window_days,
         difficulty_points: draft.difficulty_points,
         counts_towards_fairness: draft.counts_towards_fairness,
         applicable_days: draft.applicable_days,
         required_conditions: draft.required_conditions || null,
         is_night_float: draft.is_night_float,
         night_float_run: draft.night_float_run || null,
+        uses_consultant_affinity: draft.uses_consultant_affinity,
         is_active: draft.is_active,
         eligible_rank_ids: draft.eligible_rank_ids,
         is_duty_only: draft.is_duty_only,
@@ -296,29 +312,44 @@ export default function CallTypeConfigTab() {
 
       {editId != null && draft && (
         <div className="modal-backdrop" onClick={() => { setEditId(null); setDraft(null); }}>
-          <div className="modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 520 }}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>{draft.id != null ? "Edit Call Type" : "Add Call Type"}</h3>
 
-            <div className="form-group">
-              <label>Name</label>
-              <input type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. MO1" />
+            {/* ── Identity ─────────────────────────── */}
+            <SectionHeader label="Identity" />
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label htmlFor="ct-name">Name <span style={{ color: "#dc2626" }}>*</span></label>
+                <input id="ct-name" type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. MO1" />
+              </div>
+              <div className="form-group" style={{ margin: 0, display: "flex", alignItems: "flex-end", gap: 12, paddingBottom: 6 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }}>
+                  <input type="checkbox" checked={draft.is_active} onChange={(e) => setDraft({ ...draft, is_active: e.target.checked })} />
+                  Active
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6, margin: 0 }} title="Appears in Duty Roster only, not Call Roster">
+                  <input type="checkbox" checked={draft.is_duty_only} onChange={(e) => setDraft({ ...draft, is_duty_only: e.target.checked })} />
+                  Duty-only
+                </label>
+              </div>
             </div>
 
-            <div className="form-group">
-              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* ── Behaviour ────────────────────────── */}
+            <SectionHeader label="Behaviour" />
+            <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 10 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 <input type="checkbox" checked={draft.is_overnight} onChange={(e) => setDraft({ ...draft, is_overnight: e.target.checked })} />
-                Overnight (24h) call
+                Overnight (24h)
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }} title="Prefer MOs whose supervisor is today's on-call consultant, or whose team matches.">
+                <input type="checkbox" checked={draft.uses_consultant_affinity} onChange={(e) => setDraft({ ...draft, uses_consultant_affinity: e.target.checked })} />
+                Own Consultant Affinity
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <input type="checkbox" checked={draft.counts_towards_fairness} onChange={(e) => setDraft({ ...draft, counts_towards_fairness: e.target.checked })} />
+                Counts towards fairness
               </label>
             </div>
-
-            <div className="form-group">
-              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input type="checkbox" checked={draft.is_duty_only}
-                  onChange={(e) => setDraft({ ...draft, is_duty_only: e.target.checked })} />
-                Duty only (appears in Duty Roster, not Call/Con-Reg Roster)
-              </label>
-            </div>
-
             <div className="form-group">
               <label>Post-Call Mode</label>
               <select value={draft.post_call_type} onChange={(e) => setDraft({ ...draft, post_call_type: e.target.value })}>
@@ -337,7 +368,7 @@ export default function CallTypeConfigTab() {
                     Consecutive Run Days (same person covers all selected days in a week)
                   </label>
                   <div style={{ display: "flex", gap: 10 }}>
-                    {WEEKDAY_TOKENS.map((day) => (
+                    {RUN_DAY_TOKENS.map((day) => (
                       <label key={day} style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", fontSize: 13 }}>
                         <input
                           type="checkbox"
@@ -352,9 +383,11 @@ export default function CallTypeConfigTab() {
               )}
             </div>
 
+            {/* ── Scheduling ───────────────────────── */}
+            <SectionHeader label="Scheduling" />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 12 }}>
               <div className="form-group" style={{ margin: 0 }}>
-                <label>Min Gap (days)</label>
+                <label title="Min clear days before the same person does this call type again.">Min Gap (days)</label>
                 <input type="number" value={draft.min_gap_days} onChange={(e) => setDraft({ ...draft, min_gap_days: Number(e.target.value) })} min={0} max={14} />
               </div>
               <div className="form-group" style={{ margin: 0 }}>
@@ -367,64 +400,112 @@ export default function CallTypeConfigTab() {
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-              <div className="form-group" style={{ margin: 0, background: "var(--bg-muted, #f8fafc)", borderRadius: 6, padding: "10px 12px", border: "1px solid var(--border)" }}>
-                <label style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, display: "block" }}>Applicable Days</label>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                  {ALL_DAY_TOKENS.map((day, i) => (
-                    <span key={day} style={{ display: "inline-flex", alignItems: "center", gap: 0 }}>
-                      {i === 7 && <span style={{ margin: "0 4px", color: "#ccc" }}>|</span>}
-                      <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", fontSize: 13 }}>
-                        <input
-                          type="checkbox"
-                          checked={parseDays(draft.applicable_days).has(day)}
-                          onChange={() => setDraft({ ...draft, applicable_days: toggleDay(draft.applicable_days, day) })}
-                        />
-                        {day}
-                      </label>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="form-group" style={{ margin: 0, background: "var(--bg-muted, #f8fafc)", borderRadius: 6, padding: "10px 12px", border: "1px solid var(--border)" }}>
-                <label style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, display: "block" }}>Required Events <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(all must be true)</span></label>
-                <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-                  {CONDITION_TOKENS.map((cond) => (
-                    <label key={cond} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
+            <div className="form-group" style={{ background: "var(--bg-muted, #f8fafc)", borderRadius: 6, padding: "10px 12px", border: "1px solid var(--border)" }}>
+              <label style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, display: "block" }}>Applicable Days</label>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                {ALL_DAY_TOKENS.map((day, i) => (
+                  <span key={day} style={{ display: "inline-flex", alignItems: "center", gap: 0 }}>
+                    {i === 7 && <span style={{ margin: "0 4px", color: "#ccc" }}>|</span>}
+                    <label style={{ display: "flex", alignItems: "center", gap: 3, cursor: "pointer", fontSize: 13 }}>
                       <input
                         type="checkbox"
-                        checked={parseConditions(draft.required_conditions).has(cond)}
-                        onChange={() => setDraft({ ...draft, required_conditions: toggleCondition(draft.required_conditions, cond) })}
+                        checked={parseDays(draft.applicable_days).has(day)}
+                        onChange={() => setDraft({ ...draft, applicable_days: toggleDay(draft.applicable_days, day) })}
                       />
-                      {cond}
+                      {day}
                     </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            <div className="form-group">
-              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input type="checkbox" checked={draft.counts_towards_fairness} onChange={(e) => setDraft({ ...draft, counts_towards_fairness: e.target.checked })} />
-                Counts towards fairness tracking
-              </label>
-            </div>
-
-            <div className="form-group">
-              <label>Eligible Ranks</label>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
-                {ranks.filter((r) => r.is_active).map((r) => (
-                  <label key={r.id} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                    <input type="checkbox" checked={draft.eligible_rank_ids.includes(r.id)} onChange={() => toggleRank(r.id)} />
-                    {r.name} ({r.abbreviation})
-                  </label>
+                  </span>
                 ))}
               </div>
             </div>
 
+            <button
+              type="button"
+              onClick={() => setShowAdvanced(!showAdvanced)}
+              style={{
+                background: "none", border: "none", color: "var(--primary, #6366f1)",
+                cursor: "pointer", fontSize: 12, padding: "4px 0", marginBottom: 8,
+              }}
+            >
+              {showAdvanced ? "▼ Hide advanced" : "▶ Show advanced"}
+            </button>
+
+            {showAdvanced && (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label title="Days within which switching between different overnight call types is blocked (0 = no restriction)">Switch Window (days)</label>
+                    <input type="number" value={draft.switch_window_days} onChange={(e) => setDraft({ ...draft, switch_window_days: Number(e.target.value) })} min={0} max={14} />
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    <label title="Minimum consecutive days someone must commit to when starting a run (useful for night float)">Min Consecutive</label>
+                    <input type="number" value={draft.min_consecutive_days} onChange={(e) => setDraft({ ...draft, min_consecutive_days: Number(e.target.value) })} min={1} max={7} />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ background: "var(--bg-muted, #f8fafc)", borderRadius: 6, padding: "10px 12px", border: "1px solid var(--border)" }}>
+                  <label style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, display: "block" }}>
+                    Required Events <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(all must be true)</span>
+                  </label>
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+                    {CONDITION_TOKENS.map((cond) => (
+                      <label key={cond} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 13 }}>
+                        <input
+                          type="checkbox"
+                          checked={parseConditions(draft.required_conditions).has(cond)}
+                          onChange={() => setDraft({ ...draft, required_conditions: toggleCondition(draft.required_conditions, cond) })}
+                        />
+                        {cond}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="form-group">
+                  <label>Mutually Exclusive With</label>
+                  <MultiSelectDropdown
+                    options={callTypes.filter(ct => ct.id !== draft.id).map(ct => ({ id: ct.id, label: ct.name }))}
+                    selected={draft.mutually_exclusive_with}
+                    onChange={(ids) => setDraft({ ...draft, mutually_exclusive_with: ids })}
+                    placeholder="None"
+                  />
+                </div>
+              </>
+            )}
+
+            {/* ── Eligibility & Links ──────────────── */}
+            <SectionHeader label="Eligibility & Links" />
             <div className="form-group">
-              <label>Linked To (auto-fill from these call types)</label>
+              <label>Eligible Ranks</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 4 }}>
+                {ranks.filter((r) => r.is_active).map((r) => {
+                  const checked = draft.eligible_rank_ids.includes(r.id);
+                  return (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => toggleRank(r.id)}
+                      style={{
+                        border: `1px solid ${checked ? "var(--primary, #6366f1)" : "var(--border)"}`,
+                        background: checked ? "var(--primary, #6366f1)" : "transparent",
+                        color: checked ? "white" : "var(--text)",
+                        borderRadius: 999,
+                        padding: "4px 10px",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        userSelect: "none",
+                      }}
+                      title={r.name}
+                    >
+                      {r.abbreviation || r.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label>Linked To <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(auto-fill from these call types)</span></label>
               <MultiSelectDropdown
                 options={callTypes.filter(ct => ct.id !== draft.id).map(ct => ({ id: ct.id, label: ct.name }))}
                 selected={draft.linked_to}
@@ -433,33 +514,29 @@ export default function CallTypeConfigTab() {
               />
             </div>
 
-            <div className="form-group">
-              <label>Mutually Exclusive With</label>
-              <MultiSelectDropdown
-                options={callTypes.filter(ct => ct.id !== draft.id).map(ct => ({ id: ct.id, label: ct.name }))}
-                selected={draft.mutually_exclusive_with}
-                onChange={(ids) => setDraft({ ...draft, mutually_exclusive_with: ids })}
-                placeholder="None"
-              />
-            </div>
-
-            <div className="form-group">
-              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <input type="checkbox" checked={draft.is_active} onChange={(e) => setDraft({ ...draft, is_active: e.target.checked })} />
-                Active
-              </label>
-            </div>
-
             <div className="modal-actions">
               {draft.id != null && (
                 <button className="btn btn-danger" onClick={() => handleDelete(draft.id!)} style={{ marginRight: "auto" }}>Delete</button>
               )}
               <button className="btn btn-secondary" onClick={() => { setEditId(null); setDraft(null); }}>Cancel</button>
-              <button className="btn btn-primary" onClick={save}>Save</button>
+              <button className="btn btn-primary" onClick={save} disabled={!draft.name.trim()}>Save</button>
             </div>
           </div>
         </div>
       )}
     </>
+  );
+}
+
+function SectionHeader({ label }: { label: string }) {
+  return (
+    <div style={{
+      fontSize: 11, fontWeight: 700, color: "var(--text-muted)",
+      textTransform: "uppercase", letterSpacing: 0.6,
+      borderBottom: "1px solid var(--border)",
+      paddingBottom: 4, marginBottom: 10, marginTop: 14,
+    }}>
+      {label}
+    </div>
   );
 }

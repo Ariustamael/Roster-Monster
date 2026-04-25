@@ -38,8 +38,7 @@ export default function SupplyDemandTab({ configId }: { configId: number }) {
                     <th>Day</th>
                     <th>OT Rooms</th>
                     <th>OT Asst</th>
-                    <th>Sup Clinic</th>
-                    <th>MOPD</th>
+                    <th>Clinic Slots</th>
                     <th>Call Slots</th>
                     <th>Total MOs</th>
                     <th>On Leave</th>
@@ -60,8 +59,7 @@ export default function SupplyDemandTab({ configId }: { configId: number }) {
                       <td>{d.day_name}{d.is_ph ? " (PH)" : ""}</td>
                       <td>{d.ot_rooms || "-"}</td>
                       <td>{d.ot_assistants_needed || "-"}</td>
-                      <td>{d.supervised_clinics || "-"}</td>
-                      <td>{d.mopd_clinics || "-"}</td>
+                      <td>{d.clinic_slots || "-"}</td>
                       <td>{d.call_slots}</td>
                       <td>{d.total_mos}</td>
                       <td className={d.on_leave > 0 ? "leave-cell" : ""}>{d.on_leave || "-"}</td>

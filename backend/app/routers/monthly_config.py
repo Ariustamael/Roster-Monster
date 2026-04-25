@@ -4,17 +4,29 @@ from sqlalchemy import func as sa_func
 
 from ..database import get_db
 from ..models import (
-    MonthlyConfig, ConsultantOnCall, ACOnCall,
-    RegistrarDuty, StepdownDay, EveningOTDate, PublicHoliday,
+    MonthlyConfig,
+    ConsultantOnCall,
+    ACOnCall,
+    RegistrarDuty,
+    StepdownDay,
+    EveningOTDate,
+    PublicHoliday,
 )
 from ..schemas import (
-    MonthlyConfigCreate, MonthlyConfigOut,
-    ConsultantOnCallCreate, ConsultantOnCallOut,
-    ACOnCallCreate, ACOnCallOut,
-    RegistrarDutyCreate, RegistrarDutyOut,
-    StepdownDayCreate, StepdownDayOut,
-    EveningOTDateCreate, EveningOTDateOut,
-    PublicHolidayCreate, PublicHolidayOut,
+    MonthlyConfigCreate,
+    MonthlyConfigOut,
+    ConsultantOnCallCreate,
+    ConsultantOnCallOut,
+    ACOnCallCreate,
+    ACOnCallOut,
+    RegistrarDutyCreate,
+    RegistrarDutyOut,
+    StepdownDayCreate,
+    StepdownDayOut,
+    EveningOTDateCreate,
+    EveningOTDateOut,
+    PublicHolidayCreate,
+    PublicHolidayOut,
 )
 
 router = APIRouter(prefix="/api/config", tags=["monthly_config"])
@@ -22,14 +34,20 @@ router = APIRouter(prefix="/api/config", tags=["monthly_config"])
 
 @router.get("", response_model=list[MonthlyConfigOut])
 def list_configs(db: Session = Depends(get_db)):
-    return db.query(MonthlyConfig).order_by(MonthlyConfig.year.desc(), MonthlyConfig.month.desc()).all()
+    return (
+        db.query(MonthlyConfig)
+        .order_by(MonthlyConfig.year.desc(), MonthlyConfig.month.desc())
+        .all()
+    )
 
 
 @router.post("", response_model=MonthlyConfigOut)
 def create_config(payload: MonthlyConfigCreate, db: Session = Depends(get_db)):
     existing = (
         db.query(MonthlyConfig)
-        .filter(MonthlyConfig.year == payload.year, MonthlyConfig.month == payload.month)
+        .filter(
+            MonthlyConfig.year == payload.year, MonthlyConfig.month == payload.month
+        )
         .first()
     )
     if existing:
@@ -43,6 +61,7 @@ def create_config(payload: MonthlyConfigCreate, db: Session = Depends(get_db)):
 
 # ── Public Holidays (before /{config_id} to avoid path conflict) ────────
 
+
 @router.get("/public-holidays", response_model=list[PublicHolidayOut])
 def list_public_holidays(
     year: int | None = Query(None),
@@ -51,13 +70,16 @@ def list_public_holidays(
     q = db.query(PublicHoliday).order_by(PublicHoliday.date)
     if year is not None:
         from sqlalchemy import extract
+
         q = q.filter(extract("year", PublicHoliday.date) == year)
     return q.all()
 
 
 @router.post("/public-holidays", response_model=PublicHolidayOut)
 def create_public_holiday(payload: PublicHolidayCreate, db: Session = Depends(get_db)):
-    existing = db.query(PublicHoliday).filter(PublicHoliday.date == payload.date).first()
+    existing = (
+        db.query(PublicHoliday).filter(PublicHoliday.date == payload.date).first()
+    )
     if existing:
         raise HTTPException(409, "Holiday already exists for this date")
     ph = PublicHoliday(date=payload.date, name=payload.name)
@@ -79,6 +101,7 @@ def delete_public_holiday(holiday_id: int, db: Session = Depends(get_db)):
 
 # ── Config by ID ────────────────────────────────────────────────────────
 
+
 @router.get("/{config_id}", response_model=MonthlyConfigOut)
 def get_config(config_id: int, db: Session = Depends(get_db)):
     cfg = db.query(MonthlyConfig).get(config_id)
@@ -99,6 +122,7 @@ def delete_config(config_id: int, db: Session = Depends(get_db)):
 
 # ── Consultant On-Call ───────────────────────────────────────────────────
 
+
 @router.post("/{config_id}/consultant-oncall")
 def set_consultant_oncall(
     config_id: int,
@@ -110,12 +134,14 @@ def set_consultant_oncall(
         raise HTTPException(404, "Config not found")
     db.query(ConsultantOnCall).filter(ConsultantOnCall.config_id == config_id).delete()
     for e in entries:
-        db.add(ConsultantOnCall(
-            config_id=config_id,
-            date=e.date,
-            consultant_id=e.consultant_id,
-            supervising_consultant_id=e.supervising_consultant_id,
-        ))
+        db.add(
+            ConsultantOnCall(
+                config_id=config_id,
+                date=e.date,
+                consultant_id=e.consultant_id,
+                supervising_consultant_id=e.supervising_consultant_id,
+            )
+        )
     cfg.updated_at = sa_func.now()
     db.commit()
     return {"ok": True, "count": len(entries)}
@@ -145,6 +171,7 @@ def get_consultant_oncall(config_id: int, db: Session = Depends(get_db)):
 
 
 # ── AC On-Call ───────────────────────────────────────────────────────────
+
 
 @router.post("/{config_id}/ac-oncall")
 def set_ac_oncall(
@@ -179,6 +206,7 @@ def get_ac_oncall(config_id: int, db: Session = Depends(get_db)):
 
 # ── Registrar Duties ────────────────────────────────────────────────────
 
+
 @router.post("/{config_id}/registrar-duties")
 def set_registrar_duties(
     config_id: int,
@@ -190,10 +218,15 @@ def set_registrar_duties(
         raise HTTPException(404, "Config not found")
     db.query(RegistrarDuty).filter(RegistrarDuty.config_id == config_id).delete()
     for e in entries:
-        db.add(RegistrarDuty(
-            config_id=config_id, date=e.date,
-            registrar_id=e.registrar_id, duty_type=e.duty_type, shift=e.shift,
-        ))
+        db.add(
+            RegistrarDuty(
+                config_id=config_id,
+                date=e.date,
+                registrar_id=e.registrar_id,
+                duty_type=e.duty_type,
+                shift=e.shift,
+            )
+        )
     cfg.updated_at = sa_func.now()
     db.commit()
     return {"ok": True, "count": len(entries)}
@@ -209,7 +242,8 @@ def get_registrar_duties(config_id: int, db: Session = Depends(get_db)):
     )
     return [
         RegistrarDutyOut(
-            id=r.id, date=r.date,
+            id=r.id,
+            date=r.date,
             registrar_id=r.registrar_id,
             registrar_name=r.registrar.name,
             duty_type=r.duty_type,
@@ -220,6 +254,7 @@ def get_registrar_duties(config_id: int, db: Session = Depends(get_db)):
 
 
 # ── Stepdown Days ────────────────────────────────────────────────────────
+
 
 @router.post("/{config_id}/stepdown-days")
 def set_stepdown_days(
@@ -250,6 +285,7 @@ def get_stepdown_days(config_id: int, db: Session = Depends(get_db)):
 
 
 # ── Evening OT Dates ─────────────────────────────────────────────────────
+
 
 @router.post("/{config_id}/evening-ot-dates")
 def set_evening_ot_dates(

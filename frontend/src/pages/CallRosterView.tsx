@@ -1,7 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
 import type { RosterResponse, Staff, CallAssignment, DayRoster, CallTypeConfig, RankConfig } from "../types";
+import { monthName } from "../utils";
+
+interface CallDragState {
+  staffId: number;
+  staffName: string;
+  date: string;
+  fromSlot: string; // call_type the staff is being dragged FROM
+}
 
 export default function CallRosterView() {
   const { active } = useConfig();
@@ -13,6 +21,8 @@ export default function CallRosterView() {
   const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
   const [ranks, setRanks] = useState<RankConfig[]>([]);
   const [editCell, setEditCell] = useState<{ date: string; slot: string } | null>(null);
+  const dragRef = useRef<CallDragState | null>(null);
+  const [dragOver, setDragOver] = useState<string | null>(null);
 
   useEffect(() => {
     api.getMOStaff().then(setAllStaff);
@@ -69,22 +79,64 @@ export default function CallRosterView() {
     return day.call_slots[slot] ?? null;
   }
 
-  async function handleOverride(staffId: number) {
-    if (!editCell) return;
+  function applyLocalSlotUpdate(date: string, slot: string, staffName: string | null) {
+    if (!roster) return;
+    const updatedDays = roster.days.map((day) => {
+      if (day.date !== date) return day;
+      const slots = { ...day.call_slots };
+      if (staffName === null) delete slots[slot]; else slots[slot] = staffName;
+      return { ...day, call_slots: slots };
+    });
+    setRoster({ ...roster, days: updatedDays });
+  }
+
+  async function refreshAssignments() {
+    const a = await api.getAssignments(configId);
+    setAssignments(a);
+  }
+
+  // Validates server-side; on violations, prompts user to confirm an override.
+  async function performSwap(date: string, slot: string, toStaffId: number, fromStaffId: number | null): Promise<boolean> {
     try {
-      await api.setOverride(configId, editCell.date, editCell.slot, staffId);
-      const a = await api.getAssignments(configId);
-      setAssignments(a);
-      if (roster) {
-        const staffName = allStaff.find((s) => s.id === staffId)?.name || "";
-        const updatedDays = roster.days.map((day) => {
-          if (day.date !== editCell.date) return day;
-          return { ...day, call_slots: { ...day.call_slots, [editCell.slot]: staffName } };
+      const resp = await api.swapCallAssignment(configId, {
+        date, call_type: slot,
+        from_staff_id: fromStaffId,
+        to_staff_id: toStaffId,
+        force: false,
+      });
+      if (!resp.ok) {
+        const msg = "This swap violates the following rule(s):\n\n  - " +
+          resp.violations.join("\n  - ") +
+          "\n\nOverride anyway?";
+        if (!window.confirm(msg)) return false;
+        const forced = await api.swapCallAssignment(configId, {
+          date, call_type: slot,
+          from_staff_id: fromStaffId,
+          to_staff_id: toStaffId,
+          force: true,
         });
-        setRoster({ ...roster, days: updatedDays });
+        if (!forced.ok) {
+          setError("Swap failed even with force=true.");
+          return false;
+        }
       }
+      return true;
     } catch (e: any) {
       setError(e.message);
+      return false;
+    }
+  }
+
+  async function handleOverride(staffId: number) {
+    if (!editCell) return;
+    const fromAssignment = assignments.find(
+      (a) => a.date === editCell.date && a.call_type === editCell.slot
+    );
+    const ok = await performSwap(editCell.date, editCell.slot, staffId, fromAssignment?.staff_id ?? null);
+    if (ok) {
+      const staffName = allStaff.find((s) => s.id === staffId)?.name || "";
+      applyLocalSlotUpdate(editCell.date, editCell.slot, staffName);
+      await refreshAssignments();
     }
     setEditCell(null);
   }
@@ -93,21 +145,60 @@ export default function CallRosterView() {
     if (!editCell) return;
     try {
       await api.removeOverride(configId, editCell.date, editCell.slot);
-      const a = await api.getAssignments(configId);
-      setAssignments(a);
-      if (roster) {
-        const updatedDays = roster.days.map((day) => {
-          if (day.date !== editCell.date) return day;
-          const slots = { ...day.call_slots };
-          delete slots[editCell.slot];
-          return { ...day, call_slots: slots };
-        });
-        setRoster({ ...roster, days: updatedDays });
-      }
+      await refreshAssignments();
+      applyLocalSlotUpdate(editCell.date, editCell.slot, null);
     } catch (e: any) {
       setError(e.message);
     }
     setEditCell(null);
+  }
+
+  async function handleCallDrop(targetDate: string, targetSlot: string) {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    setDragOver(null);
+    if (!drag) return;
+    if (drag.date !== targetDate) {
+      setError("Cross-day swaps are not supported — drag within the same row.");
+      return;
+    }
+    if (drag.fromSlot === targetSlot) return;
+
+    // Who currently sits in the target slot? (will be moved into source slot)
+    const targetAssignment = assignments.find(
+      (a) => a.date === targetDate && a.call_type === targetSlot
+    );
+
+    // 1. Validate & set dragged staff into target slot
+    const ok1 = await performSwap(
+      targetDate, targetSlot, drag.staffId,
+      targetAssignment?.staff_id ?? null,
+    );
+    if (!ok1) return;
+
+    // 2. Validate & move the displaced staff into the source slot (or clear it)
+    if (targetAssignment) {
+      const ok2 = await performSwap(
+        targetDate, drag.fromSlot, targetAssignment.staff_id, drag.staffId,
+      );
+      if (!ok2) {
+        // Refresh to reflect partial update
+        await refreshAssignments();
+        const data = await api.viewCallRoster(configId).catch(() => null);
+        if (data) setRoster(data);
+        return;
+      }
+    } else {
+      try {
+        await api.removeOverride(configId, targetDate, drag.fromSlot);
+      } catch {
+        /* ignore */
+      }
+    }
+
+    await refreshAssignments();
+    const data = await api.viewCallRoster(configId).catch(() => null);
+    if (data) setRoster(data);
   }
 
   function filteredStaff(): Staff[] {
@@ -160,7 +251,7 @@ export default function CallRosterView() {
           )}
 
           <p style={{ fontSize: 12, color: "var(--text-muted)", margin: "8px 0" }}>
-            Click any MO cell to manually override or clear the assignment.
+            Drag a name onto another cell in the same row to swap. Click a cell to override or clear via menu. Constraint violations prompt for confirmation.
           </p>
 
           <div className="card" style={{ marginTop: 4 }}>
@@ -190,13 +281,62 @@ export default function CallRosterView() {
                       {callColumns.map((slot) => {
                         const val = getSlotValue(day, slot);
                         const over = isOverride(day.date, slot);
+                        const ca = assignments.find((a) => a.date === day.date && a.call_type === slot);
+                        const zoneKey = `${day.date}_${slot}`;
+                        const isDragOver = dragOver === zoneKey;
                         return (
                           <td
                             key={slot}
                             className={`editable ${slot === callColumns[0] ? "mo1" : ""} ${over ? "override" : ""} ${!val ? "empty" : ""}`}
                             onClick={() => setEditCell({ date: day.date, slot })}
+                            onDragOver={(e) => {
+                              if (dragRef.current) {
+                                e.preventDefault();
+                                setDragOver(zoneKey);
+                              }
+                            }}
+                            onDragLeave={() => setDragOver((cur) => (cur === zoneKey ? null : cur))}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              handleCallDrop(day.date, slot);
+                            }}
+                            style={{
+                              outline: isDragOver ? "2px dashed #6366f1" : undefined,
+                              outlineOffset: isDragOver ? -2 : undefined,
+                            }}
                           >
-                            {val || "-"}
+                            {val ? (
+                              <span
+                                draggable={!!ca}
+                                onClick={(e) => e.stopPropagation()}
+                                onDragStart={(e) => {
+                                  if (!ca) return;
+                                  e.stopPropagation();
+                                  dragRef.current = {
+                                    staffId: ca.staff_id,
+                                    staffName: ca.staff_name,
+                                    date: day.date,
+                                    fromSlot: slot,
+                                  };
+                                }}
+                                onDragEnd={() => {
+                                  dragRef.current = null;
+                                  setDragOver(null);
+                                }}
+                                style={{
+                                  cursor: ca ? "grab" : "default",
+                                  userSelect: "none",
+                                  display: "inline-block",
+                                  width: "100%",
+                                }}
+                                title={ca ? "Drag to another cell in this row to swap" : undefined}
+                              >
+                                {val}
+                              </span>
+                            ) : (
+                              "-"
+                            )}
                           </td>
                         );
                       })}
@@ -241,7 +381,3 @@ export default function CallRosterView() {
   );
 }
 
-function monthName(m: number) {
-  return ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m];
-}

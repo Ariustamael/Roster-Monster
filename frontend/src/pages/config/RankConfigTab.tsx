@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../../api";
 import type { RankConfig } from "../../types";
+import { useEscClose } from "../../hooks/useEscClose";
 
 interface DraftRank {
   id: number | null;
@@ -10,6 +11,7 @@ interface DraftRank {
   is_call_eligible: boolean;
   is_duty_eligible: boolean;
   is_consultant_tier: boolean;
+  is_registrar_tier: boolean;
   is_active: boolean;
 }
 
@@ -19,6 +21,8 @@ export default function RankConfigTab() {
   const [editId, setEditId] = useState<number | "new" | null>(null);
   const [draft, setDraft] = useState<DraftRank | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEscClose(() => { setEditId(null); setDraft(null); }, editId != null);
 
   async function load() {
     setLoading(true);
@@ -44,6 +48,7 @@ export default function RankConfigTab() {
       is_call_eligible: r.is_call_eligible,
       is_duty_eligible: r.is_duty_eligible,
       is_consultant_tier: r.is_consultant_tier,
+      is_registrar_tier: r.is_registrar_tier,
       is_active: r.is_active,
     });
   }
@@ -58,6 +63,7 @@ export default function RankConfigTab() {
       is_call_eligible: false,
       is_duty_eligible: true,
       is_consultant_tier: false,
+      is_registrar_tier: false,
       is_active: true,
     });
   }
@@ -73,6 +79,7 @@ export default function RankConfigTab() {
         is_call_eligible: draft.is_call_eligible,
         is_duty_eligible: draft.is_duty_eligible,
         is_consultant_tier: draft.is_consultant_tier,
+        is_registrar_tier: draft.is_registrar_tier,
         is_active: draft.is_active,
       };
       if (draft.id != null) {
@@ -126,6 +133,7 @@ export default function RankConfigTab() {
                 <th>Call Eligible</th>
                 <th>Duty Eligible</th>
                 <th>Consultant Tier</th>
+                <th>Registrar Tier</th>
                 <th>Active</th>
                 <th style={{ width: 100 }}></th>
               </tr>
@@ -139,6 +147,7 @@ export default function RankConfigTab() {
                   <td>{r.is_call_eligible ? "Yes" : "No"}</td>
                   <td>{r.is_duty_eligible ? "Yes" : "No"}</td>
                   <td>{r.is_consultant_tier ? "Yes" : "No"}</td>
+                  <td>{r.is_registrar_tier ? "Yes" : "No"}</td>
                   <td>{r.is_active ? "Yes" : "No"}</td>
                   <td>
                     <button className="btn btn-sm btn-secondary" onClick={() => startEdit(r)}>Edit</button>
@@ -146,7 +155,7 @@ export default function RankConfigTab() {
                 </tr>
               ))}
               {ranks.length === 0 && (
-                <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)" }}>No ranks configured.</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: "center", color: "var(--text-muted)" }}>No ranks configured.</td></tr>
               )}
             </tbody>
           </table>
@@ -158,12 +167,12 @@ export default function RankConfigTab() {
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>{draft.id != null ? "Edit Rank" : "Add Rank"}</h3>
             <div className="form-group">
-              <label>Name</label>
-              <input type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Medical Officer" />
+              <label htmlFor="rank-name">Name <span style={{ color: "#dc2626" }}>*</span></label>
+              <input id="rank-name" type="text" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Medical Officer" />
             </div>
             <div className="form-group">
-              <label>Abbreviation</label>
-              <input type="text" value={draft.abbreviation} onChange={(e) => setDraft({ ...draft, abbreviation: e.target.value })} placeholder="e.g. MO" />
+              <label htmlFor="rank-abbr">Abbreviation</label>
+              <input id="rank-abbr" type="text" value={draft.abbreviation} onChange={(e) => setDraft({ ...draft, abbreviation: e.target.value })} placeholder="e.g. MO" />
             </div>
             <div className="form-group">
               <label>Display Order</label>
@@ -188,6 +197,12 @@ export default function RankConfigTab() {
               </label>
             </div>
             <div className="form-group">
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }} title="Counts as a registrar for OT max-registrars cap and R-type call eligibility.">
+                <input type="checkbox" checked={draft.is_registrar_tier} onChange={(e) => setDraft({ ...draft, is_registrar_tier: e.target.checked })} />
+                Registrar tier
+              </label>
+            </div>
+            <div className="form-group">
               <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 <input type="checkbox" checked={draft.is_active} onChange={(e) => setDraft({ ...draft, is_active: e.target.checked })} />
                 Active
@@ -198,7 +213,7 @@ export default function RankConfigTab() {
                 <button className="btn btn-danger" onClick={() => handleDelete(draft.id!)} style={{ marginRight: "auto" }}>Delete</button>
               )}
               <button className="btn btn-secondary" onClick={() => { setEditId(null); setDraft(null); }}>Cancel</button>
-              <button className="btn btn-primary" onClick={save}>Save</button>
+              <button className="btn btn-primary" onClick={save} disabled={!draft.name.trim()}>Save</button>
             </div>
           </div>
         </div>

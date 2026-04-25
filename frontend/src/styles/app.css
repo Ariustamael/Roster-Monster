@@ -10,6 +10,7 @@
   --ph: #fce7f3;
   --success: #059669;
   --danger: #dc2626;
+  --warning: #f59e0b;
   --ot-bg: #dbeafe;
   --clinic-bg: #d1fae5;
   --mopd-bg: #fef9c3;
@@ -301,7 +302,6 @@ tr.weekend.ph { background: var(--ph); }
 
 .duty-tag.ot { background: var(--ot-bg); color: #1e40af; }
 .duty-tag.clinic { background: var(--clinic-bg); color: #065f46; }
-.duty-tag.mopd { background: var(--mopd-bg); color: #92400e; }
 .duty-tag.admin { background: var(--admin-bg); color: var(--text-muted); }
 
 /* ── Fairness table ──────────────────────────────────── */
@@ -398,8 +398,12 @@ tr.weekend.ph { background: var(--ph); }
   border-radius: 10px;
   padding: 24px;
   min-width: 340px;
-  max-width: 480px;
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
   box-shadow: 0 8px 30px rgba(0,0,0,0.15);
+  /* Anchor sticky footer relative to the modal */
+  position: relative;
 }
 
 .modal h3 {
@@ -412,6 +416,17 @@ tr.weekend.ph { background: var(--ph); }
   gap: 8px;
   justify-content: flex-end;
   margin-top: 16px;
+  /* Keep Save/Cancel reachable when the form scrolls */
+  position: sticky;
+  bottom: -24px;
+  background: var(--surface);
+  padding: 12px 0 0;
+  margin-left: -24px;
+  margin-right: -24px;
+  padding-left: 24px;
+  padding-right: 24px;
+  border-top: 1px solid var(--border);
+  z-index: 2;
 }
 
 /* ── Forms ──────────────────────────────────────────── */
@@ -477,53 +492,6 @@ td.override {
   outline-offset: -2px;
 }
 
-/* ── Expandable staff row ───────────────────────────── */
-
-.expand-toggle {
-  cursor: pointer;
-  user-select: none;
-}
-
-.expand-toggle:hover td {
-  background: #f0f1f5;
-}
-
-.staff-detail {
-  background: #f8f9fb;
-}
-
-.staff-detail td {
-  padding: 12px 16px;
-}
-
-.detail-section {
-  display: inline-flex;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-
-.detail-section .chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-}
-
-.chip .remove {
-  cursor: pointer;
-  color: var(--danger);
-  font-weight: bold;
-  margin-left: 2px;
-}
-
-.chip .remove:hover { opacity: 0.7; }
-
-.chip.block { background: #fee2e2; border-color: #fecaca; }
-.chip.request { background: #dbeafe; border-color: #bfdbfe; }
 .chip.leave { background: #fef9c3; border-color: #fde68a; }
 
 /* ── Team Board (drag-and-drop) ─────────────────────── */

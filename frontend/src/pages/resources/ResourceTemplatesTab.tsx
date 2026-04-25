@@ -2,8 +2,11 @@ import { Fragment, useEffect, useState, type DragEvent } from "react";
 import { api } from "../../api";
 import type { ResourceTemplate, Staff, CallTypeConfig } from "../../types";
 import { DAY_NAMES, CONS_RANKS, COLOR_PRESETS } from "./constants";
+import { useEscClose } from "../../hooks/useEscClose";
+import MultiSelectDropdown from "../../components/MultiSelectDropdown";
 
 const SESSIONS = ["AM", "PM"] as const;
+const OT_SESSION_OPTIONS = ["AM", "PM", "Full Day"] as const;
 
 export default function ResourceTemplatesTab() {
   const [templates, setTemplates] = useState<ResourceTemplate[]>([]);
@@ -138,8 +141,15 @@ export default function ResourceTemplatesTab() {
   for (const t of templates) {
     if (t.day_of_week >= 0 && t.day_of_week < 7) {
       const dayKey = DAY_NAMES[t.day_of_week];
-      const sess = t.session === "PM" ? "PM" : "AM";
-      grid[dayKey][sess][t.resource_type].push(t);
+      // Full-day OTs appear in BOTH AM and PM cells (same underlying template,
+      // rendered twice so users can see it in either session view).
+      if (t.resource_type === "ot" && t.session === "Full Day") {
+        grid[dayKey]["AM"][t.resource_type].push(t);
+        grid[dayKey]["PM"][t.resource_type].push(t);
+      } else {
+        const sess = t.session === "PM" ? "PM" : "AM";
+        grid[dayKey][sess][t.resource_type].push(t);
+      }
     }
   }
   for (const day of DAY_NAMES) {
@@ -211,7 +221,7 @@ export default function ResourceTemplatesTab() {
                       >
                         {grid[day][sess][type].map((t) => (
                           <ResourceCard
-                            key={t.id}
+                            key={`${sess}-${t.id}`}
                             template={t}
                             isDragging={dragItem?.id === t.id}
                             onDragStart={(e) => {
@@ -238,7 +248,7 @@ export default function ResourceTemplatesTab() {
         <ResourceFormModal
           title="Add Resource"
           consultants={consultants}
-          callSlotNames={callTypes.filter((c) => c.is_active).map((c) => c.name)}
+          callSlotOptions={callTypes.filter((c) => c.is_active).map((c) => ({ id: c.id, name: c.name }))}
           onSave={handleAdd}
           onClose={() => setShowAdd(false)}
         />
@@ -247,7 +257,7 @@ export default function ResourceTemplatesTab() {
         <ResourceFormModal
           title="Edit Resource"
           consultants={consultants}
-          callSlotNames={callTypes.filter((c) => c.is_active).map((c) => c.name)}
+          callSlotOptions={callTypes.filter((c) => c.is_active).map((c) => ({ id: c.id, name: c.name }))}
           initial={editTemplate}
           onSave={(data) => handleUpdate(editTemplate.id, data)}
           onClose={() => setEditId(null)}
@@ -297,6 +307,13 @@ function ResourceCard({
           {t.is_emergency ? "⚡ " : ""}
           {t.label || t.room}
         </span>
+        <span
+          title={`Priority ${t.priority ?? 5} (1 = filled first, 10 = filled last)`}
+          style={{
+            fontSize: 10, fontWeight: 700, padding: "1px 5px", borderRadius: 3,
+            background: "rgba(0,0,0,0.08)", color: "#374151", marginLeft: "auto", marginRight: 4,
+          }}
+        >P{t.priority ?? 5}</span>
         <button
           className="resource-card-dup"
           title="Duplicate"
@@ -323,16 +340,17 @@ function ResourceCard({
 
 
 function ResourceFormModal({
-  title, consultants, callSlotNames, initial, onSave, onClose, onDelete,
+  title, consultants, callSlotOptions, initial, onSave, onClose, onDelete,
 }: {
   title: string;
   consultants: Staff[];
-  callSlotNames: string[];
+  callSlotOptions: { id: number; name: string }[];
   initial?: ResourceTemplate;
   onSave: (data: any) => void;
   onClose: () => void;
   onDelete?: () => void;
 }) {
+  useEscClose(onClose);
   const [resourceType, setResourceType] = useState<"clinic" | "ot">(initial?.resource_type ?? "clinic");
   const [dow, setDow] = useState(initial?.day_of_week ?? 0);
   const [session, setSession] = useState(initial?.session ?? "AM");
@@ -349,9 +367,27 @@ function ResourceFormModal({
   );
   const [color, setColor] = useState<string | null>(initial?.color ?? null);
   const [isActive, setIsActive] = useState(initial?.is_active ?? true);
+  const [priority, setPriority] = useState(initial?.priority ?? 5);
+  const [maxRegistrars, setMaxRegistrars] = useState(initial?.max_registrars ?? 1);
+  const [eligibleRankIds, setEligibleRankIds] = useState<number[]>(
+    initial?.eligible_rank_ids
+      ? initial.eligible_rank_ids.split(",").map((s) => parseInt(s.trim())).filter((n) => !isNaN(n))
+      : []
+  );
+  const [ranks, setRanks] = useState<import("../../types").RankConfig[]>([]);
+  useEffect(() => { api.getRanks().then(setRanks); }, []);
+  const dutyEligibleRanks = ranks.filter(r => r.is_active && r.is_duty_eligible)
+    .sort((a, b) => a.display_order - b.display_order);
 
   const isOT = resourceType === "ot";
   const isClinic = resourceType === "clinic";
+
+  // Coerce session to a valid value if user switches from OT (Full Day) to clinic.
+  useEffect(() => {
+    if (isClinic && session === "Full Day") {
+      setSession("AM");
+    }
+  }, [isClinic, session]);
 
   function toggleWeek(w: number) {
     setSelectedWeeks((prev) =>
@@ -359,11 +395,6 @@ function ResourceFormModal({
     );
   }
 
-  function toggleSlot(slot: string) {
-    setLinkedSlots((prev) =>
-      prev.includes(slot) ? prev.filter((s) => s !== slot) : [...prev, slot]
-    );
-  }
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
@@ -386,46 +417,106 @@ function ResourceFormModal({
           </div>
         </div>
 
-        <div className="form-group">
-          <label>Day</label>
-          <select value={dow} onChange={(e) => setDow(Number(e.target.value))}>
-            {DAY_NAMES.map((n, i) => <option key={i} value={i}>{n}</option>)}
-          </select>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor="r-day">Day</label>
+            <select id="r-day" value={dow} onChange={(e) => setDow(Number(e.target.value))}>
+              {DAY_NAMES.map((n, i) => <option key={i} value={i}>{n}</option>)}
+            </select>
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor="r-session">Session</label>
+            <select id="r-session" value={session} onChange={(e) => setSession(e.target.value)}>
+              {(isOT ? OT_SESSION_OPTIONS : SESSIONS).map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+        {isOT && session === "Full Day" && (
+          <div style={{ fontSize: 11, color: "var(--text-muted)", margin: "-8px 0 12px" }}>
+            Same person covers AM + PM. Card will appear in both session rows.
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor="r-priority" title="1 = highest priority (filled first), 10 = lowest.">
+              Priority (1–10)
+            </label>
+            <input id="r-priority" type="number" min={1} max={10} value={priority}
+              onChange={(e) => setPriority(Math.max(1, Math.min(10, Number(e.target.value))))} />
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+              1 = highest (filled first)
+            </div>
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label htmlFor="r-staff">Staff Required</label>
+            <input id="r-staff" type="number" min={0} max={10} value={staffRequired}
+              onChange={(e) => setStaffRequired(Number(e.target.value))} />
+          </div>
         </div>
 
         <div className="form-group">
-          <label>Session</label>
-          <select value={session} onChange={(e) => setSession(e.target.value)}>
-            {SESSIONS.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
+          <label title="Tick which ranks may be assigned here. Leave all unticked to allow any duty-eligible rank.">
+            Eligible Ranks
+          </label>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {dutyEligibleRanks.map((r) => {
+              const checked = eligibleRankIds.includes(r.id);
+              return (
+                <label key={r.id} style={{
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                  padding: "3px 8px", fontSize: 12, borderRadius: 4,
+                  background: checked ? "#dbeafe" : "#f3f4f6",
+                  border: `1px solid ${checked ? "#2563eb" : "var(--border)"}`,
+                  cursor: "pointer", userSelect: "none",
+                }}>
+                  <input type="checkbox" checked={checked} style={{ margin: 0 }}
+                    onChange={() => setEligibleRankIds((prev) =>
+                      prev.includes(r.id) ? prev.filter((x) => x !== r.id) : [...prev, r.id]
+                    )} />
+                  {r.abbreviation || r.name}
+                </label>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+            Empty = any duty-eligible rank.
+          </div>
         </div>
 
         <div className="form-group">
-          <label>Resource Label</label>
-          <input type="text" value={label} onChange={(e) => setLabel(e.target.value)}
-            placeholder="e.g. NC, Sup, MOPD, Trauma" />
+          <label htmlFor="r-label">Resource Label</label>
+          <input id="r-label" type="text" value={label} onChange={(e) => setLabel(e.target.value)}
+            placeholder="e.g. SUP, NC, MOPD, Hand VC, Trauma" />
         </div>
 
         <div className="form-group">
-          <label>Room</label>
-          <input type="text" value={room} onChange={(e) => setRoom(e.target.value)}
+          <label htmlFor="r-room">Room <span style={{ color: "#dc2626" }}>*</span></label>
+          <input id="r-room" type="text" value={room} onChange={(e) => setRoom(e.target.value)}
             placeholder={isOT ? "e.g. OT1, EOT" : "e.g. 4E-Rm3"} />
         </div>
 
         <div className="form-group" style={{ opacity: isEmergency ? 0.4 : 1 }}>
-          <label>Consultant</label>
-          <select value={consId ?? ""} onChange={(e) => setConsId(e.target.value ? Number(e.target.value) : null)}
+          <label htmlFor="r-consultant">Consultant</label>
+          <select id="r-consultant" value={consId ?? ""} onChange={(e) => setConsId(e.target.value ? Number(e.target.value) : null)}
             disabled={isEmergency}>
             <option value="">— None —</option>
             {consultants.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
 
-        <div className="form-group">
-          <label>Staff Required</label>
-          <input type="number" min={0} max={10} value={staffRequired}
-            onChange={(e) => setStaffRequired(Number(e.target.value))} />
-        </div>
+        {isOT && (
+          <div className="form-group">
+            <label title="Cap on SSR/SR count in this OT. Set to 0 to exclude registrars entirely.">
+              Max Registrars
+            </label>
+            <input type="number" min={0} max={5} value={maxRegistrars}
+              onChange={(e) => setMaxRegistrars(Math.max(0, Math.min(5, Number(e.target.value))))} />
+            <div style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+              Typically 1 — prevents doubling up SSR/SR in the same OT.
+            </div>
+          </div>
+        )}
 
         <div className="form-group" style={{ opacity: isClinic ? 0.4 : 1 }}>
           <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -452,16 +543,19 @@ function ResourceFormModal({
         </div>
 
         <div className="form-group">
-          <label>Linked Manpower</label>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 4 }}>
-            {callSlotNames.length === 0 && <span style={{ color: "#999", fontSize: 12 }}>No call types configured</span>}
-            {callSlotNames.map((slot) => (
-              <label key={slot} style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-                <input type="checkbox" checked={linkedSlots.includes(slot)} onChange={() => toggleSlot(slot)} />
-                {slot}
-              </label>
-            ))}
-          </div>
+          <label>Linked Manpower <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>(pre-assign call holders of these types to this resource)</span></label>
+          {callSlotOptions.length === 0 ? (
+            <span style={{ color: "#999", fontSize: 12 }}>No call types configured</span>
+          ) : (
+            <MultiSelectDropdown
+              options={callSlotOptions.map((c) => ({ id: c.id, label: c.name }))}
+              selected={callSlotOptions.filter((c) => linkedSlots.includes(c.name)).map((c) => c.id)}
+              onChange={(ids) => setLinkedSlots(
+                callSlotOptions.filter((c) => ids.includes(c.id)).map((c) => c.name)
+              )}
+              placeholder="None"
+            />
+          )}
         </div>
 
         <div className="form-group">
@@ -504,6 +598,7 @@ function ResourceFormModal({
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
           <button
             className="btn btn-primary"
+            disabled={!room.trim()}
             onClick={() => {
               if (room.trim()) {
                 onSave({
@@ -520,6 +615,9 @@ function ResourceFormModal({
                   color,
                   is_active: isActive,
                   sort_order: initial?.sort_order ?? 0,
+                  priority,
+                  max_registrars: isOT ? maxRegistrars : 1,
+                  eligible_rank_ids: eligibleRankIds.length > 0 ? eligibleRankIds.join(",") : null,
                 });
               }
             }}

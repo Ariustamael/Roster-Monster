@@ -131,7 +131,9 @@ def reassign_staff(
 
     role = "mo"
     rank_val = staff.rank if isinstance(staff.rank, str) else staff.rank.value
-    cons_ranks = db.query(RankConfig).filter(RankConfig.is_consultant_tier.is_(True)).all()
+    cons_ranks = (
+        db.query(RankConfig).filter(RankConfig.is_consultant_tier.is_(True)).all()
+    )
     cons_rank_names = {r.name for r in cons_ranks}
     if rank_val in cons_rank_names:
         role = "consultant"

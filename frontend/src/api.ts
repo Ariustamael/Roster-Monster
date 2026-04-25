@@ -1,4 +1,4 @@
-const API = "http://127.0.0.1:8000/api";
+const API = (import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000") + "/api";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API}${path}`, {
@@ -39,7 +39,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ name, rank, active, has_admin_role: false }),
     }),
-  updateStaff: (id: number, data: { name: string; rank: string; active: boolean; has_admin_role?: boolean; extra_call_type_ids?: string | null; duty_preference?: string | null }) =>
+  updateStaff: (id: number, data: { name: string; rank: string; active: boolean; has_admin_role?: boolean; extra_call_type_ids?: string | null; duty_preference?: string | null; can_do_call?: boolean; can_do_clinic?: boolean; can_do_ot?: boolean }) =>
     request<import("./types").Staff>(`/staff/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
@@ -141,6 +141,18 @@ export const api = {
       `/roster/${configId}/override?date=${date}&call_type=${callType}`,
       { method: "DELETE" }
     ),
+  swapCallAssignment: (
+    configId: number,
+    data: { date: string; call_type: string; from_staff_id?: number | null; to_staff_id: number; force?: boolean }
+  ) =>
+    request<{
+      ok: boolean;
+      violations: string[];
+      assignment: import("./types").CallAssignment | null;
+    }>(`/roster/${configId}/swap`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   getAssignments: (configId: number) =>
     request<import("./types").CallAssignment[]>(`/roster/${configId}/assignments`),
 
@@ -162,6 +174,63 @@ export const api = {
     }),
   deleteDutyOverride: (configId: number, assignmentId: number) =>
     request<{ ok: boolean }>(`/roster/${configId}/duty-override/${assignmentId}`, { method: "DELETE" }),
+  regenerateDutyDay: (configId: number, targetDate: string) =>
+    request<import("./types").DutyRosterResponse>(
+      `/roster/${configId}/regenerate-day?target_date=${targetDate}`,
+      { method: "POST" }
+    ),
+  resetAllDutyAssignments: (configId: number) =>
+    request<{ ok: boolean; deleted: number }>(
+      `/roster/${configId}/duty-assignments`,
+      { method: "DELETE" }
+    ),
+  restoreDutyAssignments: (
+    configId: number,
+    rows: Array<{
+      date: string; staff_id: number; session: string; duty_type: string;
+      location?: string | null; consultant_id?: number | null;
+      is_manual_override?: boolean;
+    }>,
+    targetDate?: string,
+  ) => {
+    const qs = targetDate ? `?target_date=${targetDate}` : "";
+    return request<{ ok: boolean; count: number }>(
+      `/roster/${configId}/duty-assignments/restore${qs}`,
+      { method: "POST", body: JSON.stringify(rows) }
+    );
+  },
+  listDayResourceOverrides: (targetDate: string) =>
+    request<import("./types").ResourceTemplate[]>(
+      `/templates/day-resources?target_date=${targetDate}`
+    ),
+  initializeDayResourceOverrides: (targetDate: string) =>
+    request<import("./types").ResourceTemplate[]>(
+      `/templates/day-resources/initialize?target_date=${targetDate}`,
+      { method: "POST" }
+    ),
+  resetDayResourceOverrides: (targetDate: string) =>
+    request<{ ok: boolean; deleted: number }>(
+      `/templates/day-resources?target_date=${targetDate}`,
+      { method: "DELETE" }
+    ),
+  swapDutyAssignment: (
+    configId: number,
+    data: {
+      date: string; duty_type: string; session: string;
+      location?: string | null; consultant_id?: number | null;
+      clinic_type?: string | null;
+      from_staff_id?: number | null; to_staff_id: number;
+      old_assignment_id?: number | null; duplicate?: boolean; force?: boolean;
+    }
+  ) =>
+    request<{
+      ok: boolean;
+      violations: string[];
+      assignment: import("./types").DutyAssignment | null;
+    }>(`/roster/${configId}/duty-swap`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 
   // Resource Templates
   getResourceTemplates: () =>

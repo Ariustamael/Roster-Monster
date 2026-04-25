@@ -1,7 +1,12 @@
 from datetime import date, timedelta
 
 
-def is_overnight(call_type: str, d: date, stepdown_dates: set[date], call_type_configs: dict | None = None) -> bool:
+def is_overnight(
+    call_type: str,
+    d: date,
+    stepdown_dates: set[date],
+    call_type_configs: dict | None = None,
+) -> bool:
     if call_type_configs:
         cfg = call_type_configs.get(call_type)
         if cfg:
@@ -12,6 +17,17 @@ def is_overnight(call_type: str, d: date, stepdown_dates: set[date], call_type_c
     if call_type == "MO3" and d in stepdown_dates:
         return True
     return False
+
+
+def is_24h_call(
+    call_type: str, d: date, stepdown_dates: set[date], call_type_configs: dict | None = None
+) -> bool:
+    """True for overnight calls that come with post-call rest (i.e., a real 24h shift).
+    Night-float types are overnight but not 24h — the person works the following day."""
+    if not is_overnight(call_type, d, stepdown_dates, call_type_configs):
+        return False
+    pct = get_post_call_type(call_type, call_type_configs)
+    return pct in ("8am", "12pm", "5pm")
 
 
 def get_post_call_type(call_type: str, call_type_configs: dict | None = None) -> str:
@@ -53,22 +69,21 @@ def check_call_gap(
     call_type_configs: dict | None = None,
     min_gap: int | None = None,
 ) -> bool:
-    """Return True if there are at least min_gap clear days since last overnight call."""
-    if not is_overnight(call_type, d, stepdown_dates, call_type_configs):
-        return True
+    """Return True if there are at least min_gap clear days since this person last
+    did the SAME call type. Applies to all call types (overnight or not)."""
     if min_gap is None:
         if call_type_configs and call_type in call_type_configs:
             min_gap = call_type_configs[call_type].get("min_gap_days", 2)
         else:
             min_gap = 2
+    if min_gap <= 0:
+        return True
     for offset in range(1, min_gap + 2):
         prev = d - timedelta(days=offset)
-        if prev in assignments and person_id in assignments[prev]:
-            prev_type = assignments[prev][person_id]
-            if is_overnight(prev_type, prev, stepdown_dates, call_type_configs):
-                gap = (d - prev).days - 1
-                if gap < min_gap:
-                    return False
+        if prev in assignments and assignments[prev].get(person_id) == call_type:
+            gap = (d - prev).days - 1
+            if gap < min_gap:
+                return False
     return True
 
 
@@ -80,10 +95,15 @@ def check_no_consecutive_different_types(
     stepdown_dates: set[date],
     call_type_configs: dict | None = None,
 ) -> bool:
-    """No switching between overnight call types within a short window."""
+    """No switching between overnight call types within a configurable window."""
     if not is_overnight(call_type, d, stepdown_dates, call_type_configs):
         return True
-    for offset in range(1, 6):
+    window = 5
+    if call_type_configs and call_type in call_type_configs:
+        window = call_type_configs[call_type].get("switch_window_days", 5)
+    if window <= 0:
+        return True
+    for offset in range(1, window + 1):
         prev = d - timedelta(days=offset)
         if prev in assignments and person_id in assignments[prev]:
             prev_type = assignments[prev][person_id]
@@ -92,6 +112,27 @@ def check_no_consecutive_different_types(
                     return False
                 return True
     return True
+
+
+def check_max_consecutive(
+    person_id: int,
+    d: date,
+    call_type: str,
+    assignments: dict[date, dict[int, str]],
+    max_consecutive: int,
+) -> bool:
+    """Return True if assigning this call_type to person_id on d would not exceed
+    max_consecutive prior same-type days."""
+    if max_consecutive <= 0:
+        return True
+    streak = 0
+    for offset in range(1, max_consecutive + 1):
+        prev = d - timedelta(days=offset)
+        if prev in assignments and assignments[prev].get(person_id) == call_type:
+            streak += 1
+        else:
+            break
+    return streak < max_consecutive
 
 
 def check_not_already_assigned_today(
@@ -116,21 +157,41 @@ def validate_full_roster(
         for pid, ctype in assignments[d].items():
             name = staff_names.get(pid, f"ID:{pid}")
 
-            if not check_post_call(pid, d, assignments, stepdown_dates, call_type_configs):
-                violations.append(
-                    f"{d}: {name} assigned {ctype} but is post-call"
-                )
+            if not check_post_call(
+                pid, d, assignments, stepdown_dates, call_type_configs
+            ):
+                violations.append(f"{d}: {name} assigned {ctype} but is post-call")
 
-            if not check_call_gap(pid, d, ctype, assignments, stepdown_dates, call_type_configs):
-                violations.append(
-                    f"{d}: {name} assigned {ctype} with insufficient gap"
-                )
+            cfg_for_gap = (call_type_configs or {}).get(ctype, {})
+            day_labels_gap = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            in_nf_run_gap = False
+            if cfg_for_gap.get("is_night_float") and cfg_for_gap.get("night_float_run"):
+                run_days_gap = {t.strip() for t in cfg_for_gap["night_float_run"].split(",") if t.strip()}
+                in_nf_run_gap = day_labels_gap[d.weekday()] in run_days_gap
+            if not in_nf_run_gap and not check_call_gap(
+                pid, d, ctype, assignments, stepdown_dates, call_type_configs
+            ):
+                violations.append(f"{d}: {name} assigned {ctype} with insufficient gap")
 
             if not check_no_consecutive_different_types(
                 pid, d, ctype, assignments, stepdown_dates, call_type_configs
             ):
                 violations.append(
                     f"{d}: {name} assigned {ctype} but previous call was different type"
+                )
+
+            cfg = (call_type_configs or {}).get(ctype, {})
+            max_consec = cfg.get("max_consecutive_days", 0)
+            day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            in_nf_run = False
+            if cfg.get("is_night_float") and cfg.get("night_float_run"):
+                run_days = {t.strip() for t in cfg["night_float_run"].split(",") if t.strip()}
+                in_nf_run = day_labels[d.weekday()] in run_days
+            if max_consec and not in_nf_run and not check_max_consecutive(
+                pid, d, ctype, assignments, max_consec
+            ):
+                violations.append(
+                    f"{d}: {name} assigned {ctype} exceeds max consecutive ({max_consec})"
                 )
 
         pids_today = list(assignments[d].values())

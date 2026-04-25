@@ -6,6 +6,7 @@ from .models import PreferenceType, RegistrarShift, RegistrarDutyType, DutyType,
 
 # ── Staff ────────────────────────────────────────────────────────────────
 
+
 class StaffCreate(BaseModel):
     name: str
     rank: str
@@ -13,6 +14,9 @@ class StaffCreate(BaseModel):
     has_admin_role: bool = False
     extra_call_type_ids: Optional[str] = None
     duty_preference: Optional[str] = None
+    can_do_call: bool = True
+    can_do_clinic: bool = True
+    can_do_ot: bool = True
 
 
 class StaffOut(BaseModel):
@@ -23,6 +27,9 @@ class StaffOut(BaseModel):
     has_admin_role: bool
     extra_call_type_ids: Optional[str] = None
     duty_preference: Optional[str] = None
+    can_do_call: bool = True
+    can_do_clinic: bool = True
+    can_do_ot: bool = True
     team_name: Optional[str] = None
     supervisor_name: Optional[str] = None
 
@@ -30,6 +37,7 @@ class StaffOut(BaseModel):
 
 
 # ── Team ─────────────────────────────────────────────────────────────────
+
 
 class TeamOut(BaseModel):
     id: int
@@ -69,6 +77,7 @@ class TeamAssignmentOut(BaseModel):
 
 # ── Leave ────────────────────────────────────────────────────────────────
 
+
 class LeaveCreate(BaseModel):
     staff_id: int
     date: date
@@ -86,6 +95,7 @@ class LeaveOut(BaseModel):
 
 
 # ── Call Preferences ─────────────────────────────────────────────────────
+
 
 class CallPreferenceCreate(BaseModel):
     staff_id: int
@@ -107,6 +117,7 @@ class CallPreferenceOut(BaseModel):
 
 # ── Public Holidays ──────────────────────────────────────────────────────
 
+
 class PublicHolidayCreate(BaseModel):
     date: date
     name: str
@@ -121,6 +132,7 @@ class PublicHolidayOut(BaseModel):
 
 
 # ── Monthly Config ───────────────────────────────────────────────────────
+
 
 class MonthlyConfigCreate(BaseModel):
     year: int
@@ -209,6 +221,7 @@ class EveningOTDateCreate(BaseModel):
 
 # ── Call Assignment (output) ─────────────────────────────────────────────
 
+
 class CallAssignmentOut(BaseModel):
     id: int
     date: date
@@ -224,6 +237,20 @@ class ManualOverrideCreate(BaseModel):
     date: date
     call_type: str
     staff_id: int
+
+
+class CallSwapRequest(BaseModel):
+    date: date
+    call_type: str
+    from_staff_id: Optional[int] = None
+    to_staff_id: int
+    force: bool = False
+
+
+class CallSwapResponse(BaseModel):
+    ok: bool
+    violations: list[str] = []
+    assignment: Optional[CallAssignmentOut] = None
 
 
 class DayRoster(BaseModel):
@@ -256,6 +283,7 @@ class RosterResponse(BaseModel):
 
 # ── Resource Template ────────────────────────────────────────────────────
 
+
 class ResourceTemplateCreate(BaseModel):
     resource_type: str  # "clinic" or "ot"
     day_of_week: int
@@ -270,6 +298,10 @@ class ResourceTemplateCreate(BaseModel):
     color: Optional[str] = None
     is_active: bool = True
     sort_order: int = 0
+    priority: int = 5
+    max_registrars: int = 1
+    eligible_rank_ids: Optional[str] = None
+    effective_date: Optional[date] = None
 
 
 class ResourceTemplateOut(BaseModel):
@@ -288,11 +320,16 @@ class ResourceTemplateOut(BaseModel):
     color: Optional[str] = None
     is_active: bool = True
     sort_order: int = 0
+    priority: int = 5
+    max_registrars: int = 1
+    eligible_rank_ids: Optional[str] = None
+    effective_date: Optional[date] = None
 
     model_config = {"from_attributes": True}
 
 
 # ── Duty Assignment (output) ─────────────────────────────────────────────
+
 
 class DutyOverrideCreate(BaseModel):
     date: date
@@ -320,6 +357,37 @@ class DutyAssignmentOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class DutyAssignmentRestore(BaseModel):
+    """Lightweight payload for bulk-restoring duty assignments (used by Undo)."""
+    date: date
+    staff_id: int
+    session: Session
+    duty_type: str
+    location: Optional[str] = None
+    consultant_id: Optional[int] = None
+    is_manual_override: bool = False
+
+
+class DutySwapRequest(BaseModel):
+    date: date
+    duty_type: str
+    session: Session
+    location: Optional[str] = None
+    consultant_id: Optional[int] = None
+    clinic_type: Optional[str] = None  # template label (e.g. "MOPD", "Hand VC")
+    from_staff_id: Optional[int] = None
+    to_staff_id: int
+    old_assignment_id: Optional[int] = None
+    duplicate: bool = False
+    force: bool = False
+
+
+class DutySwapResponse(BaseModel):
+    ok: bool
+    violations: list[str] = []
+    assignment: Optional[DutyAssignmentOut] = None
+
+
 class DayDutyRoster(BaseModel):
     date: date
     day_name: str
@@ -336,6 +404,14 @@ class DayDutyRoster(BaseModel):
     am_admin: list[DutyAssignmentOut]
     pm_admin: list[DutyAssignmentOut]
     unavailable: list[dict] = []
+    # Expected resource slots (templates) for the day, so the UI can render
+    # headers + empty drop zones even when no one is currently assigned.
+    expected_resources: list[dict] = []
+    # Constraint warnings for this day (post-call, leave conflicts, eligibility, etc.)
+    warnings: list[str] = []
+    # Total staffing shortfall — sum of (staff_required - assigned) across all
+    # expected resources on this day, where the diff is positive.
+    shortfall: int = 0
 
 
 class DutyRosterResponse(BaseModel):
@@ -347,6 +423,7 @@ class DutyRosterResponse(BaseModel):
 
 
 # ── Rank Config ──────────────────────────────────────────────────────────
+
 
 class RankConfigCreate(BaseModel):
     name: str
@@ -375,13 +452,16 @@ class RankConfigOut(BaseModel):
 
 # ── Call Type Config ─────────────────────────────────────────────────────
 
+
 class CallTypeConfigCreate(BaseModel):
     name: str
     display_order: int = 0
     is_overnight: bool = False
     post_call_type: str = "none"
     max_consecutive_days: int = 1
+    min_consecutive_days: int = 1
     min_gap_days: int = 2
+    switch_window_days: int = 5
     difficulty_points: int = 1
     counts_towards_fairness: bool = True
     applicable_days: str = "Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH"
@@ -389,6 +469,7 @@ class CallTypeConfigCreate(BaseModel):
     default_duty_type: Optional[str] = None
     is_night_float: bool = False
     night_float_run: Optional[str] = None
+    uses_consultant_affinity: bool = False
     is_active: bool = True
     is_duty_only: bool = False
     linked_to: Optional[str] = None
@@ -403,7 +484,9 @@ class CallTypeConfigOut(BaseModel):
     is_overnight: bool
     post_call_type: str
     max_consecutive_days: int
+    min_consecutive_days: int = 1
     min_gap_days: int
+    switch_window_days: int = 5
     difficulty_points: int
     counts_towards_fairness: bool
     applicable_days: str

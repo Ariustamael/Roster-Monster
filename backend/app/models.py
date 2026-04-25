@@ -1,6 +1,15 @@
 from sqlalchemy import (
-    Column, Integer, String, Date, DateTime, Boolean, ForeignKey, Enum as SAEnum,
-    UniqueConstraint, Text, func,
+    Column,
+    Integer,
+    String,
+    Date,
+    DateTime,
+    Boolean,
+    ForeignKey,
+    Enum as SAEnum,
+    UniqueConstraint,
+    Text,
+    func,
 )
 from sqlalchemy.orm import relationship
 import enum
@@ -12,9 +21,7 @@ class DutyType(str, enum.Enum):
     OT = "OT"
     EOT = "EOT"
     CLINIC = "Clinic"
-    MOPD = "MOPD"
     ADMIN = "Admin"
-    CAT_A = "CAT-A"
     SPECIAL = "Special"
     WARD_MO = "Ward MO"
     EOT_MO = "EOT MO"
@@ -45,6 +52,7 @@ class RegistrarDutyType(str, enum.Enum):
 
 # ── Rank Configuration ──────────────────────────────────────────────────
 
+
 class RankConfig(Base):
     __tablename__ = "rank_config"
 
@@ -59,11 +67,14 @@ class RankConfig(Base):
     is_active = Column(Boolean, default=True)
 
     eligible_call_types = relationship(
-        "CallTypeEligibleRank", back_populates="rank", cascade="all, delete-orphan",
+        "CallTypeEligibleRank",
+        back_populates="rank",
+        cascade="all, delete-orphan",
     )
 
 
 # ── Call Type Configuration ─────────────────────────────────────────────
+
 
 class CallTypeConfig(Base):
     __tablename__ = "call_type_config"
@@ -74,7 +85,9 @@ class CallTypeConfig(Base):
     is_overnight = Column(Boolean, default=False)
     post_call_type = Column(String(10), default="none")
     max_consecutive_days = Column(Integer, default=1)
+    min_consecutive_days = Column(Integer, default=1)
     min_gap_days = Column(Integer, default=2)
+    switch_window_days = Column(Integer, default=5)
     difficulty_points = Column(Integer, default=1)
     counts_towards_fairness = Column(Boolean, default=True)
     applicable_days = Column(String(50), default="Mon,Tue,Wed,Thu,Fri,Sat,Sun,PH")
@@ -82,13 +95,16 @@ class CallTypeConfig(Base):
     default_duty_type = Column(String(20), nullable=True)
     is_night_float = Column(Boolean, default=False)
     night_float_run = Column(String(50), nullable=True)
+    uses_consultant_affinity = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     is_duty_only = Column(Boolean, default=False)
     linked_to = Column(String(100), nullable=True)
     mutually_exclusive_with = Column(String(100), nullable=True)
 
     eligible_ranks = relationship(
-        "CallTypeEligibleRank", back_populates="call_type", cascade="all, delete-orphan",
+        "CallTypeEligibleRank",
+        back_populates="call_type",
+        cascade="all, delete-orphan",
     )
 
 
@@ -107,6 +123,7 @@ class CallTypeEligibleRank(Base):
 
 # ── Staff ────────────────────────────────────────────────────────────────
 
+
 class Staff(Base):
     __tablename__ = "staff"
 
@@ -117,18 +134,30 @@ class Staff(Base):
     has_admin_role = Column(Boolean, default=False)
     extra_call_type_ids = Column(String(100), nullable=True)
     duty_preference = Column(String(20), nullable=True)
+    # Per-staff eligibility toggles (e.g. pregnancy, injury, light duties).
+    # Defaults true — must be explicitly disabled. Active=False disables everything.
+    can_do_call = Column(Boolean, default=True)
+    can_do_clinic = Column(Boolean, default=True)
+    can_do_ot = Column(Boolean, default=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     team_assignments = relationship(
-        "TeamAssignment", back_populates="staff",
-        foreign_keys="TeamAssignment.staff_id", cascade="all, delete-orphan",
+        "TeamAssignment",
+        back_populates="staff",
+        foreign_keys="TeamAssignment.staff_id",
+        cascade="all, delete-orphan",
     )
     leaves = relationship("Leave", back_populates="staff", cascade="all, delete-orphan")
-    call_preferences = relationship("CallPreference", back_populates="staff", cascade="all, delete-orphan")
-    call_assignments = relationship("CallAssignment", back_populates="staff", cascade="all, delete-orphan")
+    call_preferences = relationship(
+        "CallPreference", back_populates="staff", cascade="all, delete-orphan"
+    )
+    call_assignments = relationship(
+        "CallAssignment", back_populates="staff", cascade="all, delete-orphan"
+    )
 
 
 # ── Teams ────────────────────────────────────────────────────────────────
+
 
 class Team(Base):
     __tablename__ = "team"
@@ -137,7 +166,9 @@ class Team(Base):
     name = Column(String(60), nullable=False, unique=True)
     display_order = Column(Integer, nullable=False, server_default="0")
 
-    assignments = relationship("TeamAssignment", back_populates="team", cascade="all, delete-orphan")
+    assignments = relationship(
+        "TeamAssignment", back_populates="team", cascade="all, delete-orphan"
+    )
 
 
 class TeamAssignment(Base):
@@ -151,12 +182,15 @@ class TeamAssignment(Base):
     effective_from = Column(Date, nullable=False)
     effective_to = Column(Date, nullable=True)
 
-    staff = relationship("Staff", back_populates="team_assignments", foreign_keys=[staff_id])
+    staff = relationship(
+        "Staff", back_populates="team_assignments", foreign_keys=[staff_id]
+    )
     team = relationship("Team", back_populates="assignments")
     supervisor = relationship("Staff", foreign_keys=[supervisor_id])
 
 
 # ── Leave ────────────────────────────────────────────────────────────────
+
 
 class Leave(Base):
     __tablename__ = "leave"
@@ -172,6 +206,7 @@ class Leave(Base):
 
 
 # ── Call Preferences ─────────────────────────────────────────────────────
+
 
 class CallPreference(Base):
     __tablename__ = "call_preference"
@@ -189,6 +224,7 @@ class CallPreference(Base):
 
 # ── Public Holidays ──────────────────────────────────────────────────────
 
+
 class PublicHoliday(Base):
     __tablename__ = "public_holiday"
 
@@ -199,6 +235,7 @@ class PublicHoliday(Base):
 
 # ── Monthly Configuration ────────────────────────────────────────────────
 
+
 class MonthlyConfig(Base):
     __tablename__ = "monthly_config"
 
@@ -208,13 +245,27 @@ class MonthlyConfig(Base):
     status = Column(String(20), default="draft")
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
-    consultant_oncalls = relationship("ConsultantOnCall", back_populates="config", cascade="all, delete-orphan")
-    ac_oncalls = relationship("ACOnCall", back_populates="config", cascade="all, delete-orphan")
-    registrar_duties = relationship("RegistrarDuty", back_populates="config", cascade="all, delete-orphan")
-    stepdown_days = relationship("StepdownDay", back_populates="config", cascade="all, delete-orphan")
-    evening_ot_dates = relationship("EveningOTDate", back_populates="config", cascade="all, delete-orphan")
-    call_assignments = relationship("CallAssignment", back_populates="config", cascade="all, delete-orphan")
-    duty_assignments = relationship("DutyAssignment", back_populates="config", cascade="all, delete-orphan")
+    consultant_oncalls = relationship(
+        "ConsultantOnCall", back_populates="config", cascade="all, delete-orphan"
+    )
+    ac_oncalls = relationship(
+        "ACOnCall", back_populates="config", cascade="all, delete-orphan"
+    )
+    registrar_duties = relationship(
+        "RegistrarDuty", back_populates="config", cascade="all, delete-orphan"
+    )
+    stepdown_days = relationship(
+        "StepdownDay", back_populates="config", cascade="all, delete-orphan"
+    )
+    evening_ot_dates = relationship(
+        "EveningOTDate", back_populates="config", cascade="all, delete-orphan"
+    )
+    call_assignments = relationship(
+        "CallAssignment", back_populates="config", cascade="all, delete-orphan"
+    )
+    duty_assignments = relationship(
+        "DutyAssignment", back_populates="config", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (UniqueConstraint("year", "month"),)
 
@@ -230,7 +281,9 @@ class ConsultantOnCall(Base):
 
     config = relationship("MonthlyConfig", back_populates="consultant_oncalls")
     consultant = relationship("Staff", foreign_keys=[consultant_id])
-    supervising_consultant = relationship("Staff", foreign_keys=[supervising_consultant_id])
+    supervising_consultant = relationship(
+        "Staff", foreign_keys=[supervising_consultant_id]
+    )
 
     __table_args__ = (UniqueConstraint("config_id", "date"),)
 
@@ -289,6 +342,7 @@ class EveningOTDate(Base):
 
 # ── Call Assignments (output) ────────────────────────────────────────────
 
+
 class CallAssignment(Base):
     __tablename__ = "call_assignment"
 
@@ -307,6 +361,7 @@ class CallAssignment(Base):
 
 # ── Resource Templates (unified clinic + OT) ─────────────────────────────
 
+
 class ResourceTemplate(Base):
     __tablename__ = "resource_template"
 
@@ -324,12 +379,22 @@ class ResourceTemplate(Base):
     color = Column(String(10), nullable=True)
     is_active = Column(Boolean, default=True)
     sort_order = Column(Integer, default=0)
+    priority = Column(Integer, default=5)  # 1=highest, 10=lowest
+    max_registrars = Column(Integer, default=1)  # cap on SSR/SR count per OT slot
+    # CSV of RankConfig.id values eligible for this resource. Empty/null = all
+    # duty-eligible ranks (current behavior).
+    eligible_rank_ids = Column(String(100), nullable=True)
+    # When set, this template applies ONLY on that date — overriding any weekly
+    # template for that date. Used for per-day edits (e.g. consultant on leave,
+    # extra ad-hoc OT). NULL = standard weekly template.
+    effective_date = Column(Date, nullable=True)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     consultant = relationship("Staff")
 
 
 # ── Duty Assignments (output) ────────────────────────────────────────────
+
 
 class DutyAssignment(Base):
     __tablename__ = "duty_assignment"
@@ -343,6 +408,10 @@ class DutyAssignment(Base):
     location = Column(String(30), nullable=True)
     consultant_id = Column(Integer, ForeignKey("staff.id"), nullable=True)
     is_manual_override = Column(Boolean, default=False)
+    # Resource template label (e.g. "MOPD", "Hand VC", "Sup", "NC") so that
+    # multiple unsited / no-consultant clinics with different labels remain
+    # distinguishable in the duty roster display.
+    clinic_type = Column(String(40), nullable=True)
 
     config = relationship("MonthlyConfig", back_populates="duty_assignments")
     staff = relationship("Staff", foreign_keys=[staff_id])

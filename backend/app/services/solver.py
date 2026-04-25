@@ -22,16 +22,21 @@ Soft scoring (higher = more likely picked):
   - Difficulty-weighted fairness
 """
 
+import logging
 from datetime import date, timedelta
 from dataclasses import dataclass, field
 from collections import defaultdict
 
+logger = logging.getLogger(__name__)
+
 from .validators import (
     is_overnight,
+    is_24h_call,
     check_post_call,
     check_call_gap,
     check_no_consecutive_different_types,
     check_not_already_assigned_today,
+    check_max_consecutive,
     validate_full_roster,
 )
 
@@ -43,7 +48,9 @@ class CallTypeInfo:
     is_overnight: bool
     post_call_type: str
     max_consecutive_days: int
+    min_consecutive_days: int
     min_gap_days: int
+    switch_window_days: int
     difficulty_points: int
     counts_towards_fairness: bool
     applicable_days: str
@@ -51,6 +58,10 @@ class CallTypeInfo:
     required_conditions: str = ""
     is_night_float: bool = False
     night_float_run: str = ""
+    uses_consultant_affinity: bool = False
+    is_duty_only: bool = False
+    # Names of other call types that must NOT be assigned on the same day.
+    mutually_exclusive_names: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -85,6 +96,9 @@ class SolverInput:
     request_dates: dict[int, set[date]]
     prior_assignments: dict[date, dict[int, str]] = field(default_factory=dict)
     call_type_configs: list[CallTypeInfo] = field(default_factory=list)
+    # Manual overrides: {date: {call_type: staff_id}} — seeded before solving
+    # so the solver treats them as already-filled and respects daily/continuity rules.
+    manual_overrides: dict[date, dict[str, int]] = field(default_factory=dict)
 
 
 @dataclass
@@ -97,7 +111,14 @@ class FairnessTracker:
     weekend_calls: dict[int, int] = field(default_factory=lambda: defaultdict(int))
     difficulty_points: dict[int, int] = field(default_factory=lambda: defaultdict(int))
 
-    def record(self, pid: int, call_type: str, is_weekend_or_ph: bool, is_24h: bool, diff_points: int = 1):
+    def record(
+        self,
+        pid: int,
+        call_type: str,
+        is_weekend_or_ph: bool,
+        is_24h: bool,
+        diff_points: int = 1,
+    ):
         self.total_all[pid] += 1
         self.type_calls[pid][call_type] += 1
         self.difficulty_points[pid] += diff_points
@@ -106,7 +127,9 @@ class FairnessTracker:
         if is_weekend_or_ph:
             self.weekend_calls[pid] += 1
 
-    def score(self, pid: int, call_type: str, is_weekend_or_ph: bool, diff_points: int = 1) -> float:
+    def score(
+        self, pid: int, call_type: str, is_weekend_or_ph: bool, diff_points: int = 1
+    ) -> float:
         s = 0.0
         total_24h = self.total_24h[pid]
         type_count = self.type_calls[pid][call_type]
@@ -114,10 +137,13 @@ class FairnessTracker:
         total_diff = self.difficulty_points[pid]
 
         max_24h = max(self.total_24h.values()) if self.total_24h else 1
-        max_type = max(
-            (self.type_calls[p].get(call_type, 0) for p in self.total_all),
-            default=1,
-        ) or 1
+        max_type = (
+            max(
+                (self.type_calls[p].get(call_type, 0) for p in self.total_all),
+                default=1,
+            )
+            or 1
+        )
         max_weekend = max(self.weekend_calls.values()) if self.weekend_calls else 1
         max_diff = max(self.difficulty_points.values()) if self.difficulty_points else 1
 
@@ -173,10 +199,16 @@ def _required_conditions_met(day: DayConfig, required_conditions: str) -> bool:
     return True
 
 
-def _required_slots(day: DayConfig, call_type_configs: list[CallTypeInfo]) -> list[CallTypeInfo]:
+def _required_slots(
+    day: DayConfig, call_type_configs: list[CallTypeInfo]
+) -> list[CallTypeInfo]:
     slots = []
     for ct in sorted(call_type_configs, key=lambda c: c.display_order):
-        if _day_matches_applicable(day, ct.applicable_days) and _required_conditions_met(day, ct.required_conditions):
+        if ct.is_duty_only:
+            continue  # duty-only types are filled by the duty solver, not here
+        if _day_matches_applicable(
+            day, ct.applicable_days
+        ) and _required_conditions_met(day, ct.required_conditions):
             slots.append(ct)
     return slots
 
@@ -187,6 +219,10 @@ def _build_ct_config_dict(call_type_configs: list[CallTypeInfo]) -> dict:
             "is_overnight": ct.is_overnight,
             "post_call_type": ct.post_call_type,
             "min_gap_days": ct.min_gap_days,
+            "switch_window_days": ct.switch_window_days,
+            "max_consecutive_days": ct.max_consecutive_days,
+            "is_night_float": ct.is_night_float,
+            "night_float_run": ct.night_float_run,
         }
         for ct in call_type_configs
     }
@@ -221,13 +257,59 @@ def _is_eligible(
     if not check_post_call(pid, d, assignments, stepdown_dates, ct_config_dict):
         return False
 
-    if is_overnight(ct.name, d, stepdown_dates, ct_config_dict):
-        if not check_call_gap(pid, d, ct.name, assignments, stepdown_dates, ct_config_dict, ct.min_gap_days):
+    # Night-float runs are expected to span multiple consecutive days; max_consecutive
+    # gates *other* call types. Skip the check when today is within this call type's
+    # night_float_run.
+    in_nf_run = False
+    if ct.is_night_float and ct.night_float_run:
+        run_days = {t.strip() for t in ct.night_float_run.split(",") if t.strip()}
+        in_nf_run = DAY_LABELS[d.weekday()] in run_days
+    if not in_nf_run:
+        if not check_max_consecutive(pid, d, ct.name, assignments, ct.max_consecutive_days):
             return False
+
+    # Same-type gap (applies to all call types; skip within night-float run)
+    if not in_nf_run and not check_call_gap(
+        pid,
+        d,
+        ct.name,
+        assignments,
+        stepdown_dates,
+        ct_config_dict,
+        ct.min_gap_days,
+    ):
+        return False
+
+    # Cross-type switching (only applies when today's call is overnight)
+    if is_overnight(ct.name, d, stepdown_dates, ct_config_dict):
         if not check_no_consecutive_different_types(
             pid, d, ct.name, assignments, stepdown_dates, ct_config_dict
         ):
             return False
+
+    # Min consecutive days: on run-start days (no prior-day continuation for this
+    # person + call type), require availability for the remainder of the run.
+    # When the run is shorter than min_consec (e.g. starting Thu of a Tue-Fri
+    # run = 2 days left), we cap at the remaining run length instead of failing,
+    # so coverage still happens when a broken run would otherwise leave gaps.
+    if ct.min_consecutive_days > 1:
+        prev = d - timedelta(days=1)
+        is_continuation = (
+            prev in assignments and assignments[prev].get(pid) == ct.name
+        )
+        if not is_continuation:
+            run_days: set[str] = set()
+            if ct.night_float_run:
+                run_days = {t.strip() for t in ct.night_float_run.split(",") if t.strip()}
+            needed = ct.min_consecutive_days - 1
+            for offset in range(1, needed + 1):
+                future = d + timedelta(days=offset)
+                if run_days and DAY_LABELS[future.weekday()] not in run_days:
+                    break  # end of run — stop requiring further availability
+                if future in leave_dates.get(pid, set()):
+                    return False
+                if future in block_dates.get(pid, set()):
+                    return False
 
     return True
 
@@ -246,14 +328,17 @@ def _score_candidate(
 
     score += fairness.score(person.id, ct.name, is_wknd_ph, ct.difficulty_points)
 
-    if ct.display_order == 0 and day.consultant_oncall_id is not None:
+    if ct.uses_consultant_affinity and day.consultant_oncall_id is not None:
         if person.supervisor_id == day.consultant_oncall_id:
             score += 5.0
-        elif day.consultant_oncall_team_id is not None and person.team_id == day.consultant_oncall_team_id:
+        elif (
+            day.consultant_oncall_team_id is not None
+            and person.team_id == day.consultant_oncall_team_id
+        ):
             score += 3.0
 
     if day.d in request_dates.get(person.id, set()):
-        score += 4.0
+        score += 20.0
 
     # Night float run continuity bonus: same person should cover consecutive run days
     if ct.night_float_run:
@@ -263,7 +348,10 @@ def _score_candidate(
             prev_day = day.d - timedelta(days=1)
             prev_label = DAY_LABELS[prev_day.weekday()]
             if prev_label in run_days and prev_day in assignments:
-                if person.id in assignments[prev_day] and assignments[prev_day].get(person.id) == ct.name:
+                if (
+                    person.id in assignments[prev_day]
+                    and assignments[prev_day].get(person.id) == ct.name
+                ):
                     score += 25.0
 
     last_call_date = None
@@ -301,9 +389,65 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
         slots = _required_slots(day, inp.call_type_configs)
         daily: dict[int, str] = {}
 
+        # Seed daily + assignments with manual overrides so the solver respects
+        # them for double-assignment checks, post-call gaps, and night-float continuity.
+        overrides_today = inp.manual_overrides.get(day.d, {})
+        for ctype, pid in overrides_today.items():
+            daily[pid] = ctype
+            assignments.setdefault(day.d, {})[pid] = ctype
+            call_is_24h = is_24h_call(ctype, day.d, stepdown_dates, ct_config_dict)
+            ct_cfg = next((c for c in inp.call_type_configs if c.name == ctype), None)
+            diff = ct_cfg.difficulty_points if ct_cfg else 1
+            if ct_cfg is None or ct_cfg.counts_towards_fairness:
+                fairness.record(pid, ctype, day.is_weekend or day.is_ph, call_is_24h, diff)
+
+        # Pre-assign night-float continuations before display-order slot processing.
+        # Otherwise earlier-order slots (e.g. R1) can snap up the night-float person
+        # before the continuity bonus applies to their real slot (e.g. R2).
+        today_label = DAY_LABELS[day.d.weekday()]
+        prev_day = day.d - timedelta(days=1)
+        prev_label = DAY_LABELS[prev_day.weekday()]
         for ct in slots:
-            # R1+2 covers 24h only when R1 or R2 is missing; skip if both already assigned
-            if ct.name == "R1+2" and "R1" in daily.values() and "R2" in daily.values():
+            if ct.name in overrides_today or ct.name in daily.values():
+                continue
+            if not ct.is_night_float or not ct.night_float_run:
+                continue
+            run_days = {t.strip() for t in ct.night_float_run.split(",") if t.strip()}
+            if today_label not in run_days or prev_label not in run_days:
+                continue
+            prev_holder = next(
+                (pid for pid, pct in assignments.get(prev_day, {}).items() if pct == ct.name),
+                None,
+            )
+            if prev_holder is None:
+                continue
+            person = next((p for p in inp.mo_pool if p.id == prev_holder), None)
+            if person is None:
+                continue
+            if not _is_eligible(
+                person, day, ct, assignments, daily,
+                inp.leave_dates, inp.block_dates, stepdown_dates, ct_config_dict,
+            ):
+                continue
+            daily[person.id] = ct.name
+            assignments.setdefault(day.d, {})[person.id] = ct.name
+            call_is_24h = is_24h_call(ct.name, day.d, stepdown_dates, ct_config_dict)
+            if ct.counts_towards_fairness:
+                fairness.record(
+                    person.id, ct.name, day.is_weekend or day.is_ph,
+                    call_is_24h, ct.difficulty_points,
+                )
+
+        for ct in slots:
+            # Skip slots already filled by manual override or pre-assigned continuation
+            if ct.name in overrides_today or ct.name in daily.values():
+                continue
+            # Mutual exclusion: if any mutually-exclusive call type is already
+            # assigned today, skip this slot. Covers the R1+2 vs R1/R2 case
+            # generically — no special-casing by name.
+            if ct.mutually_exclusive_names and any(
+                other in daily.values() for other in ct.mutually_exclusive_names
+            ):
                 continue
 
             eligible = [
@@ -342,8 +486,15 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
 
             chosen = scored[0]
             daily[chosen.id] = ct.name
-            call_is_24h = is_overnight(ct.name, day.d, stepdown_dates, ct_config_dict)
-            fairness.record(chosen.id, ct.name, day.is_weekend or day.is_ph, call_is_24h, ct.difficulty_points)
+            call_is_24h = is_24h_call(ct.name, day.d, stepdown_dates, ct_config_dict)
+            if ct.counts_towards_fairness:
+                fairness.record(
+                    chosen.id,
+                    ct.name,
+                    day.is_weekend or day.is_ph,
+                    call_is_24h,
+                    ct.difficulty_points,
+                )
 
         assignments[day.d] = daily
 
@@ -353,10 +504,175 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
         if d.year == inp.year and d.month == inp.month
     }
 
+    # Post-pass local search: swap pairs of same-call-type assignments if it
+    # reduces difficulty-point stddev across staff and all constraints still hold.
+    month_assignments = _local_search_swaps(
+        month_assignments, assignments, inp, stepdown_dates, ct_config_dict,
+    )
+
     staff_names = {p.id: p.name for p in inp.mo_pool}
-    violations = validate_full_roster(month_assignments, stepdown_dates, staff_names, ct_config_dict)
+    violations = validate_full_roster(
+        month_assignments, stepdown_dates, staff_names, ct_config_dict
+    )
 
     return month_assignments, violations
+
+
+def _local_search_swaps(
+    month_assignments: dict[date, dict[int, str]],
+    all_assignments: dict[date, dict[int, str]],
+    inp: SolverInput,
+    stepdown_dates: set[date],
+    ct_config_dict: dict,
+    max_passes: int = 5,
+) -> dict[date, dict[int, str]]:
+    """Try pairwise swaps (same call type, two different dates) that reduce
+    difficulty-point stddev. Only swaps that preserve all hard constraints for
+    both participants are kept. Iterates until no improvement or max_passes."""
+    diff_by_type = {
+        ct.name: (ct.difficulty_points if ct.counts_towards_fairness else 0)
+        for ct in inp.call_type_configs
+    }
+    ct_by_name = {ct.name: ct for ct in inp.call_type_configs}
+
+    def compute_diff_points() -> dict[int, int]:
+        dp: dict[int, int] = defaultdict(int)
+        for mapping in month_assignments.values():
+            for pid, ctype in mapping.items():
+                if pid == -1:
+                    continue
+                dp[pid] += diff_by_type.get(ctype, 1)
+        return dp
+
+    def stddev(values: list[float]) -> float:
+        if not values:
+            return 0.0
+        mean = sum(values) / len(values)
+        return (sum((v - mean) ** 2 for v in values) / len(values)) ** 0.5
+
+    def current_score() -> float:
+        dp = compute_diff_points()
+        return stddev([float(dp.get(p.id, 0)) for p in inp.mo_pool])
+
+    # Build a mutable view of all_assignments that local search will modify.
+    # Manual overrides are frozen — never swap them.
+    manual_keys: set[tuple[date, str]] = {
+        (d, ct) for d, slots in inp.manual_overrides.items() for ct in slots
+    }
+
+    def is_valid_after_swap(
+        pid: int, d: date, ct_name: str, new_daily_pid: int,
+    ) -> bool:
+        """Check pid is valid for (d, ct_name) under the hypothetical state where
+        new_daily_pid replaces the current holder. We temporarily mutate
+        all_assignments[d], run checks, then revert."""
+        ct = ct_by_name.get(ct_name)
+        if ct is None:
+            return False
+        person = next((p for p in inp.mo_pool if p.id == pid), None)
+        if person is None:
+            return False
+        prev_day = all_assignments.get(d, {})
+        original = dict(prev_day)
+        # Apply the hypothetical: remove the old holder of ct_name, add pid
+        new_day = {k: v for k, v in original.items() if v != ct_name}
+        new_day[pid] = ct_name
+        all_assignments[d] = new_day
+        # Daily assignments should exclude the slot we're re-evaluating
+        daily_excl = {k: v for k, v in new_day.items() if v != ct_name}
+        try:
+            ok = _is_eligible(
+                person, _day_cfg_for(d, inp), ct, all_assignments, daily_excl,
+                inp.leave_dates, inp.block_dates, stepdown_dates, ct_config_dict,
+            )
+        finally:
+            all_assignments[d] = original
+        return ok
+
+    def find_holder(d: date, ct_name: str) -> int | None:
+        for pid, ctype in month_assignments.get(d, {}).items():
+            if ctype == ct_name and pid != -1:
+                return pid
+        return None
+
+    def apply_swap(d1: date, d2: date, ct_name: str, p1: int, p2: int) -> None:
+        month_assignments[d1].pop(p1, None)
+        month_assignments[d1][p2] = ct_name
+        month_assignments[d2].pop(p2, None)
+        month_assignments[d2][p1] = ct_name
+        all_assignments[d1] = month_assignments[d1]
+        all_assignments[d2] = month_assignments[d2]
+
+    swaps_applied = 0
+    swaps_rejected_eligibility = 0
+    swaps_rejected_stddev = 0
+    passes_run = 0
+
+    improved = True
+    passes = 0
+    while improved and passes < max_passes:
+        improved = False
+        passes += 1
+        passes_run = passes
+        baseline = current_score()
+        # Candidate slots: (date, ct_name) pairs, excluding manual overrides
+        # and call types that don't count towards fairness (no point balancing).
+        slots_by_type: dict[str, list[date]] = defaultdict(list)
+        for d, mapping in month_assignments.items():
+            for pid, ctype in mapping.items():
+                if pid == -1 or (d, ctype) in manual_keys:
+                    continue
+                ct_obj = ct_by_name.get(ctype)
+                if ct_obj is not None and not ct_obj.counts_towards_fairness:
+                    continue
+                slots_by_type[ctype].append(d)
+
+        for ct_name, dates in slots_by_type.items():
+            dates_sorted = sorted(dates)
+            for i in range(len(dates_sorted)):
+                for j in range(i + 1, len(dates_sorted)):
+                    d1, d2 = dates_sorted[i], dates_sorted[j]
+                    p1 = find_holder(d1, ct_name)
+                    p2 = find_holder(d2, ct_name)
+                    if p1 is None or p2 is None or p1 == p2:
+                        continue
+                    # Reject if swap target person already holds a different slot
+                    # on the same day — swapping would silently clobber that slot.
+                    if p2 in month_assignments.get(d1, {}) and month_assignments[d1][p2] != ct_name:
+                        continue
+                    if p1 in month_assignments.get(d2, {}) and month_assignments[d2][p1] != ct_name:
+                        continue
+                    if not is_valid_after_swap(p2, d1, ct_name, p1):
+                        swaps_rejected_eligibility += 1
+                        continue
+                    if not is_valid_after_swap(p1, d2, ct_name, p2):
+                        swaps_rejected_eligibility += 1
+                        continue
+                    apply_swap(d1, d2, ct_name, p1, p2)
+                    new_score = current_score()
+                    if new_score < baseline - 1e-9:
+                        baseline = new_score
+                        improved = True
+                        swaps_applied += 1
+                    else:
+                        apply_swap(d1, d2, ct_name, p2, p1)  # revert
+                        swaps_rejected_stddev += 1
+
+    logger.info(
+        "local_search_swaps summary: passes_run=%d swaps_applied=%d "
+        "swaps_rejected_eligibility=%d swaps_rejected_stddev=%d",
+        passes_run, swaps_applied, swaps_rejected_eligibility, swaps_rejected_stddev,
+    )
+    return month_assignments
+
+
+def _day_cfg_for(d: date, inp: SolverInput) -> DayConfig:
+    for day in inp.days:
+        if day.d == d:
+            return day
+    # Fallback for prior-month dates (shouldn't be swapped, but defensive)
+    return DayConfig(d=d, is_weekend=d.weekday() >= 5, is_ph=False,
+                     is_stepdown=False, has_evening_ot=False)
 
 
 def compute_fairness_stats(
@@ -365,10 +681,25 @@ def compute_fairness_stats(
     stepdown_dates: set[date],
     call_type_configs: list[CallTypeInfo] | None = None,
 ) -> dict[str, dict]:
-    ct_config_dict = _build_ct_config_dict(call_type_configs) if call_type_configs else None
-    diff_by_type = {ct.name: ct.difficulty_points for ct in call_type_configs} if call_type_configs else {}
+    ct_config_dict = (
+        _build_ct_config_dict(call_type_configs) if call_type_configs else None
+    )
+    diff_by_type = (
+        {ct.name: ct.difficulty_points for ct in call_type_configs}
+        if call_type_configs
+        else {}
+    )
+    counts_fairness = (
+        {ct.name: ct.counts_towards_fairness for ct in call_type_configs}
+        if call_type_configs
+        else {}
+    )
 
-    ct_names = sorted(ct.name for ct in call_type_configs) if call_type_configs else ["MO1", "MO2", "MO3", "MO4", "MO5"]
+    ct_names = (
+        sorted(ct.name for ct in call_type_configs)
+        if call_type_configs
+        else ["MO1", "MO2", "MO3", "MO4", "MO5"]
+    )
 
     stats: dict[str, dict] = {}
     for p in mo_pool:
@@ -388,10 +719,14 @@ def compute_fairness_stats(
             name = pid_to_name.get(pid)
             if name is None:
                 continue
-            stats[name]["total_all"] += 1
+            # Per-type count is always shown (assignment still happened),
+            # but fairness aggregates skip call types flagged not-counting.
             if ctype in stats[name]["per_type"]:
                 stats[name]["per_type"][ctype] += 1
-            if is_overnight(ctype, d, stepdown_dates, ct_config_dict):
+            if not counts_fairness.get(ctype, True):
+                continue
+            stats[name]["total_all"] += 1
+            if is_24h_call(ctype, d, stepdown_dates, ct_config_dict):
                 stats[name]["total_24h"] += 1
             if is_wknd:
                 stats[name]["weekend_ph"] += 1

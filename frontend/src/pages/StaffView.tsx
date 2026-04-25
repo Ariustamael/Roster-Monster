@@ -1,25 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { Staff, Leave, CallPreference, CallTypeConfig, Team } from "../types";
+import type { Staff, Leave, CallPreference, CallTypeConfig, Team, RankConfig } from "../types";
 import MultiSelectDropdown from "../components/MultiSelectDropdown";
-
-const RANK_ORDER: Record<string, number> = {
-  "Senior Consultant": 0,
-  "Consultant": 1,
-  "Associate Consultant": 2,
-  "Senior Staff Registrar": 3,
-  "Senior Resident": 4,
-  "Senior Medical Officer": 5,
-  "Medical Officer": 6,
-};
-
-const ALL_RANKS = [
-  "Senior Consultant", "Consultant", "Associate Consultant",
-  "Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer",
-];
-
-const ALLOCATABLE_RANKS = ["Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer"];
+import { useEscClose } from "../hooks/useEscClose";
 
 function toDDMM(dateStr: string): string {
   const [, m, d] = dateStr.split("-");
@@ -53,11 +37,35 @@ const MONTH_NAMES = [
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
 ];
 
+type StaffSortKey = "name" | "rank" | "team" | "supervisor";
+type StaffSortDir = "asc" | "desc";
+
 export default function StaffView() {
   const { active } = useConfig();
   const [staff, setStaff] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
+  const [sortKey, setSortKey] = useState<StaffSortKey>("rank");
+  const [sortDir, setSortDir] = useState<StaffSortDir>("asc");
+
+  function toggleSort(k: StaffSortKey) {
+    if (k === sortKey) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortKey(k); setSortDir("asc"); }
+  }
+
+  function sortHeader(label: string, k: StaffSortKey) {
+    const active = sortKey === k;
+    const arrow = !active ? "⇅" : sortDir === "asc" ? "↑" : "↓";
+    return (
+      <th
+        onClick={() => toggleSort(k)}
+        style={{ cursor: "pointer", userSelect: "none" }}
+        title={`Sort by ${label}`}
+      >
+        {label} <span style={{ opacity: active ? 1 : 0.4, fontSize: 10 }}>{arrow}</span>
+      </th>
+    );
+  }
   // expanded state removed — editing is via modal
   const [leaves, setLeaves] = useState<Leave[]>([]);
   const [prefs, setPrefs] = useState<CallPreference[]>([]);
@@ -66,6 +74,26 @@ export default function StaffView() {
   const [staffUpdatedAt, setStaffUpdatedAt] = useState<string | null>(null);
   const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [ranks, setRanks] = useState<RankConfig[]>([]);
+
+  const sortedRanks = useMemo(
+    () => [...ranks].filter(r => r.is_active).sort((a, b) => a.display_order - b.display_order),
+    [ranks]
+  );
+  const rankOrder = useMemo(() => {
+    const m: Record<string, number> = {};
+    sortedRanks.forEach((r, i) => { m[r.name] = i; });
+    return m;
+  }, [sortedRanks]);
+  const allRanks = useMemo(() => sortedRanks.map(r => r.name), [sortedRanks]);
+  const allocatableRanks = useMemo(
+    () => sortedRanks.filter(r => !r.is_consultant_tier).map(r => r.name),
+    [sortedRanks]
+  );
+  const consultantRanks = useMemo(
+    () => sortedRanks.filter(r => r.is_consultant_tier).map(r => r.name),
+    [sortedRanks]
+  );
 
   const year = active?.year ?? 2026;
   const month = active?.month ?? 1;
@@ -75,6 +103,7 @@ export default function StaffView() {
     api.getTimestamps().then(ts => setStaffUpdatedAt(ts.staff));
     api.getCallTypes().then(setCallTypes);
     api.getTeams().then(setTeams);
+    api.getRanks().then(setRanks);
   }, []);
 
   useEffect(() => {
@@ -92,9 +121,19 @@ export default function StaffView() {
         (s.team_name || "").toLowerCase().includes(filter.toLowerCase()) ||
         (s.supervisor_name || "").toLowerCase().includes(filter.toLowerCase())
     )
-    .sort((a, b) => (RANK_ORDER[a.rank] ?? 9) - (RANK_ORDER[b.rank] ?? 9) || a.name.localeCompare(b.name));
+    .sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case "name": cmp = a.name.localeCompare(b.name); break;
+        case "rank": cmp = (rankOrder[a.rank] ?? 9999) - (rankOrder[b.rank] ?? 9999); break;
+        case "team": cmp = (a.team_name || "").localeCompare(b.team_name || ""); break;
+        case "supervisor": cmp = (a.supervisor_name || "").localeCompare(b.supervisor_name || ""); break;
+      }
+      if (cmp === 0) cmp = a.name.localeCompare(b.name);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
 
-  const moCount = staff.filter((s) => ALLOCATABLE_RANKS.includes(s.rank)).length;
+  const moCount = staff.filter((s) => allocatableRanks.includes(s.rank)).length;
 
   async function addStaff(name: string, grade: string) {
     const s = await api.createStaff(name, grade);
@@ -102,7 +141,7 @@ export default function StaffView() {
     setShowAdd(false);
   }
 
-  async function saveEdit(id: number, data: { name: string; rank: string; active: boolean; has_admin_role: boolean; extra_call_type_ids: string | null; duty_preference: string | null }) {
+  async function saveEdit(id: number, data: { name: string; rank: string; active: boolean; has_admin_role: boolean; extra_call_type_ids: string | null; duty_preference: string | null; can_do_call: boolean; can_do_clinic: boolean; can_do_ot: boolean }) {
     await api.updateStaff(id, data);
     const refreshed = await api.getStaff();
     setStaff(refreshed);
@@ -164,10 +203,10 @@ export default function StaffView() {
             <table style={{ width: "100%", minWidth: 900 }}>
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Rank</th>
-                  <th>Team</th>
-                  <th>Supervisor</th>
+                  {sortHeader("Name", "name")}
+                  {sortHeader("Rank", "rank")}
+                  {sortHeader("Team", "team")}
+                  {sortHeader("Supervisor", "supervisor")}
                   <th style={{ width: 130 }}>Leaves</th>
                   <th style={{ width: 130 }}>Preferences</th>
                   <th style={{ width: 100 }}>Extra Call Types</th>
@@ -224,7 +263,7 @@ export default function StaffView() {
       )}
 
       {showAdd && (
-        <AddStaffModal onAdd={addStaff} onClose={() => setShowAdd(false)} />
+        <AddStaffModal onAdd={addStaff} onClose={() => setShowAdd(false)} allRanks={allRanks} />
       )}
 
       {editing != null && (() => {
@@ -236,6 +275,9 @@ export default function StaffView() {
             callTypes={callTypes}
             teams={teams}
             allStaff={staff}
+            allRanks={allRanks}
+            allocatableRanks={allocatableRanks}
+            consultantRanks={consultantRanks}
             leaves={leaves.filter(l => l.staff_id === editing)}
             prefs={prefs.filter(p => p.staff_id === editing)}
             year={year}
@@ -273,18 +315,21 @@ export default function StaffView() {
 // StaffRow removed — table rows are now inline, editing is via modal
 
 function EditStaffModal({
-  staff, callTypes, teams, allStaff, leaves, prefs, year, month,
+  staff, callTypes, teams, allStaff, allRanks, allocatableRanks, consultantRanks, leaves, prefs, year, month,
   onSave, onClose, onAddLeave, onRemoveLeave, onAddPref, onRemovePref, onReassign,
 }: {
   staff: Staff;
   callTypes: CallTypeConfig[];
   teams: Team[];
   allStaff: Staff[];
+  allRanks: string[];
+  allocatableRanks: string[];
+  consultantRanks: string[];
   leaves: Leave[];
   prefs: CallPreference[];
   year: number;
   month: number;
-  onSave: (data: { name: string; rank: string; active: boolean; has_admin_role: boolean; extra_call_type_ids: string | null; duty_preference: string | null }) => void;
+  onSave: (data: { name: string; rank: string; active: boolean; has_admin_role: boolean; extra_call_type_ids: string | null; duty_preference: string | null; can_do_call: boolean; can_do_clinic: boolean; can_do_ot: boolean }) => void;
   onClose: () => void;
   onAddLeave: (date: string) => Promise<void>;
   onRemoveLeave: (id: number) => Promise<void>;
@@ -292,10 +337,14 @@ function EditStaffModal({
   onRemovePref: (id: number) => Promise<void>;
   onReassign: (teamId: number, supervisorId?: number) => Promise<void>;
 }) {
+  useEscClose(onClose);
   const [name, setName] = useState(staff.name);
   const [rank, setRank] = useState(staff.rank);
   const [active, setActive] = useState(staff.active);
   const [hasAdmin, setHasAdmin] = useState(staff.has_admin_role);
+  const [canCall, setCanCall] = useState(staff.can_do_call ?? true);
+  const [canClinic, setCanClinic] = useState(staff.can_do_clinic ?? true);
+  const [canOt, setCanOt] = useState(staff.can_do_ot ?? true);
   const [extraCallIds, setExtraCallIds] = useState<number[]>(
     staff.extra_call_type_ids ? staff.extra_call_type_ids.split(",").map(s => parseInt(s.trim())).filter(n => !isNaN(n)) : []
   );
@@ -309,7 +358,7 @@ function EditStaffModal({
   const [newPrefDate, setNewPrefDate] = useState("");
   const [newPrefType, setNewPrefType] = useState<"request" | "block">("request");
 
-  const consultants = allStaff.filter(s => ["Senior Consultant", "Consultant"].includes(s.rank) && s.active);
+  const consultants = allStaff.filter(s => consultantRanks.includes(s.rank) && s.active);
   const monthName = ["", "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month];
 
   function toggleCallType(ctId: number) {
@@ -323,28 +372,28 @@ function EditStaffModal({
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
           <div className="form-group" style={{ margin: 0 }}>
-            <label>Name</label>
-            <input type="text" value={name} onChange={(e) => setName(e.target.value)} />
+            <label htmlFor="edit-staff-name">Name <span style={{ color: "#dc2626" }}>*</span></label>
+            <input id="edit-staff-name" type="text" value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="form-group" style={{ margin: 0 }}>
-            <label>Rank</label>
-            <select value={rank} onChange={(e) => setRank(e.target.value)}>
-              {ALL_RANKS.map((g) => <option key={g} value={g}>{g}</option>)}
+            <label htmlFor="edit-staff-rank">Rank</label>
+            <select id="edit-staff-rank" value={rank} onChange={(e) => setRank(e.target.value)}>
+              {allRanks.map((g) => <option key={g} value={g}>{g}</option>)}
             </select>
           </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
           <div className="form-group" style={{ margin: 0 }}>
-            <label>Team</label>
-            <select value={teamId} onChange={(e) => setTeamId(e.target.value ? Number(e.target.value) : "")}>
+            <label htmlFor="edit-staff-team">Team</label>
+            <select id="edit-staff-team" value={teamId} onChange={(e) => setTeamId(e.target.value ? Number(e.target.value) : "")}>
               <option value="">— None —</option>
               {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </div>
           <div className="form-group" style={{ margin: 0 }}>
-            <label>Supervisor</label>
-            <select value={supervisorId} onChange={(e) => setSupervisorId(e.target.value ? Number(e.target.value) : "")}>
+            <label htmlFor="edit-staff-supervisor">Supervisor</label>
+            <select id="edit-staff-supervisor" value={supervisorId} onChange={(e) => setSupervisorId(e.target.value ? Number(e.target.value) : "")}>
               <option value="">— None —</option>
               {consultants.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -352,8 +401,8 @@ function EditStaffModal({
         </div>
 
         <div className="form-group">
-          <label>Duty Preference</label>
-          <select value={dutyPref} onChange={(e) => setDutyPref(e.target.value)}>
+          <label htmlFor="edit-staff-dutypref">Duty Preference</label>
+          <select id="edit-staff-dutypref" value={dutyPref} onChange={(e) => setDutyPref(e.target.value)}>
             <option value="">No preference</option>
             <option value="OT">Prefer OT</option>
             <option value="Clinic">Prefer Clinic</option>
@@ -380,6 +429,28 @@ function EditStaffModal({
             Admin Role
           </label>
         </div>
+
+        {allocatableRanks.includes(rank) && (
+          <div className="form-group" style={{ background: "var(--bg-muted, #f8fafc)", borderRadius: 6, padding: "10px 12px", border: "1px solid var(--border)" }}>
+            <label style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, display: "block" }}>
+              Allocation Eligibility
+            </label>
+            <div style={{ display: "flex", gap: 16, fontSize: 13 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={canCall} onChange={(e) => setCanCall(e.target.checked)} />
+                Can take call
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={canClinic} onChange={(e) => setCanClinic(e.target.checked)} />
+                Can do clinic
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+                <input type="checkbox" checked={canOt} onChange={(e) => setCanOt(e.target.checked)} />
+                Can do OT
+              </label>
+            </div>
+          </div>
+        )}
 
         {/* Leave management */}
         <div style={{ borderTop: "1px solid var(--border)", paddingTop: 10, marginBottom: 10 }}>
@@ -444,7 +515,7 @@ function EditStaffModal({
 
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={async () => {
+          <button className="btn btn-primary" disabled={!name.trim()} onClick={async () => {
             if (name.trim()) {
               if (teamId && teamId !== (teams.find(t => t.name === staff.team_name)?.id ?? "")) {
                 await onReassign(teamId as number, supervisorId ? supervisorId as number : undefined);
@@ -461,6 +532,9 @@ function EditStaffModal({
                 has_admin_role: hasAdmin,
                 extra_call_type_ids: extraCallIds.length > 0 ? extraCallIds.join(",") : null,
                 duty_preference: dutyPref || null,
+                can_do_call: canCall,
+                can_do_clinic: canClinic,
+                can_do_ot: canOt,
               });
             }
           }}>Save</button>
@@ -473,30 +547,33 @@ function EditStaffModal({
 function AddStaffModal({
   onAdd,
   onClose,
+  allRanks,
 }: {
   onAdd: (name: string, grade: string) => void;
   onClose: () => void;
+  allRanks: string[];
 }) {
+  useEscClose(onClose);
   const [name, setName] = useState("");
-  const [rank, setRank] = useState("Medical Officer");
+  const [rank, setRank] = useState(allRanks.includes("Medical Officer") ? "Medical Officer" : (allRanks[allRanks.length - 1] ?? ""));
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <h3>Add Staff</h3>
         <div className="form-group">
-          <label>Name</label>
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
+          <label htmlFor="add-staff-name">Name <span style={{ color: "#dc2626" }}>*</span></label>
+          <input id="add-staff-name" type="text" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
         </div>
         <div className="form-group">
-          <label>Rank</label>
-          <select value={rank} onChange={(e) => setRank(e.target.value)}>
-            {ALL_RANKS.map((g) => <option key={g} value={g}>{g}</option>)}
+          <label htmlFor="add-staff-rank">Rank</label>
+          <select id="add-staff-rank" value={rank} onChange={(e) => setRank(e.target.value)}>
+            {allRanks.map((g) => <option key={g} value={g}>{g}</option>)}
           </select>
         </div>
         <div className="modal-actions">
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={() => { if (name.trim()) onAdd(name.trim(), rank); }}>
+          <button className="btn btn-primary" disabled={!name.trim()} onClick={() => { if (name.trim()) onAdd(name.trim(), rank); }}>
             Add
           </button>
         </div>

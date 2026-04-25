@@ -6,6 +6,9 @@ export interface Staff {
   has_admin_role: boolean;
   extra_call_type_ids: string | null;
   duty_preference: string | null;
+  can_do_call?: boolean;
+  can_do_clinic?: boolean;
+  can_do_ot?: boolean;
   team_name: string | null;
   supervisor_name: string | null;
 }
@@ -74,6 +77,19 @@ export interface DayDutyRoster {
   am_admin: DutyAssignment[];
   pm_admin: DutyAssignment[];
   unavailable: { staff_id: number; staff_name: string; reason: string }[];
+  expected_resources?: {
+    resource_type: "clinic" | "ot";
+    room: string;
+    label: string;
+    session: string;
+    is_emergency: boolean;
+    consultant_id: number | null;
+    consultant_name: string | null;
+    staff_required: number;
+    priority: number;
+  }[];
+  warnings?: string[];
+  shortfall?: number;
 }
 
 export interface DutyRosterResponse {
@@ -88,8 +104,9 @@ export interface DutyStats {
   ot_days: number;
   eot_days: number;
   supervised_sessions: number;
-  mopd_sessions: number;
   admin_sessions: number;
+  ward_mo_sessions?: number;
+  eot_mo_sessions?: number;
 }
 
 export interface MonthlyConfig {
@@ -154,6 +171,10 @@ export interface ResourceTemplate {
   color: string | null;
   is_active: boolean;
   sort_order: number;
+  priority?: number;
+  max_registrars?: number;
+  eligible_rank_ids?: string | null;
+  effective_date?: string | null;
 }
 
 export interface ConsultantOnCall {
@@ -204,8 +225,7 @@ export interface ResourceDay {
   is_ph: boolean;
   ot_rooms: number;
   ot_assistants_needed: number;
-  supervised_clinics: number;
-  mopd_clinics: number;
+  clinic_slots: number;
   call_slots: number;
   total_mos: number;
   on_leave: number;
@@ -241,7 +261,9 @@ export interface CallTypeConfig {
   is_overnight: boolean;
   post_call_type: string;
   max_consecutive_days: number;
+  min_consecutive_days: number;
   min_gap_days: number;
+  switch_window_days: number;
   difficulty_points: number;
   counts_towards_fairness: boolean;
   applicable_days: string;
@@ -249,6 +271,7 @@ export interface CallTypeConfig {
   default_duty_type: string | null;
   is_night_float: boolean;
   night_float_run: string | null;
+  uses_consultant_affinity: boolean;
   is_active: boolean;
   is_duty_only: boolean;
   linked_to: string | null;
