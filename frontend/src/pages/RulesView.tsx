@@ -247,6 +247,20 @@ export default function RulesView() {
               Staff with <strong>extra_call_type_ids</strong> are eligible for additional call types beyond their rank default.
             </div>
           </div>
+
+          <div className="rule">
+            <div className="rule-title">Per-day resource overrides</div>
+            <div className="rule-body">
+              Each day card has an <strong>Edit Resources</strong> button. Clicking it opens a modal where you can add,
+              edit, or delete resources for that specific date only — overriding the weekly template without changing it.
+              <br /><br />
+              Days with active overrides show an amber <strong>✎ edited</strong> pill next to the date.
+              Use <strong>↺ Reset Day to Default</strong> inside the modal to revert a day back to its weekly template.
+              <br /><br />
+              After editing resources, use <strong>↻ Regenerate</strong> on the day card to re-solve duty assignments
+              against the updated resource list.
+            </div>
+          </div>
         </section>
 
         <section className="rules-section">
@@ -259,7 +273,7 @@ export default function RulesView() {
               are pre-assigned to that resource.
               <br />
               Common examples: <strong>Ward MO ← MO1</strong> (MO1 holder also mans the ward),
-              <strong> EOT ← MO2 / R1 / R2</strong> (overnight call holders also staff the evening OT).
+              <strong> EOT ← MO2 / R1 / R2</strong> (overnight call holders are pre-assigned to the Emergency OT).
               <br />
               Linked assignments are not flagged as conflicts on the duty roster, even though the staff are also on call.
             </div>

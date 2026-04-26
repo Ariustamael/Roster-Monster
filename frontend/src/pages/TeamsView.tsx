@@ -1,11 +1,13 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { api } from "../api";
+import { useConfig } from "../context/ConfigContext";
 import type { Staff, Team, TeamAssignment } from "../types";
 
 const TRAINEE_RANKS = ["Senior Staff Registrar", "Senior Resident", "Senior Medical Officer", "Medical Officer"];
 const CONS_RANKS = ["Senior Consultant", "Consultant", "Associate Consultant"];
 
 export default function TeamsView() {
+  const { active } = useConfig();
   const [staff, setStaff] = useState<Staff[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [assignments, setAssignments] = useState<TeamAssignment[]>([]);
@@ -163,7 +165,7 @@ export default function TeamsView() {
   return (
     <>
       <div className="page-header">
-        <h2>Team Assignments</h2>
+        <h2>Team Assignments{active ? ` - ${new Date(active.year, active.month - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}` : ""}</h2>
         <div className="btn-group">
           <button className="btn btn-primary" onClick={createTeam}>+ Create Team</button>
         </div>

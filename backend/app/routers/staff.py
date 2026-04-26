@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy import select, delete, update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import Staff, Leave, CallPreference, TeamAssignment, Team
@@ -15,72 +17,116 @@ from ..schemas import (
 router = APIRouter(prefix="/api/staff", tags=["staff"])
 
 
-@router.get("", response_model=list[StaffOut])
-def list_staff(active_only: bool = True, db: Session = Depends(get_db)):
-    q = db.query(Staff)
-    if active_only:
-        q = q.filter(Staff.active.is_(True))
-    staff = q.order_by(Staff.name).all()
-
-    result = []
-    for s in staff:
-        team_name = None
-        supervisor_name = None
-        ta = (
-            db.query(TeamAssignment)
-            .filter(TeamAssignment.staff_id == s.id)
-            .order_by(TeamAssignment.effective_from.desc())
-            .first()
-        )
-        if ta:
-            team = db.query(Team).get(ta.team_id)
-            if team:
-                team_name = team.name
-            if ta.supervisor_id:
-                sup = db.query(Staff).get(ta.supervisor_id)
-                if sup:
-                    supervisor_name = sup.name
-        result.append(_staff_out(s, team_name, supervisor_name))
-    return result
-
-
 def _staff_out(s: Staff, team_name=None, supervisor_name=None) -> StaffOut:
     return StaffOut(
-        id=s.id, name=s.name, rank=s.rank, active=s.active,
+        id=s.id,
+        name=s.name,
+        rank=s.rank,
+        active=s.active,
         has_admin_role=s.has_admin_role or False,
         extra_call_type_ids=s.extra_call_type_ids,
         duty_preference=s.duty_preference,
         can_do_call=s.can_do_call if s.can_do_call is not None else True,
         can_do_clinic=s.can_do_clinic if s.can_do_clinic is not None else True,
         can_do_ot=s.can_do_ot if s.can_do_ot is not None else True,
-        team_name=team_name, supervisor_name=supervisor_name,
+        team_name=team_name,
+        supervisor_name=supervisor_name,
     )
 
 
+@router.get("", response_model=list[StaffOut])
+async def list_staff(active_only: bool = True, db: AsyncSession = Depends(get_db)):
+    q = select(Staff).order_by(Staff.name)
+    if active_only:
+        q = q.filter(Staff.active.is_(True))
+    staff = (await db.execute(q)).scalars().all()
+    staff_ids = [s.id for s in staff]
+
+    # Batch-load the most-recent team assignment per staff member.
+    all_assignments = (
+        (
+            await db.execute(
+                select(TeamAssignment)
+                .filter(TeamAssignment.staff_id.in_(staff_ids))
+                .order_by(TeamAssignment.staff_id, TeamAssignment.effective_from.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Keep only the latest assignment per staff member.
+    latest_assignment: dict[int, TeamAssignment] = {}
+    for ta in all_assignments:
+        if ta.staff_id not in latest_assignment:
+            latest_assignment[ta.staff_id] = ta
+
+    # Batch-load all referenced teams and supervisors in two queries.
+    team_ids = {ta.team_id for ta in latest_assignment.values()}
+    supervisor_ids = {
+        ta.supervisor_id for ta in latest_assignment.values() if ta.supervisor_id
+    }
+
+    teams_by_id: dict[int, Team] = {}
+    if team_ids:
+        teams_by_id = {
+            t.id: t
+            for t in (await db.execute(select(Team).filter(Team.id.in_(team_ids))))
+            .scalars()
+            .all()
+        }
+
+    supervisors_by_id: dict[int, Staff] = {}
+    if supervisor_ids:
+        supervisors_by_id = {
+            s.id: s
+            for s in (
+                await db.execute(select(Staff).filter(Staff.id.in_(supervisor_ids)))
+            )
+            .scalars()
+            .all()
+        }
+
+    result = []
+    for s in staff:
+        ta = latest_assignment.get(s.id)
+        team_name = (
+            teams_by_id[ta.team_id].name if ta and ta.team_id in teams_by_id else None
+        )
+        supervisor_name = (
+            supervisors_by_id[ta.supervisor_id].name
+            if ta and ta.supervisor_id and ta.supervisor_id in supervisors_by_id
+            else None
+        )
+        result.append(_staff_out(s, team_name, supervisor_name))
+    return result
+
+
 @router.post("", response_model=StaffOut)
-def create_staff(payload: StaffCreate, db: Session = Depends(get_db)):
+async def create_staff(payload: StaffCreate, db: AsyncSession = Depends(get_db)):
     s = Staff(**payload.model_dump())
     db.add(s)
-    db.commit()
-    db.refresh(s)
+    await db.commit()
+    await db.refresh(s)
     return _staff_out(s)
 
 
 @router.put("/{staff_id}", response_model=StaffOut)
-def update_staff(staff_id: int, payload: StaffCreate, db: Session = Depends(get_db)):
-    s = db.query(Staff).get(staff_id)
+async def update_staff(
+    staff_id: int, payload: StaffCreate, db: AsyncSession = Depends(get_db)
+):
+    s = await db.get(Staff, staff_id)
     if not s:
         raise HTTPException(404, "Staff not found")
     for k, v in payload.model_dump().items():
         setattr(s, k, v)
-    db.commit()
-    db.refresh(s)
+    await db.commit()
+    await db.refresh(s)
     return _staff_out(s)
 
 
 @router.delete("/{staff_id}")
-def delete_staff(staff_id: int, db: Session = Depends(get_db)):
-    s = db.query(Staff).get(staff_id)
+async def delete_staff(staff_id: int, db: AsyncSession = Depends(get_db)):
+    s = await db.get(Staff, staff_id)
     if not s:
         raise HTTPException(404, "Staff not found")
     from ..models import (
@@ -91,30 +137,47 @@ def delete_staff(staff_id: int, db: Session = Depends(get_db)):
         ResourceTemplate,
     )
 
-    db.query(ConsultantOnCall).filter(
-        ConsultantOnCall.consultant_id == staff_id
-    ).delete()
-    db.query(ACOnCall).filter(ACOnCall.ac_id == staff_id).delete()
-    db.query(RegistrarDuty).filter(RegistrarDuty.registrar_id == staff_id).delete()
-    db.query(DutyAssignment).filter(DutyAssignment.staff_id == staff_id).delete()
-    db.query(DutyAssignment).filter(DutyAssignment.consultant_id == staff_id).delete()
-    db.query(ResourceTemplate).filter(
-        ResourceTemplate.consultant_id == staff_id
-    ).delete()
-    db.query(TeamAssignment).filter(TeamAssignment.supervisor_id == staff_id).update(
-        {TeamAssignment.supervisor_id: None}
+    await db.execute(
+        delete(ConsultantOnCall).where(ConsultantOnCall.consultant_id == staff_id)
     )
-    db.delete(s)
-    db.commit()
+    await db.execute(delete(ACOnCall).where(ACOnCall.ac_id == staff_id))
+    await db.execute(
+        delete(RegistrarDuty).where(RegistrarDuty.registrar_id == staff_id)
+    )
+    await db.execute(delete(DutyAssignment).where(DutyAssignment.staff_id == staff_id))
+    await db.execute(
+        delete(DutyAssignment).where(DutyAssignment.consultant_id == staff_id)
+    )
+    await db.execute(
+        delete(ResourceTemplate).where(ResourceTemplate.consultant_id == staff_id)
+    )
+    await db.execute(
+        update(TeamAssignment)
+        .where(TeamAssignment.supervisor_id == staff_id)
+        .values(supervisor_id=None)
+    )
+    await db.delete(s)
+    await db.commit()
     return {"ok": True}
 
 
-# ── Leave ────────────────────────────────────────────────────────────────
+# â”€â”€ Leave â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.get("/{staff_id}/leave", response_model=list[LeaveOut])
-def list_leave(staff_id: int, db: Session = Depends(get_db)):
-    rows = db.query(Leave).filter(Leave.staff_id == staff_id).order_by(Leave.date).all()
+async def list_leave(staff_id: int, db: AsyncSession = Depends(get_db)):
+    rows = (
+        (
+            await db.execute(
+                select(Leave)
+                .filter(Leave.staff_id == staff_id)
+                .options(selectinload(Leave.staff))
+                .order_by(Leave.date)
+            )
+        )
+        .scalars()
+        .all()
+    )
     return [
         LeaveOut(
             id=r.id,
@@ -128,14 +191,25 @@ def list_leave(staff_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/leave", response_model=LeaveOut)
-def create_leave(payload: LeaveCreate, db: Session = Depends(get_db)):
-    s = db.query(Staff).get(payload.staff_id)
+async def create_leave(payload: LeaveCreate, db: AsyncSession = Depends(get_db)):
+    s = await db.get(Staff, payload.staff_id)
     if not s:
         raise HTTPException(404, "Staff not found")
+    existing = (
+        await db.execute(
+            select(Leave).filter(
+                Leave.staff_id == payload.staff_id, Leave.date == payload.date
+            )
+        )
+    ).scalar_one_or_none()
+    if existing:
+        raise HTTPException(
+            409, "Leave record already exists for this staff member on this date"
+        )
     lv = Leave(**payload.model_dump())
     db.add(lv)
-    db.commit()
-    db.refresh(lv)
+    await db.commit()
+    await db.refresh(lv)
     return LeaveOut(
         id=lv.id,
         staff_id=lv.staff_id,
@@ -146,24 +220,30 @@ def create_leave(payload: LeaveCreate, db: Session = Depends(get_db)):
 
 
 @router.delete("/leave/{leave_id}")
-def delete_leave(leave_id: int, db: Session = Depends(get_db)):
-    lv = db.query(Leave).get(leave_id)
+async def delete_leave(leave_id: int, db: AsyncSession = Depends(get_db)):
+    lv = await db.get(Leave, leave_id)
     if not lv:
         raise HTTPException(404, "Leave not found")
-    db.delete(lv)
-    db.commit()
+    await db.delete(lv)
+    await db.commit()
     return {"ok": True}
 
 
-# ── Call Preferences ─────────────────────────────────────────────────────
+# â”€â”€ Call Preferences â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.get("/{staff_id}/preferences", response_model=list[CallPreferenceOut])
-def list_preferences(staff_id: int, db: Session = Depends(get_db)):
+async def list_preferences(staff_id: int, db: AsyncSession = Depends(get_db)):
     rows = (
-        db.query(CallPreference)
-        .filter(CallPreference.staff_id == staff_id)
-        .order_by(CallPreference.date)
+        (
+            await db.execute(
+                select(CallPreference)
+                .filter(CallPreference.staff_id == staff_id)
+                .options(selectinload(CallPreference.staff))
+                .order_by(CallPreference.date)
+            )
+        )
+        .scalars()
         .all()
     )
     return [
@@ -180,14 +260,16 @@ def list_preferences(staff_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/preferences", response_model=CallPreferenceOut)
-def create_preference(payload: CallPreferenceCreate, db: Session = Depends(get_db)):
-    s = db.query(Staff).get(payload.staff_id)
+async def create_preference(
+    payload: CallPreferenceCreate, db: AsyncSession = Depends(get_db)
+):
+    s = await db.get(Staff, payload.staff_id)
     if not s:
         raise HTTPException(404, "Staff not found")
     cp = CallPreference(**payload.model_dump())
     db.add(cp)
-    db.commit()
-    db.refresh(cp)
+    await db.commit()
+    await db.refresh(cp)
     return CallPreferenceOut(
         id=cp.id,
         staff_id=cp.staff_id,
@@ -199,29 +281,37 @@ def create_preference(payload: CallPreferenceCreate, db: Session = Depends(get_d
 
 
 @router.delete("/preferences/{pref_id}")
-def delete_preference(pref_id: int, db: Session = Depends(get_db)):
-    cp = db.query(CallPreference).get(pref_id)
+async def delete_preference(pref_id: int, db: AsyncSession = Depends(get_db)):
+    cp = await db.get(CallPreference, pref_id)
     if not cp:
         raise HTTPException(404, "Preference not found")
-    db.delete(cp)
-    db.commit()
+    await db.delete(cp)
+    await db.commit()
     return {"ok": True}
 
 
-# ── Bulk queries for a month ────────────────────────────────────────────
+# â”€â”€ Bulk queries for a month â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.get("/leave/month/{year}/{month}", response_model=list[LeaveOut])
-def list_leaves_for_month(year: int, month: int, db: Session = Depends(get_db)):
+async def list_leaves_for_month(
+    year: int, month: int, db: AsyncSession = Depends(get_db)
+):
     from datetime import date as d_type
     import calendar
 
     start = d_type(year, month, 1)
     end = d_type(year, month, calendar.monthrange(year, month)[1])
     rows = (
-        db.query(Leave)
-        .filter(Leave.date >= start, Leave.date <= end)
-        .order_by(Leave.date)
+        (
+            await db.execute(
+                select(Leave)
+                .filter(Leave.date >= start, Leave.date <= end)
+                .options(selectinload(Leave.staff))
+                .order_by(Leave.date)
+            )
+        )
+        .scalars()
         .all()
     )
     return [
@@ -237,16 +327,24 @@ def list_leaves_for_month(year: int, month: int, db: Session = Depends(get_db)):
 
 
 @router.get("/preferences/month/{year}/{month}", response_model=list[CallPreferenceOut])
-def list_preferences_for_month(year: int, month: int, db: Session = Depends(get_db)):
+async def list_preferences_for_month(
+    year: int, month: int, db: AsyncSession = Depends(get_db)
+):
     from datetime import date as d_type
     import calendar
 
     start = d_type(year, month, 1)
     end = d_type(year, month, calendar.monthrange(year, month)[1])
     rows = (
-        db.query(CallPreference)
-        .filter(CallPreference.date >= start, CallPreference.date <= end)
-        .order_by(CallPreference.date)
+        (
+            await db.execute(
+                select(CallPreference)
+                .filter(CallPreference.date >= start, CallPreference.date <= end)
+                .options(selectinload(CallPreference.staff))
+                .order_by(CallPreference.date)
+            )
+        )
+        .scalars()
         .all()
     )
     return [

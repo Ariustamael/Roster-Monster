@@ -3,7 +3,9 @@
     "allow": [
       "PowerShell($ROOT = \"C:\\\\Users\\\\Chester\\\\OneDrive\\\\30-39 Career & Professional\\\\35 Work Projects\\\\Roster Monster\\\\Roster-Monster\"; $fso = New-Object -ComObject Scripting.FileSystemObject; $shortPath = $fso.GetFolder\\($ROOT\\).ShortPath; Write-Output \"Short path: $shortPath\"; Write-Output \"Backend venv activate exists: $\\(Test-Path \"$shortPath\\\\backend\\\\venv\\\\Scripts\\\\activate.bat\"\\)\")",
       "PowerShell($paths = @\\(\"$env:USERPROFILE\\\\Desktop\", \"$env:USERPROFILE\\\\OneDrive\\\\Desktop\", \"$env:OneDrive\\\\Desktop\"\\); foreach \\($p in $paths\\) { if \\(Test-Path $p\\) { Write-Output \"--- $p ---\"; Get-ChildItem $p | Where-Object { $_.Name -match \"start|roster|monster\" } | Select-Object Name, FullName } })",
-      "PowerShell(Write-Output \"OneDrive env: $env:OneDrive\"; Write-Output \"---\"; if \\(Test-Path \"$env:OneDrive\\\\Desktop\"\\) { Get-ChildItem \"$env:OneDrive\\\\Desktop\" | Select-Object Name } else { Write-Output \"No OneDrive Desktop\" }; Write-Output \"---\"; Get-ChildItem \"$env:USERPROFILE\" -Directory | Select-Object Name)"
+      "PowerShell(Write-Output \"OneDrive env: $env:OneDrive\"; Write-Output \"---\"; if \\(Test-Path \"$env:OneDrive\\\\Desktop\"\\) { Get-ChildItem \"$env:OneDrive\\\\Desktop\" | Select-Object Name } else { Write-Output \"No OneDrive Desktop\" }; Write-Output \"---\"; Get-ChildItem \"$env:USERPROFILE\" -Directory | Select-Object Name)",
+      "Bash(netstat -ano)",
+      "Bash(venv/Scripts/python -m uvicorn app.main:app --reload --port 8000)"
     ]
   }
 }

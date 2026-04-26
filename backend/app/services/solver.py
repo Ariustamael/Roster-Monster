@@ -23,11 +23,9 @@ Soft scoring (higher = more likely picked):
 """
 
 import logging
-from datetime import date, timedelta
-from dataclasses import dataclass, field
 from collections import defaultdict
-
-logger = logging.getLogger(__name__)
+from dataclasses import dataclass, field
+from datetime import date, timedelta
 
 from .validators import (
     is_overnight,
@@ -39,6 +37,8 @@ from .validators import (
     check_max_consecutive,
     validate_full_roster,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -79,7 +79,7 @@ class DayConfig:
     is_weekend: bool
     is_ph: bool
     is_stepdown: bool
-    has_evening_ot: bool
+    has_ext_ot: bool
     consultant_oncall_id: int | None = None
     consultant_oncall_team_id: int | None = None
     ac_oncall_id: int | None = None
@@ -194,7 +194,7 @@ def _required_conditions_met(day: DayConfig, required_conditions: str) -> bool:
             return False
         elif token == "Not PH" and day.is_ph:
             return False
-        elif token in ("Extended OT", "Evening OT") and not day.has_evening_ot:
+        elif token == "Extended OT" and not day.has_ext_ot:
             return False
     return True
 
@@ -265,7 +265,9 @@ def _is_eligible(
         run_days = {t.strip() for t in ct.night_float_run.split(",") if t.strip()}
         in_nf_run = DAY_LABELS[d.weekday()] in run_days
     if not in_nf_run:
-        if not check_max_consecutive(pid, d, ct.name, assignments, ct.max_consecutive_days):
+        if not check_max_consecutive(
+            pid, d, ct.name, assignments, ct.max_consecutive_days
+        ):
             return False
 
     # Same-type gap (applies to all call types; skip within night-float run)
@@ -294,13 +296,13 @@ def _is_eligible(
     # so coverage still happens when a broken run would otherwise leave gaps.
     if ct.min_consecutive_days > 1:
         prev = d - timedelta(days=1)
-        is_continuation = (
-            prev in assignments and assignments[prev].get(pid) == ct.name
-        )
+        is_continuation = prev in assignments and assignments[prev].get(pid) == ct.name
         if not is_continuation:
             run_days: set[str] = set()
             if ct.night_float_run:
-                run_days = {t.strip() for t in ct.night_float_run.split(",") if t.strip()}
+                run_days = {
+                    t.strip() for t in ct.night_float_run.split(",") if t.strip()
+                }
             needed = ct.min_consecutive_days - 1
             for offset in range(1, needed + 1):
                 future = d + timedelta(days=offset)
@@ -367,11 +369,205 @@ def _score_candidate(
     return score
 
 
-def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
-    assignments: dict[date, dict[int, str]] = {}
+def _solve_cp_sat(
+    inp: SolverInput,
+    stepdown_dates: set[date],
+    ct_config_dict: dict,
+    time_limit_seconds: int = 30,
+) -> dict[date, dict[int, str]] | None:
+    """
+    OR-Tools CP-SAT solver for call roster assignment.
 
-    for d, mapping in inp.prior_assignments.items():
-        assignments[d] = dict(mapping)
+    Builds a constraint-satisfaction model where each (person, day, call_type)
+    triple is a boolean variable. Hard constraints mirror _is_eligible(); the
+    objective minimises the spread of difficulty-points across staff.
+
+    Returns the assignment dict on success, or None if infeasible / timeout.
+    """
+    try:
+        from ortools.sat.python import cp_model  # type: ignore[import]
+    except ImportError:
+        logger.warning("ortools not installed — skipping CP-SAT, using greedy fallback")
+        return None
+
+    model = cp_model.CpModel()
+
+    people = inp.mo_pool
+    pid_index = {p.id: i for i, p in enumerate(people)}
+    days = inp.days
+    d_index = {day.d: i for i, day in enumerate(days)}
+
+    # Pre-compute which call types are required on each day
+    required_slots: dict[int, list[CallTypeInfo]] = {
+        i: _required_slots(day, inp.call_type_configs) for i, day in enumerate(days)
+    }
+
+    # ── Decision variables ────────────────────────────────────────────────────
+    # x[pi][di][cti] = 1 if person pi assigned call type cti on day di
+    ct_index = {ct.name: i for i, ct in enumerate(inp.call_type_configs)}
+
+    x: dict[tuple[int, int, int], cp_model.IntVar] = {}
+    for pi in range(len(people)):
+        for di in range(len(days)):
+            for cti, ct in enumerate(inp.call_type_configs):
+                x[(pi, di, cti)] = model.new_bool_var(f"x_{pi}_{di}_{cti}")
+
+    # ── Hard constraints ─────────────────────────────────────────────────────
+
+    # 1. Manual overrides: fix variables to 1
+    override_set: set[tuple[int, int, str]] = set()  # (pid, di, ctype)
+    for d_date, overrides in inp.manual_overrides.items():
+        if d_date not in d_index:
+            continue
+        di = d_index[d_date]
+        for ctype, pid in overrides.items():
+            if pid not in pid_index or ctype not in ct_index:
+                continue
+            pi = pid_index[pid]
+            cti = ct_index[ctype]
+            model.add(x[(pi, di, cti)] == 1)
+            override_set.add((pid, di, ctype))
+
+    # 2. Coverage: each required slot must be filled by exactly one person
+    for di, day in enumerate(days):
+        for ct in required_slots[di]:
+            cti = ct_index[ct.name]
+            eligible = [
+                pi
+                for pi, p in enumerate(people)
+                if p.rank in ct.eligible_rank_names
+                and day.d not in inp.leave_dates.get(p.id, set())
+                and day.d not in inp.block_dates.get(p.id, set())
+            ]
+            if not eligible:
+                # Infeasible slot — let greedy handle it
+                return None
+            model.add_exactly_one([x[(pi, di, cti)] for pi in eligible])
+            # Force ineligible people's variables to 0 for this slot
+            all_pis = set(range(len(people)))
+            for pi in all_pis - set(eligible):
+                model.add(x[(pi, di, cti)] == 0)
+
+    # 3. Non-required slots: all zero (don't assign outside the schedule)
+    for di, day in enumerate(days):
+        required_ctis = {ct_index[ct.name] for ct in required_slots[di]}
+        for cti in range(len(inp.call_type_configs)):
+            if cti not in required_ctis:
+                for pi in range(len(people)):
+                    model.add(x[(pi, di, cti)] == 0)
+
+    # 4. At most one call type per person per day
+    for pi in range(len(people)):
+        for di in range(len(days)):
+            model.add_at_most_one(
+                [x[(pi, di, cti)] for cti in range(len(inp.call_type_configs))]
+            )
+
+    # 5. Post-call gap: if overnight call on day d, person unavailable day d+1
+    for pi, person in enumerate(people):
+        for di, day in enumerate(days):
+            for cti, ct in enumerate(inp.call_type_configs):
+                if not ct.is_overnight or ct.post_call_type == "none":
+                    continue
+                if di + 1 >= len(days):
+                    continue
+                next_di = di + 1
+                # x[pi][di][cti_overnight] = 1 → sum(x[pi][next_di][*]) = 0
+                next_all = [
+                    x[(pi, next_di, c)] for c in range(len(inp.call_type_configs))
+                ]
+                model.add(sum(next_all) == 0).only_enforce_if(x[(pi, di, cti)])
+
+    # 6. Max consecutive days for same call type
+    for pi in range(len(people)):
+        for cti, ct in enumerate(inp.call_type_configs):
+            max_c = ct.max_consecutive_days
+            if max_c <= 0:
+                continue
+            for di in range(len(days) - max_c):
+                window = [x[(pi, di + k, cti)] for k in range(max_c + 1)]
+                model.add(sum(window) <= max_c)
+
+    # 7. Min gap between same-type assignments (non-night-float)
+    for pi in range(len(people)):
+        for cti, ct in enumerate(inp.call_type_configs):
+            if ct.is_night_float or ct.min_gap_days <= 1:
+                continue
+            gap = ct.min_gap_days
+            for di in range(len(days)):
+                for offset in range(1, gap):
+                    di2 = di + offset
+                    if di2 >= len(days):
+                        break
+                    model.add(x[(pi, di, cti)] + x[(pi, di2, cti)] <= 1)
+
+    # ── Objective: minimise spread of difficulty-points across staff ──────────
+    # difficulty[pi] = sum over all (di, cti) of ct.difficulty_points * x[pi][di][cti]
+    # Minimise max(difficulty) - min(difficulty)
+    diff_pts = [ct.difficulty_points for ct in inp.call_type_configs]
+
+    # Scale to integers (CP-SAT requires integer coefficients)
+    person_points = []
+    for pi in range(len(people)):
+        pts = sum(
+            diff_pts[cti] * x[(pi, di, cti)]
+            for di in range(len(days))
+            for cti in range(len(inp.call_type_configs))
+        )
+        person_points.append(pts)
+
+    if len(person_points) >= 2:
+        max_pts = model.new_int_var(0, 10000, "max_pts")
+        min_pts = model.new_int_var(0, 10000, "min_pts")
+        for pts in person_points:
+            model.add(pts <= max_pts)
+            model.add(pts >= min_pts)
+        model.minimize(max_pts - min_pts)
+
+    # ── Solve ────────────────────────────────────────────────────────────────
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = time_limit_seconds
+    solver.parameters.log_search_progress = False
+
+    status = solver.solve(model)
+
+    if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        logger.warning(
+            "CP-SAT solver status=%s after %ds — falling back to greedy",
+            solver.status_name(status),
+            time_limit_seconds,
+        )
+        return None
+
+    logger.info(
+        "CP-SAT solver status=%s objective=%.1f wall=%.2fs",
+        solver.status_name(status),
+        solver.objective_value,
+        solver.wall_time,
+    )
+
+    # Decode solution → {date: {staff_id: call_type}}
+    result: dict[date, dict[int, str]] = {}
+    for di, day in enumerate(days):
+        for pi, person in enumerate(people):
+            for cti, ct in enumerate(inp.call_type_configs):
+                if solver.value(x[(pi, di, cti)]):
+                    result.setdefault(day.d, {})[person.id] = ct.name
+
+    # Merge manual overrides from prior_assignments (carry-over months)
+    for d_date, mapping in inp.prior_assignments.items():
+        if d_date not in {day.d for day in days}:
+            result.setdefault(d_date, {}).update(mapping)
+
+    return result
+
+
+def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
+    logger.info(
+        "Solver starting: %d staff, %d days",
+        len(inp.mo_pool),
+        len(inp.days),
+    )
 
     stepdown_dates: set[date] = set()
     for day in inp.days:
@@ -379,6 +575,51 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
             stepdown_dates.add(day.d)
 
     ct_config_dict = _build_ct_config_dict(inp.call_type_configs)
+
+    # ── Try OR-Tools CP-SAT first ─────────────────────────────────────────────
+    cp_result = _solve_cp_sat(inp, stepdown_dates, ct_config_dict)
+    if cp_result is not None:
+        # Merge manual overrides explicitly
+        for d_date, overrides in inp.manual_overrides.items():
+            for ctype, pid in overrides.items():
+                cp_result.setdefault(d_date, {})[pid] = ctype
+
+        month_assignments = {
+            d: mapping
+            for d, mapping in cp_result.items()
+            if any(day.d == d for day in inp.days)
+        }
+        # Run post-pass local search on the CP-SAT result too
+        month_assignments = _local_search_swaps(
+            month_assignments,
+            cp_result,
+            inp,
+            stepdown_dates,
+            ct_config_dict,
+        )
+        staff_names = {p.id: p.name for p in inp.mo_pool}
+        violations = validate_full_roster(
+            month_assignments, stepdown_dates, staff_names, ct_config_dict
+        )
+        total_assignments = sum(len(v) for v in month_assignments.values())
+        logger.info(
+            "CP-SAT solve complete: %d assignments, %d violations",
+            total_assignments,
+            len(violations),
+        )
+        if violations:
+            for v in violations:
+                logger.warning("Constraint violation: %s", v)
+        return month_assignments, violations
+
+    # ── Greedy fallback ────────────────────────────────────────────────────────
+    logger.info("Using greedy solver (CP-SAT fallback)")
+    assignments: dict[date, dict[int, str]] = {}
+
+    for d, mapping in inp.prior_assignments.items():
+        assignments[d] = dict(mapping)
+
+    # stepdown_dates and ct_config_dict already computed above (before CP-SAT attempt)
 
     fairness = FairnessTracker()
     for pid in [p.id for p in inp.mo_pool]:
@@ -399,7 +640,9 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
             ct_cfg = next((c for c in inp.call_type_configs if c.name == ctype), None)
             diff = ct_cfg.difficulty_points if ct_cfg else 1
             if ct_cfg is None or ct_cfg.counts_towards_fairness:
-                fairness.record(pid, ctype, day.is_weekend or day.is_ph, call_is_24h, diff)
+                fairness.record(
+                    pid, ctype, day.is_weekend or day.is_ph, call_is_24h, diff
+                )
 
         # Pre-assign night-float continuations before display-order slot processing.
         # Otherwise earlier-order slots (e.g. R1) can snap up the night-float person
@@ -416,7 +659,11 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
             if today_label not in run_days or prev_label not in run_days:
                 continue
             prev_holder = next(
-                (pid for pid, pct in assignments.get(prev_day, {}).items() if pct == ct.name),
+                (
+                    pid
+                    for pid, pct in assignments.get(prev_day, {}).items()
+                    if pct == ct.name
+                ),
                 None,
             )
             if prev_holder is None:
@@ -425,8 +672,15 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
             if person is None:
                 continue
             if not _is_eligible(
-                person, day, ct, assignments, daily,
-                inp.leave_dates, inp.block_dates, stepdown_dates, ct_config_dict,
+                person,
+                day,
+                ct,
+                assignments,
+                daily,
+                inp.leave_dates,
+                inp.block_dates,
+                stepdown_dates,
+                ct_config_dict,
             ):
                 continue
             daily[person.id] = ct.name
@@ -434,8 +688,11 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
             call_is_24h = is_24h_call(ct.name, day.d, stepdown_dates, ct_config_dict)
             if ct.counts_towards_fairness:
                 fairness.record(
-                    person.id, ct.name, day.is_weekend or day.is_ph,
-                    call_is_24h, ct.difficulty_points,
+                    person.id,
+                    ct.name,
+                    day.is_weekend or day.is_ph,
+                    call_is_24h,
+                    ct.difficulty_points,
                 )
 
         for ct in slots:
@@ -507,13 +764,27 @@ def solve(inp: SolverInput) -> tuple[dict[date, dict[int, str]], list[str]]:
     # Post-pass local search: swap pairs of same-call-type assignments if it
     # reduces difficulty-point stddev across staff and all constraints still hold.
     month_assignments = _local_search_swaps(
-        month_assignments, assignments, inp, stepdown_dates, ct_config_dict,
+        month_assignments,
+        assignments,
+        inp,
+        stepdown_dates,
+        ct_config_dict,
     )
 
     staff_names = {p.id: p.name for p in inp.mo_pool}
     violations = validate_full_roster(
         month_assignments, stepdown_dates, staff_names, ct_config_dict
     )
+
+    total_assignments = sum(len(v) for v in month_assignments.values())
+    logger.info(
+        "Solver complete: %d assignments, %d violations",
+        total_assignments,
+        len(violations),
+    )
+    if violations:
+        for v in violations:
+            logger.warning("Constraint violation: %s", v)
 
     return month_assignments, violations
 
@@ -561,7 +832,9 @@ def _local_search_swaps(
     }
 
     def is_valid_after_swap(
-        pid: int, d: date, ct_name: str, new_daily_pid: int,
+        pid: int,
+        d: date,
+        ct_name: str,
     ) -> bool:
         """Check pid is valid for (d, ct_name) under the hypothetical state where
         new_daily_pid replaces the current holder. We temporarily mutate
@@ -582,8 +855,15 @@ def _local_search_swaps(
         daily_excl = {k: v for k, v in new_day.items() if v != ct_name}
         try:
             ok = _is_eligible(
-                person, _day_cfg_for(d, inp), ct, all_assignments, daily_excl,
-                inp.leave_dates, inp.block_dates, stepdown_dates, ct_config_dict,
+                person,
+                _day_cfg_for(d, inp),
+                ct,
+                all_assignments,
+                daily_excl,
+                inp.leave_dates,
+                inp.block_dates,
+                stepdown_dates,
+                ct_config_dict,
             )
         finally:
             all_assignments[d] = original
@@ -638,14 +918,20 @@ def _local_search_swaps(
                         continue
                     # Reject if swap target person already holds a different slot
                     # on the same day — swapping would silently clobber that slot.
-                    if p2 in month_assignments.get(d1, {}) and month_assignments[d1][p2] != ct_name:
+                    if (
+                        p2 in month_assignments.get(d1, {})
+                        and month_assignments[d1][p2] != ct_name
+                    ):
                         continue
-                    if p1 in month_assignments.get(d2, {}) and month_assignments[d2][p1] != ct_name:
+                    if (
+                        p1 in month_assignments.get(d2, {})
+                        and month_assignments[d2][p1] != ct_name
+                    ):
                         continue
-                    if not is_valid_after_swap(p2, d1, ct_name, p1):
+                    if not is_valid_after_swap(p2, d1, ct_name):
                         swaps_rejected_eligibility += 1
                         continue
-                    if not is_valid_after_swap(p1, d2, ct_name, p2):
+                    if not is_valid_after_swap(p1, d2, ct_name):
                         swaps_rejected_eligibility += 1
                         continue
                     apply_swap(d1, d2, ct_name, p1, p2)
@@ -661,7 +947,10 @@ def _local_search_swaps(
     logger.info(
         "local_search_swaps summary: passes_run=%d swaps_applied=%d "
         "swaps_rejected_eligibility=%d swaps_rejected_stddev=%d",
-        passes_run, swaps_applied, swaps_rejected_eligibility, swaps_rejected_stddev,
+        passes_run,
+        swaps_applied,
+        swaps_rejected_eligibility,
+        swaps_rejected_stddev,
     )
     return month_assignments
 
@@ -671,8 +960,13 @@ def _day_cfg_for(d: date, inp: SolverInput) -> DayConfig:
         if day.d == d:
             return day
     # Fallback for prior-month dates (shouldn't be swapped, but defensive)
-    return DayConfig(d=d, is_weekend=d.weekday() >= 5, is_ph=False,
-                     is_stepdown=False, has_evening_ot=False)
+    return DayConfig(
+        d=d,
+        is_weekend=d.weekday() >= 5,
+        is_ph=False,
+        is_stepdown=False,
+        has_ext_ot=False,
+    )
 
 
 def compute_fairness_stats(

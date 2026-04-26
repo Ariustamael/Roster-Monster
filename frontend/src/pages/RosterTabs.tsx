@@ -1,27 +1,15 @@
 import { NavLink, Outlet } from "react-router-dom";
 
-const tabStyle: React.CSSProperties = {
-  padding: "8px 14px",
-  fontSize: 13,
-  fontWeight: 600,
-  color: "var(--text-muted)",
-  textDecoration: "none",
-  borderBottom: "2px solid transparent",
-};
-const activeTabStyle: React.CSSProperties = {
-  color: "var(--primary)",
-  borderBottomColor: "var(--primary)",
-};
-
 export default function RosterTabs() {
   return (
     <div>
-      <div style={{
-        display: "flex", gap: 4, borderBottom: "1px solid var(--border)", marginBottom: 14,
-      }}>
-        <NavLink end to="/roster" style={({ isActive }) => ({ ...tabStyle, ...(isActive ? activeTabStyle : {}) })}>Call Roster</NavLink>
-        <NavLink to="/roster/duty" style={({ isActive }) => ({ ...tabStyle, ...(isActive ? activeTabStyle : {}) })}>Duty Roster</NavLink>
-        <NavLink to="/roster/fairness" style={({ isActive }) => ({ ...tabStyle, ...(isActive ? activeTabStyle : {}) })}>Fairness</NavLink>
+      <div className="roster-tab-bar">
+        <NavLink end to="/roster" className={({ isActive }) => "roster-tab" + (isActive ? " roster-tab--active" : "")}>Call Roster</NavLink>
+        <NavLink to="/roster/duty" className={({ isActive }) => "roster-tab" + (isActive ? " roster-tab--active" : "")}>Duty Roster</NavLink>
+        <NavLink to="/roster/conreg" className={({ isActive }) => "roster-tab" + (isActive ? " roster-tab--active" : "")}>Con/Reg Roster</NavLink>
+        <NavLink to="/roster/supply" className={({ isActive }) => "roster-tab" + (isActive ? " roster-tab--active" : "")}>Supply / Demand</NavLink>
+        <NavLink to="/roster/call-distribution" className={({ isActive }) => "roster-tab" + (isActive ? " roster-tab--active" : "")}>Call Distribution</NavLink>
+        <NavLink to="/roster/duty-distribution" className={({ isActive }) => "roster-tab" + (isActive ? " roster-tab--active" : "")}>Duty Distribution</NavLink>
       </div>
       <Outlet />
     </div>

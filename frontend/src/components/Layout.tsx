@@ -1,8 +1,6 @@
-import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useConfig } from "../context/ConfigContext";
 import { api } from "../api";
-import LegendModal from "./LegendModal";
 
 const MONTH_NAMES = [
   "", "January", "February", "March", "April", "May", "June",
@@ -11,7 +9,6 @@ const MONTH_NAMES = [
 
 export default function Layout() {
   const { configs, active, setActiveId, reload } = useConfig();
-  const [legendOpen, setLegendOpen] = useState(false);
 
   async function addMonth() {
     const input = prompt("Enter year and month (e.g. 2026-05):");
@@ -66,25 +63,12 @@ export default function Layout() {
 
         <nav>
           <NavLink to="/roster">Roster</NavLink>
-          <NavLink to="/staff">Staff</NavLink>
           <NavLink to="/resources">Resources</NavLink>
-          <NavLink to="/config">Config</NavLink>
+          <NavLink to="/config">Configuration</NavLink>
         </nav>
       </aside>
-      <main className="main" style={{ position: "relative" }}>
-        <button
-          onClick={() => setLegendOpen(true)}
-          title="Legend / help"
-          style={{
-            position: "absolute", top: 12, right: 16, zIndex: 50,
-            width: 28, height: 28, borderRadius: "50%",
-            border: "1px solid #e1e4e8", background: "white",
-            color: "#1a1a2e", fontSize: 14, fontWeight: 700,
-            cursor: "pointer", boxShadow: "0 1px 3px rgba(0,0,0,0.08)",
-          }}
-        >?</button>
+      <main className="main">
         <Outlet />
-        {legendOpen && <LegendModal onClose={() => setLegendOpen(false)} />}
       </main>
     </div>
   );

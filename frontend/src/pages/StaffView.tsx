@@ -169,29 +169,39 @@ export default function StaffView() {
 
   return (
     <>
-      <div className="page-header">
-        <h2>Staff ({staff.length} total, {moCount} MOs)
+      <div className="page-header" style={{ alignItems: "flex-start" }}>
+        <div>
+          <h2>Staff{active ? ` - ${new Date(active.year, active.month - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}` : ""}</h2>
+          <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+            {(() => {
+              const consCount = staff.filter(s => consultantRanks.includes(s.rank)).length;
+              const regCount = staff.filter(s => ranks.find(r => r.name === s.rank)?.is_registrar_tier).length;
+              return `${staff.length} Total | ${consCount} Cons, ${regCount} Regs, ${moCount} MOs`;
+            })()}
+          </div>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+          <div className="btn-group">
+            <input
+              type="text"
+              placeholder="Filter by name, rank, or team..."
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              style={{
+                padding: "8px 12px",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                fontSize: 13,
+                width: 220,
+              }}
+            />
+            <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Staff</button>
+          </div>
           {staffUpdatedAt && (
-            <span style={{ fontSize: 11, fontWeight: 400, color: "var(--text-muted)", marginLeft: 12 }}>
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
               Last updated: {new Date(staffUpdatedAt).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
             </span>
           )}
-        </h2>
-        <div className="btn-group">
-          <input
-            type="text"
-            placeholder="Filter by name, rank, or team..."
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            style={{
-              padding: "8px 12px",
-              border: "1px solid var(--border)",
-              borderRadius: 6,
-              fontSize: 13,
-              width: 220,
-            }}
-          />
-          <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Staff</button>
         </div>
       </div>
 

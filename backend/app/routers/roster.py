@@ -1,10 +1,12 @@
 import calendar
-from datetime import date, timedelta
 from collections import defaultdict
+from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select, delete
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import (
@@ -14,6 +16,8 @@ from ..models import (
     Leave,
     CallPreference,
     CallAssignment,
+    DutyAssignment,
+    DutyType,
     PublicHoliday,
     PreferenceType,
     ResourceTemplate,
@@ -27,6 +31,7 @@ from ..schemas import (
     ManualOverrideCreate,
     CallSwapRequest,
     CallSwapResponse,
+    CallAssignmentRestore,
 )
 from ..services.solver import (
     SolverInput,
@@ -36,27 +41,87 @@ from ..services.solver import (
     solve,
     compute_fairness_stats,
 )
-from ..services.exporter import export_original, export_clean
+from ..services.exporter import export_full, export_clean
+from ..services.validators import get_post_call_type
 
 router = APIRouter(prefix="/api/roster", tags=["roster"])
 
 
-def _load_call_type_infos(db: Session) -> list[CallTypeInfo]:
+async def _build_call_rank_groups(db: AsyncSession) -> dict[str, str]:
+    """Return a map of call-type name â†’ tier label (Consultant / Registrar / rank name)."""
+    from sqlalchemy.orm import selectinload as _si
+    from ..models import CallTypeEligibleRank as _CTER
+
     configs = (
-        db.query(CallTypeConfig)
-        .filter(CallTypeConfig.is_active.is_(True))
-        .order_by(CallTypeConfig.display_order)
+        (
+            await db.execute(
+                select(CallTypeConfig)
+                .filter(CallTypeConfig.is_active.is_(True))
+                .options(_si(CallTypeConfig.eligible_ranks).selectinload(_CTER.rank))
+            )
+        )
+        .scalars()
         .all()
     )
-    # Build id → name map for resolving mutually_exclusive_with (stored as CSV of ids)
-    all_cts = db.query(CallTypeConfig).all()
+    groups: dict[str, str] = {}
+    for ct in configs:
+        ranks = [j.rank for j in ct.eligible_ranks if j.rank]
+        if not ranks:
+            groups[ct.name] = ""
+        elif any(r.is_consultant_tier for r in ranks):
+            groups[ct.name] = "Consultant"
+        elif any(r.is_registrar_tier for r in ranks):
+            groups[ct.name] = "Registrar"
+        else:
+            top = min(ranks, key=lambda r: r.display_order)
+            groups[ct.name] = top.name
+    return groups
+
+
+def _tier_order(group: str) -> int:
+    return 0 if group == "Consultant" else 1 if group == "Registrar" else 2
+
+
+def _sorted_ct_columns(call_type_configs, rank_groups: dict[str, str]) -> list[str]:
+    return [
+        ct.name
+        for ct in sorted(
+            call_type_configs,
+            key=lambda c: (_tier_order(rank_groups.get(c.name, "")), c.display_order),
+        )
+    ]
+
+
+async def _load_call_type_infos(db: AsyncSession) -> list[CallTypeInfo]:
+    configs = (
+        (
+            await db.execute(
+                select(CallTypeConfig)
+                .filter(CallTypeConfig.is_active.is_(True))
+                .options(selectinload(CallTypeConfig.eligible_ranks))
+                .order_by(CallTypeConfig.display_order)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    # Build id â†’ name map for resolving mutually_exclusive_with (stored as CSV of ids)
+    all_cts = (await db.execute(select(CallTypeConfig))).scalars().all()
     name_by_id = {c.id: c.name for c in all_cts}
     result = []
     for ct in configs:
         rank_ids = [er.rank_id for er in ct.eligible_ranks]
         rank_names = set()
         if rank_ids:
-            ranks = db.query(RankConfig).filter(RankConfig.id.in_(rank_ids)).all()
+            ranks = (
+                (
+                    await db.execute(
+                        select(RankConfig).filter(RankConfig.id.in_(rank_ids))
+                    )
+                )
+                .scalars()
+                .all()
+            )
             rank_names = {r.name for r in ranks}
         mutex_names: set[str] = set()
         if ct.mutually_exclusive_with:
@@ -73,9 +138,13 @@ def _load_call_type_infos(db: Session) -> list[CallTypeInfo]:
                 is_overnight=ct.is_overnight,
                 post_call_type=ct.post_call_type,
                 max_consecutive_days=ct.max_consecutive_days,
-                min_consecutive_days=ct.min_consecutive_days if ct.min_consecutive_days is not None else 1,
+                min_consecutive_days=ct.min_consecutive_days
+                if ct.min_consecutive_days is not None
+                else 1,
                 min_gap_days=ct.min_gap_days,
-                switch_window_days=ct.switch_window_days if ct.switch_window_days is not None else 5,
+                switch_window_days=ct.switch_window_days
+                if ct.switch_window_days is not None
+                else 5,
                 difficulty_points=ct.difficulty_points,
                 counts_towards_fairness=ct.counts_towards_fairness,
                 applicable_days=ct.applicable_days,
@@ -98,28 +167,44 @@ def _load_call_type_infos(db: Session) -> list[CallTypeInfo]:
     return result
 
 
-def _get_call_eligible_ranks(db: Session) -> set[str]:
-    ranks = db.query(RankConfig).filter(RankConfig.is_call_eligible.is_(True)).all()
+async def _get_call_eligible_ranks(db: AsyncSession) -> set[str]:
+    ranks = (
+        (
+            await db.execute(
+                select(RankConfig).filter(RankConfig.is_call_eligible.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
     return {r.name for r in ranks}
 
 
-def _get_duty_eligible_ranks(db: Session) -> set[str]:
-    ranks = db.query(RankConfig).filter(RankConfig.is_duty_eligible.is_(True)).all()
+async def _get_duty_eligible_ranks(db: AsyncSession) -> set[str]:
+    ranks = (
+        (
+            await db.execute(
+                select(RankConfig).filter(RankConfig.is_duty_eligible.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
     return {r.name for r in ranks}
 
 
-def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
+async def _build_solver_input(config: MonthlyConfig, db: AsyncSession) -> SolverInput:
     year, month = config.year, config.month
     num_days = calendar.monthrange(year, month)[1]
 
     ph_dates = {
         r.date
-        for r in db.query(PublicHoliday).all()
+        for r in (await db.execute(select(PublicHoliday))).scalars().all()
         if r.date.year == year and r.date.month == month
     }
 
     stepdown = {r.date for r in config.stepdown_days}
-    evening_ot = {r.date for r in config.evening_ot_dates}
+    ext_ot = {r.date for r in config.ext_ot_dates}
 
     consultant_oncall_map: dict[date, int] = {}
     for r in config.consultant_oncalls:
@@ -127,7 +212,13 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
 
     consultant_team_map: dict[int, int] = {}
     for ta in (
-        db.query(TeamAssignment).filter(TeamAssignment.role == "consultant").all()
+        (
+            await db.execute(
+                select(TeamAssignment).filter(TeamAssignment.role == "consultant")
+            )
+        )
+        .scalars()
+        .all()
     ):
         consultant_team_map[ta.staff_id] = ta.team_id
 
@@ -147,7 +238,7 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
                 is_weekend=is_wknd,
                 is_ph=is_ph,
                 is_stepdown=d in stepdown,
-                has_evening_ot=d in evening_ot,
+                has_ext_ot=d in ext_ot,
                 consultant_oncall_id=cons_id,
                 consultant_oncall_team_id=consultant_team_map.get(cons_id)
                 if cons_id
@@ -156,28 +247,37 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
             )
         )
 
-    call_eligible_ranks = _get_call_eligible_ranks(db)
+    call_eligible_ranks = await _get_call_eligible_ranks(db)
     mo_staff = (
-        db.query(Staff)
-        .filter(
-            Staff.active.is_(True),
-            Staff.rank.in_(list(call_eligible_ranks)),
-            # Exclude staff flagged as unable to take call
-            (Staff.can_do_call.is_(True)) | (Staff.can_do_call.is_(None)),
+        (
+            await db.execute(
+                select(Staff).filter(
+                    Staff.active.is_(True),
+                    Staff.rank.in_(list(call_eligible_ranks)),
+                    # Exclude staff flagged as unable to take call
+                    (Staff.can_do_call.is_(True)) | (Staff.can_do_call.is_(None)),
+                )
+            )
         )
+        .scalars()
         .all()
     )
 
     mo_pool: list[PersonInfo] = []
     for s in mo_staff:
         ta = (
-            db.query(TeamAssignment)
-            .filter(
-                TeamAssignment.staff_id == s.id,
-                TeamAssignment.role == "mo",
-                TeamAssignment.effective_from <= date(year, month, num_days),
+            (
+                await db.execute(
+                    select(TeamAssignment)
+                    .filter(
+                        TeamAssignment.staff_id == s.id,
+                        TeamAssignment.role == "mo",
+                        TeamAssignment.effective_from <= date(year, month, num_days),
+                    )
+                    .order_by(TeamAssignment.effective_from.desc())
+                )
             )
-            .order_by(TeamAssignment.effective_from.desc())
+            .scalars()
             .first()
         )
         mo_pool.append(
@@ -192,11 +292,15 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
 
     leave_dates: dict[int, set[date]] = defaultdict(set)
     for lv in (
-        db.query(Leave)
-        .filter(
-            Leave.date >= date(year, month, 1),
-            Leave.date <= date(year, month, num_days),
+        (
+            await db.execute(
+                select(Leave).filter(
+                    Leave.date >= date(year, month, 1),
+                    Leave.date <= date(year, month, num_days),
+                )
+            )
         )
+        .scalars()
         .all()
     ):
         leave_dates[lv.staff_id].add(lv.date)
@@ -204,11 +308,15 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
     block_dates: dict[int, set[date]] = defaultdict(set)
     request_dates: dict[int, set[date]] = defaultdict(set)
     for cp in (
-        db.query(CallPreference)
-        .filter(
-            CallPreference.date >= date(year, month, 1),
-            CallPreference.date <= date(year, month, num_days),
+        (
+            await db.execute(
+                select(CallPreference).filter(
+                    CallPreference.date >= date(year, month, 1),
+                    CallPreference.date <= date(year, month, num_days),
+                )
+            )
         )
+        .scalars()
         .all()
     ):
         if cp.preference_type == PreferenceType.BLOCK:
@@ -223,19 +331,25 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
         prev_month = 12
         prev_year = year - 1
     prev_config = (
-        db.query(MonthlyConfig)
-        .filter(MonthlyConfig.year == prev_year, MonthlyConfig.month == prev_month)
-        .first()
-    )
+        await db.execute(
+            select(MonthlyConfig).filter(
+                MonthlyConfig.year == prev_year, MonthlyConfig.month == prev_month
+            )
+        )
+    ).scalar_one_or_none()
     if prev_config:
         prev_num_days = calendar.monthrange(prev_year, prev_month)[1]
         lookback_start = date(prev_year, prev_month, max(1, prev_num_days - 6))
         prev_calls = (
-            db.query(CallAssignment)
-            .filter(
-                CallAssignment.config_id == prev_config.id,
-                CallAssignment.date >= lookback_start,
+            (
+                await db.execute(
+                    select(CallAssignment).filter(
+                        CallAssignment.config_id == prev_config.id,
+                        CallAssignment.date >= lookback_start,
+                    )
+                )
             )
+            .scalars()
             .all()
         )
         for c in prev_calls:
@@ -243,15 +357,19 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
                 prior_assignments[c.date] = {}
             prior_assignments[c.date][c.staff_id] = c.call_type
 
-    call_type_configs = _load_call_type_infos(db)
+    call_type_configs = await _load_call_type_infos(db)
 
     manual_overrides: dict[date, dict[str, int]] = {}
     manual_rows = (
-        db.query(CallAssignment)
-        .filter(
-            CallAssignment.config_id == config.id,
-            CallAssignment.is_manual_override.is_(True),
+        (
+            await db.execute(
+                select(CallAssignment).filter(
+                    CallAssignment.config_id == config.id,
+                    CallAssignment.is_manual_override.is_(True),
+                )
+            )
         )
+        .scalars()
         .all()
     )
     for r in manual_rows:
@@ -272,68 +390,96 @@ def _build_solver_input(config: MonthlyConfig, db: Session) -> SolverInput:
 
 
 @router.post("/{config_id}/generate", response_model=RosterResponse)
-def generate_roster(config_id: int, db: Session = Depends(get_db)):
-    config = db.query(MonthlyConfig).get(config_id)
+async def generate_roster(config_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(MonthlyConfig)
+        .filter(MonthlyConfig.id == config_id)
+        .options(
+            selectinload(MonthlyConfig.consultant_oncalls),
+            selectinload(MonthlyConfig.ac_oncalls),
+            selectinload(MonthlyConfig.stepdown_days),
+            selectinload(MonthlyConfig.ext_ot_dates),
+            selectinload(MonthlyConfig.call_assignments),
+        )
+    )
+    config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(404, "Config not found")
 
-    inp = _build_solver_input(config, db)
+    inp = await _build_solver_input(config, db)
     assignments, violations = solve(inp)
 
-    db.query(CallAssignment).filter(
-        CallAssignment.config_id == config_id,
-        CallAssignment.is_manual_override.is_(False),
-    ).delete()
-
-    manual_overrides = {
-        (r.date, r.call_type)
-        for r in db.query(CallAssignment)
-        .filter(
-            CallAssignment.config_id == config_id,
-            CallAssignment.is_manual_override.is_(True),
+    try:
+        await db.execute(
+            delete(CallAssignment).where(
+                CallAssignment.config_id == config_id,
+                CallAssignment.is_manual_override.is_(False),
+            )
         )
-        .all()
-    }
 
-    pid_to_name = {p.id: p.name for p in inp.mo_pool}
-
-    for d in sorted(assignments.keys()):
-        for pid, ctype in assignments[d].items():
-            if pid == -1:
-                continue
-            if (d, ctype) in manual_overrides:
-                continue
-            db.add(
-                CallAssignment(
-                    config_id=config_id,
-                    date=d,
-                    staff_id=pid,
-                    call_type=ctype,
-                    is_manual_override=False,
+        manual_overrides = {
+            (r.date, r.call_type)
+            for r in (
+                await db.execute(
+                    select(CallAssignment).filter(
+                        CallAssignment.config_id == config_id,
+                        CallAssignment.is_manual_override.is_(True),
+                    )
                 )
             )
-    db.commit()
+            .scalars()
+            .all()
+        }
+
+        pid_to_name = {p.id: p.name for p in inp.mo_pool}
+
+        for d in sorted(assignments.keys()):
+            for pid, ctype in assignments[d].items():
+                if pid == -1:
+                    continue
+                if (d, ctype) in manual_overrides:
+                    continue
+                db.add(
+                    CallAssignment(
+                        config_id=config_id,
+                        date=d,
+                        staff_id=pid,
+                        call_type=ctype,
+                        is_manual_override=False,
+                    )
+                )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500, detail="Roster generation failed; no changes were saved."
+        )
 
     ph_dates = {
         r.date
-        for r in db.query(PublicHoliday).all()
+        for r in (await db.execute(select(PublicHoliday))).scalars().all()
         if r.date.year == config.year and r.date.month == config.month
     }
 
-    all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
+    all_staff_names = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
     cons_oncall_rows = {r.date: r for r in config.consultant_oncalls}
 
     stepdown_dates = {r.date for r in config.stepdown_days}
-    ct_columns = [
-        ct.name for ct in sorted(inp.call_type_configs, key=lambda c: c.display_order)
-    ]
+    rank_groups = await _build_call_rank_groups(db)
+    ct_columns = _sorted_ct_columns(inp.call_type_configs, rank_groups)
 
     manual_rows = (
-        db.query(CallAssignment)
-        .filter(
-            CallAssignment.config_id == config_id,
-            CallAssignment.is_manual_override.is_(True),
+        (
+            await db.execute(
+                select(CallAssignment).filter(
+                    CallAssignment.config_id == config_id,
+                    CallAssignment.is_manual_override.is_(True),
+                )
+            )
         )
+        .scalars()
         .all()
     )
     manual_slots: dict[date, dict[str, str]] = defaultdict(dict)
@@ -389,17 +535,35 @@ def generate_roster(config_id: int, db: Session = Depends(get_db)):
         violations=violations,
         fairness=fairness,
         call_type_columns=ct_columns,
+        call_type_rank_groups=rank_groups,
     )
 
 
 @router.get("/{config_id}/view", response_model=RosterResponse)
-def view_roster(config_id: int, db: Session = Depends(get_db)):
-    config = db.query(MonthlyConfig).get(config_id)
+async def view_roster(config_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(MonthlyConfig)
+        .filter(MonthlyConfig.id == config_id)
+        .options(
+            selectinload(MonthlyConfig.consultant_oncalls),
+            selectinload(MonthlyConfig.ac_oncalls),
+            selectinload(MonthlyConfig.stepdown_days),
+            selectinload(MonthlyConfig.ext_ot_dates),
+            selectinload(MonthlyConfig.call_assignments),
+        )
+    )
+    config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(404, "Config not found")
 
     call_rows = (
-        db.query(CallAssignment).filter(CallAssignment.config_id == config_id).all()
+        (
+            await db.execute(
+                select(CallAssignment).filter(CallAssignment.config_id == config_id)
+            )
+        )
+        .scalars()
+        .all()
     )
     if not call_rows:
         raise HTTPException(404, "No roster generated yet")
@@ -407,10 +571,12 @@ def view_roster(config_id: int, db: Session = Depends(get_db)):
     year, month = config.year, config.month
     num_days = calendar.monthrange(year, month)[1]
 
-    all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
+    all_staff_names = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
     ph_dates = {
         r.date
-        for r in db.query(PublicHoliday).all()
+        for r in (await db.execute(select(PublicHoliday))).scalars().all()
         if r.date.year == year and r.date.month == month
     }
     cons_oncall_rows = {r.date: r for r in config.consultant_oncalls}
@@ -429,10 +595,9 @@ def view_roster(config_id: int, db: Session = Depends(get_db)):
             r.staff_id, f"ID:{r.staff_id}"
         )
 
-    call_type_configs = _load_call_type_infos(db)
-    ct_columns = [
-        ct.name for ct in sorted(call_type_configs, key=lambda c: c.display_order)
-    ]
+    call_type_configs = await _load_call_type_infos(db)
+    rank_groups = await _build_call_rank_groups(db)
+    ct_columns = _sorted_ct_columns(call_type_configs, rank_groups)
 
     day_rosters: list[DayRoster] = []
     for day_num in range(1, num_days + 1):
@@ -465,15 +630,44 @@ def view_roster(config_id: int, db: Session = Depends(get_db)):
             )
         )
 
-    call_eligible_ranks = _get_call_eligible_ranks(db)
-    mo_pool_staff = (
-        db.query(Staff)
-        .filter(
-            Staff.active.is_(True),
-            Staff.rank.in_(list(call_eligible_ranks)),
-            # Exclude staff flagged as unable to take call
-            (Staff.can_do_call.is_(True)) | (Staff.can_do_call.is_(None)),
+    # Backfill Ward MO / EOT MO from duty assignments (if duties have been generated)
+    duty_rows = (
+        (
+            await db.execute(
+                select(DutyAssignment).filter(
+                    DutyAssignment.config_id == config_id,
+                    DutyAssignment.duty_type.in_([DutyType.WARD_MO, DutyType.EOT_MO]),
+                )
+            )
         )
+        .scalars()
+        .all()
+    )
+    ward_by_date: dict[date, list[str]] = defaultdict(list)
+    eot_by_date: dict[date, list[str]] = defaultdict(list)
+    for r in duty_rows:
+        name = all_staff_names.get(r.staff_id, f"ID:{r.staff_id}")
+        if r.duty_type == DutyType.WARD_MO:
+            ward_by_date[r.date].append(name)
+        else:
+            eot_by_date[r.date].append(name)
+    for dr in day_rosters:
+        dr.ward_mo = ward_by_date.get(dr.date, [])
+        dr.eot_mo = eot_by_date.get(dr.date, [])
+
+    call_eligible_ranks = await _get_call_eligible_ranks(db)
+    mo_pool_staff = (
+        (
+            await db.execute(
+                select(Staff).filter(
+                    Staff.active.is_(True),
+                    Staff.rank.in_(list(call_eligible_ranks)),
+                    # Exclude staff flagged as unable to take call
+                    (Staff.can_do_call.is_(True)) | (Staff.can_do_call.is_(None)),
+                )
+            )
+        )
+        .scalars()
         .all()
     )
     mo_pool_persons = [
@@ -495,26 +689,38 @@ def view_roster(config_id: int, db: Session = Depends(get_db)):
         violations=[],
         fairness=fairness,
         call_type_columns=ct_columns,
+        call_type_rank_groups=rank_groups,
     )
 
 
 @router.get("/{config_id}/export")
-def export_roster(
+async def export_roster(
     config_id: int,
-    format: str = Query("original", pattern="^(original|clean)$"),
-    db: Session = Depends(get_db),
+    format: str = Query("full", pattern="^(full|clean)$"),
+    db: AsyncSession = Depends(get_db),
 ):
-    config = db.query(MonthlyConfig).get(config_id)
+    result = await db.execute(
+        select(MonthlyConfig)
+        .filter(MonthlyConfig.id == config_id)
+        .options(
+            selectinload(MonthlyConfig.consultant_oncalls),
+            selectinload(MonthlyConfig.ac_oncalls),
+            selectinload(MonthlyConfig.stepdown_days),
+            selectinload(MonthlyConfig.ext_ot_dates),
+            selectinload(MonthlyConfig.call_assignments),
+        )
+    )
+    config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(404, "Config not found")
 
     month_name = calendar.month_name[config.month]
     if format == "clean":
-        buf = export_clean(config, db)
+        buf = await export_clean(config, db)
         filename = f"Roster_Clean_{month_name}_{config.year}.xlsx"
     else:
-        buf = export_original(config, db)
-        filename = f"Roster_Original_{month_name}_{config.year}.xlsx"
+        buf = await export_full(config, db)
+        filename = f"Roster_Full_{month_name}_{config.year}.xlsx"
 
     return StreamingResponse(
         buf,
@@ -524,53 +730,78 @@ def export_roster(
 
 
 @router.get("/{config_id}/resources")
-def get_resources(config_id: int, db: Session = Depends(get_db)):
-    config = db.query(MonthlyConfig).get(config_id)
+async def get_resources(config_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(MonthlyConfig)
+        .filter(MonthlyConfig.id == config_id)
+        .options(
+            selectinload(MonthlyConfig.consultant_oncalls),
+            selectinload(MonthlyConfig.ac_oncalls),
+            selectinload(MonthlyConfig.stepdown_days),
+            selectinload(MonthlyConfig.ext_ot_dates),
+            selectinload(MonthlyConfig.call_assignments),
+        )
+    )
+    config = result.scalar_one_or_none()
     if not config:
         raise HTTPException(404, "Config not found")
 
     year, month = config.year, config.month
     num_days = calendar.monthrange(year, month)[1]
 
-    all_templates = db.query(ResourceTemplate).all()
+    all_templates = (await db.execute(select(ResourceTemplate))).scalars().all()
     ot_templates = [t for t in all_templates if t.resource_type == "ot"]
     clinic_templates = [t for t in all_templates if t.resource_type == "clinic"]
 
     ph_dates = {
         r.date
-        for r in db.query(PublicHoliday).all()
+        for r in (await db.execute(select(PublicHoliday))).scalars().all()
         if r.date.year == year and r.date.month == month
     }
-    duty_eligible_ranks = _get_duty_eligible_ranks(db)
+    duty_eligible_ranks = await _get_duty_eligible_ranks(db)
     duty_staff = (
-        db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks)))
+        (
+            await db.execute(
+                select(Staff).filter(
+                    Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks))
+                )
+            )
+        )
+        .scalars()
         .all()
     )
     total_mos = len(duty_staff)
     duty_staff_ids = {s.id for s in duty_staff}
 
-    call_type_configs = _load_call_type_infos(db)
+    call_type_configs = await _load_call_type_infos(db)
 
     leave_counts: dict[str, int] = defaultdict(int)
     for lv in (
-        db.query(Leave)
-        .filter(
-            Leave.date >= date(year, month, 1),
-            Leave.date <= date(year, month, num_days),
+        (
+            await db.execute(
+                select(Leave).filter(
+                    Leave.date >= date(year, month, 1),
+                    Leave.date <= date(year, month, num_days),
+                )
+            )
         )
+        .scalars()
         .all()
     ):
         if lv.staff_id in duty_staff_ids:
             leave_counts[lv.date.isoformat()] += 1
 
     call_assignments = (
-        db.query(CallAssignment).filter(CallAssignment.config_id == config_id).all()
+        (
+            await db.execute(
+                select(CallAssignment).filter(CallAssignment.config_id == config_id)
+            )
+        )
+        .scalars()
+        .all()
     )
     oncall_counts: dict[str, int] = defaultdict(int)
     postcall_dates: set[str] = set()
-
-    from ..services.validators import get_post_call_type
 
     ct_config_dict = {
         ct.name: {"is_overnight": ct.is_overnight, "post_call_type": ct.post_call_type}
@@ -617,9 +848,13 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
         on_leave = leave_counts.get(ds, 0)
         on_call = oncall_counts.get(ds, 0)
         post_call = 1 if ds in postcall_dates else 0
-        available = total_mos - on_leave - on_call - post_call
-        needed = ot_assistants + clinic_slots if not is_wknd and not is_ph else 0
-        surplus = available - needed if not is_wknd and not is_ph else available
+        available = max(total_mos - on_leave - on_call - post_call, 0)
+        duty_slots = ot_assistants + clinic_slots if not is_wknd and not is_ph else 0
+        # Each available MO covers 2 session-slots (AM + PM), so capacity is in slots.
+        capacity_slots = available * 2 if not is_wknd and not is_ph else 0
+        balance_slots = (
+            capacity_slots - duty_slots if not is_wknd and not is_ph else None
+        )
 
         days.append(
             {
@@ -635,9 +870,10 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
                 "on_leave": on_leave,
                 "on_call": on_call,
                 "post_call": post_call,
-                "available": max(available, 0),
-                "needed_for_duties": needed,
-                "surplus": surplus,
+                "available": available,
+                "duty_slots": duty_slots,
+                "capacity_slots": capacity_slots,
+                "balance_slots": balance_slots,
             }
         )
 
@@ -645,25 +881,25 @@ def get_resources(config_id: int, db: Session = Depends(get_db)):
 
 
 @router.put("/{config_id}/override", response_model=CallAssignmentOut)
-def set_override(
-    config_id: int, payload: ManualOverrideCreate, db: Session = Depends(get_db)
+async def set_override(
+    config_id: int, payload: ManualOverrideCreate, db: AsyncSession = Depends(get_db)
 ):
-    config = db.query(MonthlyConfig).get(config_id)
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404, "Config not found")
-    staff = db.query(Staff).get(payload.staff_id)
+    staff = await db.get(Staff, payload.staff_id)
     if not staff:
         raise HTTPException(404, "Staff not found")
 
     existing = (
-        db.query(CallAssignment)
-        .filter(
-            CallAssignment.config_id == config_id,
-            CallAssignment.date == payload.date,
-            CallAssignment.call_type == payload.call_type,
+        await db.execute(
+            select(CallAssignment).filter(
+                CallAssignment.config_id == config_id,
+                CallAssignment.date == payload.date,
+                CallAssignment.call_type == payload.call_type,
+            )
         )
-        .first()
-    )
+    ).scalar_one_or_none()
     if existing:
         existing.staff_id = payload.staff_id
         existing.is_manual_override = True
@@ -676,8 +912,8 @@ def set_override(
             is_manual_override=True,
         )
         db.add(existing)
-    db.commit()
-    db.refresh(existing)
+    await db.commit()
+    await db.refresh(existing)
     return CallAssignmentOut(
         id=existing.id,
         date=existing.date,
@@ -689,42 +925,40 @@ def set_override(
 
 
 @router.delete("/{config_id}/override")
-def remove_override(
+async def remove_override(
     config_id: int,
     date_str: str = Query(..., alias="date"),
     call_type: str = Query(...),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    from datetime import datetime as dt
-
-    d = dt.strptime(date_str, "%Y-%m-%d").date()
+    d = datetime.strptime(date_str, "%Y-%m-%d").date()
     existing = (
-        db.query(CallAssignment)
-        .filter(
-            CallAssignment.config_id == config_id,
-            CallAssignment.date == d,
-            CallAssignment.call_type == call_type,
+        await db.execute(
+            select(CallAssignment).filter(
+                CallAssignment.config_id == config_id,
+                CallAssignment.date == d,
+                CallAssignment.call_type == call_type,
+            )
         )
-        .first()
-    )
+    ).scalar_one_or_none()
     if not existing:
         raise HTTPException(404, "Assignment not found")
-    db.delete(existing)
-    db.commit()
+    await db.delete(existing)
+    await db.commit()
     return {"ok": True}
 
 
-def _validate_call_swap(
+async def _validate_call_swap(
     config_id: int,
     target_date: date,
     call_type_name: str,
     to_staff: Staff,
-    db: Session,
+    db: AsyncSession,
 ) -> list[str]:
     """Run server-side constraint checks for placing `to_staff` in `call_type_name`
     on `target_date`. Returns a list of human-readable violation strings (empty on
     success). Reuses helpers from validators.py and the canonical eligibility
-    logic in solver._is_eligible (we duplicate only the framing — the underlying
+    logic in solver._is_eligible (we duplicate only the framing â€” the underlying
     helpers are reused).
     """
     from ..services.validators import (
@@ -738,11 +972,48 @@ def _validate_call_swap(
     violations: list[str] = []
     DAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-    ct_infos = _load_call_type_infos(db)
+    ct_infos = await _load_call_type_infos(db)
     ct = next((c for c in ct_infos if c.name == call_type_name), None)
     if ct is None:
         violations.append(f"Unknown call type: {call_type_name}")
         return violations
+
+    # 0. Applicable day check (PH, SD, weekday)
+    result = await db.execute(
+        select(MonthlyConfig)
+        .filter(MonthlyConfig.id == config_id)
+        .options(
+            selectinload(MonthlyConfig.consultant_oncalls),
+            selectinload(MonthlyConfig.ac_oncalls),
+            selectinload(MonthlyConfig.stepdown_days),
+            selectinload(MonthlyConfig.ext_ot_dates),
+            selectinload(MonthlyConfig.call_assignments),
+        )
+    )
+    config_for_day = result.scalar_one_or_none()
+    ph_dates_all = {
+        r.date
+        for r in (await db.execute(select(PublicHoliday))).scalars().all()
+        if r.date.year == target_date.year and r.date.month == target_date.month
+    }
+    sd_dates_all = (
+        {r.date for r in config_for_day.stepdown_days} if config_for_day else set()
+    )
+    is_ph_day = target_date in ph_dates_all
+    is_sd_day = target_date in sd_dates_all
+    day_label = DAY_LABELS[target_date.weekday()]
+    if ct.applicable_days:
+        applicable = [a.strip() for a in ct.applicable_days.split(",")]
+        day_ok = (
+            day_label in applicable
+            or (is_ph_day and "PH" in applicable)
+            or (is_sd_day and "SD" in applicable)
+        )
+        if not day_ok:
+            violations.append(
+                f"{call_type_name} is not applicable on {target_date} "
+                f"({day_label}{', PH' if is_ph_day else ''}{', SD' if is_sd_day else ''})"
+            )
 
     # 1. Eligibility by rank
     if ct.eligible_rank_names and to_staff.rank not in ct.eligible_rank_names:
@@ -752,18 +1023,24 @@ def _validate_call_swap(
 
     # 2. Leave dates
     leave_hit = (
-        db.query(Leave)
-        .filter(Leave.staff_id == to_staff.id, Leave.date == target_date)
-        .first()
-    )
+        await db.execute(
+            select(Leave).filter(
+                Leave.staff_id == to_staff.id, Leave.date == target_date
+            )
+        )
+    ).scalar_one_or_none()
     if leave_hit:
         violations.append(f"{to_staff.name} is on leave on {target_date}")
 
     # Build assignments map (ALL staff, ALL dates) for context-sensitive checks.
     # Exclude any existing entry for THIS slot so we don't compare to ourselves.
     rows = (
-        db.query(CallAssignment)
-        .filter(CallAssignment.config_id == config_id)
+        (
+            await db.execute(
+                select(CallAssignment).filter(CallAssignment.config_id == config_id)
+            )
+        )
+        .scalars()
         .all()
     )
     assignments: dict[date, dict[int, str]] = defaultdict(dict)
@@ -785,10 +1062,7 @@ def _validate_call_swap(
         for c in ct_infos
     }
 
-    stepdown_dates: set[date] = set()
-    config = db.query(MonthlyConfig).get(config_id)
-    if config:
-        stepdown_dates = {r.date for r in config.stepdown_days}
+    stepdown_dates = sd_dates_all
 
     # 3. Post-call (no call assignment the day after a 24h call)
     if not check_post_call(
@@ -820,27 +1094,35 @@ def _validate_call_swap(
         if not is_continuation:
             run_days_set: set[str] = set()
             if ct.night_float_run:
-                run_days_set = {t.strip() for t in ct.night_float_run.split(",") if t.strip()}
+                run_days_set = {
+                    t.strip() for t in ct.night_float_run.split(",") if t.strip()
+                }
             needed = ct.min_consecutive_days - 1
             for offset in range(1, needed + 1):
                 future = target_date + timedelta(days=offset)
                 if run_days_set and DAY_LABELS[future.weekday()] not in run_days_set:
                     break
                 future_leave = (
-                    db.query(Leave)
-                    .filter(Leave.staff_id == to_staff.id, Leave.date == future)
-                    .first()
-                )
+                    await db.execute(
+                        select(Leave).filter(
+                            Leave.staff_id == to_staff.id, Leave.date == future
+                        )
+                    )
+                ).scalar_one_or_none()
                 if future_leave:
                     violations.append(
-                        f"{to_staff.name} is on leave on {future} — cannot complete {ct.min_consecutive_days}-day {call_type_name} run"
+                        f"{to_staff.name} is on leave on {future} â€” cannot complete {ct.min_consecutive_days}-day {call_type_name} run"
                     )
                     break
 
     # 6. Max consecutive (skip inside an NF run for the same call type)
     if not in_nf_run and ct.max_consecutive_days:
         if not check_max_consecutive(
-            to_staff.id, target_date, ct.name, dict(assignments), ct.max_consecutive_days
+            to_staff.id,
+            target_date,
+            ct.name,
+            dict(assignments),
+            ct.max_consecutive_days,
         ):
             violations.append(
                 f"{to_staff.name} would exceed max consecutive {ct.max_consecutive_days} days of {call_type_name}"
@@ -848,7 +1130,13 @@ def _validate_call_swap(
 
     # 7. Same-type minimum gap (skip inside NF run)
     if not in_nf_run and not check_call_gap(
-        to_staff.id, target_date, ct.name, dict(assignments), stepdown_dates, ct_config_dict, ct.min_gap_days
+        to_staff.id,
+        target_date,
+        ct.name,
+        dict(assignments),
+        stepdown_dates,
+        ct_config_dict,
+        ct.min_gap_days,
     ):
         violations.append(
             f"{to_staff.name} has insufficient gap since last {call_type_name} (min {ct.min_gap_days} days)"
@@ -857,13 +1145,18 @@ def _validate_call_swap(
     # 8. Cross-type switching window for overnight calls
     if is_overnight(ct.name, target_date, stepdown_dates, ct_config_dict):
         if not check_no_consecutive_different_types(
-            to_staff.id, target_date, ct.name, dict(assignments), stepdown_dates, ct_config_dict
+            to_staff.id,
+            target_date,
+            ct.name,
+            dict(assignments),
+            stepdown_dates,
+            ct_config_dict,
         ):
             violations.append(
                 f"{to_staff.name} had a different overnight call type within the switch window"
             )
 
-    # 9. Mutually exclusive call types — check the look-back/look-ahead window
+    # 9. Mutually exclusive call types â€” check the look-back/look-ahead window
     if ct.mutually_exclusive_names:
         window = max(ct.min_gap_days or 0, 1)
         for offset in range(-window, window + 1):
@@ -881,22 +1174,22 @@ def _validate_call_swap(
 
 
 @router.post("/{config_id}/swap", response_model=CallSwapResponse)
-def swap_call_assignment(
-    config_id: int, payload: CallSwapRequest, db: Session = Depends(get_db)
+async def swap_call_assignment(
+    config_id: int, payload: CallSwapRequest, db: AsyncSession = Depends(get_db)
 ):
     """Validate then apply a single-cell call assignment change.
 
     On constraint violations, returns `{ok: false, violations: [...]}` WITHOUT
     applying the change. Caller may re-submit with `force=true` to override.
     """
-    config = db.query(MonthlyConfig).get(config_id)
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404, "Config not found")
-    to_staff = db.query(Staff).get(payload.to_staff_id)
+    to_staff = await db.get(Staff, payload.to_staff_id)
     if not to_staff:
         raise HTTPException(404, "Target staff not found")
 
-    violations = _validate_call_swap(
+    violations = await _validate_call_swap(
         config_id, payload.date, payload.call_type, to_staff, db
     )
 
@@ -905,14 +1198,14 @@ def swap_call_assignment(
 
     # Apply (same logic as set_override)
     existing = (
-        db.query(CallAssignment)
-        .filter(
-            CallAssignment.config_id == config_id,
-            CallAssignment.date == payload.date,
-            CallAssignment.call_type == payload.call_type,
+        await db.execute(
+            select(CallAssignment).filter(
+                CallAssignment.config_id == config_id,
+                CallAssignment.date == payload.date,
+                CallAssignment.call_type == payload.call_type,
+            )
         )
-        .first()
-    )
+    ).scalar_one_or_none()
     if existing:
         existing.staff_id = payload.to_staff_id
         existing.is_manual_override = True
@@ -925,8 +1218,8 @@ def swap_call_assignment(
             is_manual_override=True,
         )
         db.add(existing)
-    db.commit()
-    db.refresh(existing)
+    await db.commit()
+    await db.refresh(existing)
 
     return CallSwapResponse(
         ok=True,
@@ -943,11 +1236,16 @@ def swap_call_assignment(
 
 
 @router.get("/{config_id}/assignments", response_model=list[CallAssignmentOut])
-def get_assignments(config_id: int, db: Session = Depends(get_db)):
+async def get_assignments(config_id: int, db: AsyncSession = Depends(get_db)):
     rows = (
-        db.query(CallAssignment)
-        .filter(CallAssignment.config_id == config_id)
-        .order_by(CallAssignment.date, CallAssignment.call_type)
+        (
+            await db.execute(
+                select(CallAssignment)
+                .filter(CallAssignment.config_id == config_id)
+                .order_by(CallAssignment.date, CallAssignment.call_type)
+            )
+        )
+        .scalars()
         .all()
     )
     return [
@@ -963,12 +1261,71 @@ def get_assignments(config_id: int, db: Session = Depends(get_db)):
     ]
 
 
-@router.get("/timestamps")
-def get_timestamps(db: Session = Depends(get_db)):
-    from sqlalchemy import func as sa_func
+@router.delete("/{config_id}/call-assignments")
+async def delete_all_call_assignments(
+    config_id: int, db: AsyncSession = Depends(get_db)
+):
+    """Delete all call assignments for a config (for full reset before regeneration)."""
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(CallAssignment)
+            .filter(CallAssignment.config_id == config_id)
+        )
+    ).scalar()
+    await db.execute(
+        delete(CallAssignment).where(CallAssignment.config_id == config_id)
+    )
+    await db.commit()
+    return {"ok": True, "deleted": count}
 
-    resource_ts = db.query(sa_func.max(ResourceTemplate.updated_at)).scalar()
-    staff_ts = db.query(sa_func.max(Staff.updated_at)).scalar()
+
+@router.post("/{config_id}/call-assignments/restore")
+async def restore_call_assignments(
+    config_id: int,
+    rows: list[CallAssignmentRestore],
+    target_date: str = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Bulk-replace call assignments (used for undo). If target_date given, only clears that date first."""
+    try:
+        if target_date:
+            d = date.fromisoformat(target_date)
+            await db.execute(
+                delete(CallAssignment).where(
+                    CallAssignment.config_id == config_id,
+                    CallAssignment.date == d,
+                )
+            )
+        else:
+            await db.execute(
+                delete(CallAssignment).where(CallAssignment.config_id == config_id)
+            )
+        for r in rows:
+            db.add(
+                CallAssignment(
+                    config_id=config_id,
+                    date=r.date,
+                    staff_id=r.staff_id,
+                    call_type=r.call_type,
+                    is_manual_override=r.is_manual_override,
+                )
+            )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        raise HTTPException(
+            status_code=500, detail="Restore failed; no changes were saved."
+        )
+    return {"ok": True, "count": len(rows)}
+
+
+@router.get("/timestamps")
+async def get_timestamps(db: AsyncSession = Depends(get_db)):
+    resource_ts = (
+        await db.execute(select(func.max(ResourceTemplate.updated_at)))
+    ).scalar()
+    staff_ts = (await db.execute(select(func.max(Staff.updated_at)))).scalar()
     return {
         "resources": resource_ts.isoformat() if resource_ts else None,
         "staff": staff_ts.isoformat() if staff_ts else None,
@@ -976,8 +1333,8 @@ def get_timestamps(db: Session = Depends(get_db)):
 
 
 @router.get("/timestamps/{config_id}")
-def get_config_timestamp(config_id: int, db: Session = Depends(get_db)):
-    config = db.query(MonthlyConfig).get(config_id)
+async def get_config_timestamp(config_id: int, db: AsyncSession = Depends(get_db)):
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404)
     return {

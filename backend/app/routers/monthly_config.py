@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from sqlalchemy import func as sa_func
+from sqlalchemy import select, delete, extract, func as sa_func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import (
@@ -9,7 +10,7 @@ from ..models import (
     ACOnCall,
     RegistrarDuty,
     StepdownDay,
-    EveningOTDate,
+    ExtOTDate,
     PublicHoliday,
 )
 from ..schemas import (
@@ -23,8 +24,8 @@ from ..schemas import (
     RegistrarDutyOut,
     StepdownDayCreate,
     StepdownDayOut,
-    EveningOTDateCreate,
-    EveningOTDateOut,
+    ExtOTDateCreate,
+    ExtOTDateOut,
     PublicHolidayCreate,
     PublicHolidayOut,
 )
@@ -33,106 +34,118 @@ router = APIRouter(prefix="/api/config", tags=["monthly_config"])
 
 
 @router.get("", response_model=list[MonthlyConfigOut])
-def list_configs(db: Session = Depends(get_db)):
+async def list_configs(db: AsyncSession = Depends(get_db)):
     return (
-        db.query(MonthlyConfig)
-        .order_by(MonthlyConfig.year.desc(), MonthlyConfig.month.desc())
+        (
+            await db.execute(
+                select(MonthlyConfig).order_by(
+                    MonthlyConfig.year.desc(), MonthlyConfig.month.desc()
+                )
+            )
+        )
+        .scalars()
         .all()
     )
 
 
 @router.post("", response_model=MonthlyConfigOut)
-def create_config(payload: MonthlyConfigCreate, db: Session = Depends(get_db)):
+async def create_config(
+    payload: MonthlyConfigCreate, db: AsyncSession = Depends(get_db)
+):
     existing = (
-        db.query(MonthlyConfig)
-        .filter(
-            MonthlyConfig.year == payload.year, MonthlyConfig.month == payload.month
+        await db.execute(
+            select(MonthlyConfig).filter(
+                MonthlyConfig.year == payload.year, MonthlyConfig.month == payload.month
+            )
         )
-        .first()
-    )
+    ).scalar_one_or_none()
     if existing:
         raise HTTPException(409, "Config already exists for this month")
     cfg = MonthlyConfig(**payload.model_dump())
     db.add(cfg)
-    db.commit()
-    db.refresh(cfg)
+    await db.commit()
+    await db.refresh(cfg)
     return cfg
 
 
-# ── Public Holidays (before /{config_id} to avoid path conflict) ────────
+# â”€â”€ Public Holidays (before /{config_id} to avoid path conflict) â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.get("/public-holidays", response_model=list[PublicHolidayOut])
-def list_public_holidays(
+async def list_public_holidays(
     year: int | None = Query(None),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    q = db.query(PublicHoliday).order_by(PublicHoliday.date)
+    q = select(PublicHoliday).order_by(PublicHoliday.date)
     if year is not None:
-        from sqlalchemy import extract
-
         q = q.filter(extract("year", PublicHoliday.date) == year)
-    return q.all()
+    return (await db.execute(q)).scalars().all()
 
 
 @router.post("/public-holidays", response_model=PublicHolidayOut)
-def create_public_holiday(payload: PublicHolidayCreate, db: Session = Depends(get_db)):
+async def create_public_holiday(
+    payload: PublicHolidayCreate, db: AsyncSession = Depends(get_db)
+):
     existing = (
-        db.query(PublicHoliday).filter(PublicHoliday.date == payload.date).first()
-    )
+        await db.execute(
+            select(PublicHoliday).filter(PublicHoliday.date == payload.date)
+        )
+    ).scalar_one_or_none()
     if existing:
         raise HTTPException(409, "Holiday already exists for this date")
     ph = PublicHoliday(date=payload.date, name=payload.name)
     db.add(ph)
-    db.commit()
-    db.refresh(ph)
+    await db.commit()
+    await db.refresh(ph)
     return ph
 
 
 @router.delete("/public-holidays/{holiday_id}")
-def delete_public_holiday(holiday_id: int, db: Session = Depends(get_db)):
-    ph = db.query(PublicHoliday).get(holiday_id)
+async def delete_public_holiday(holiday_id: int, db: AsyncSession = Depends(get_db)):
+    ph = await db.get(PublicHoliday, holiday_id)
     if not ph:
         raise HTTPException(404, "Holiday not found")
-    db.delete(ph)
-    db.commit()
+    await db.delete(ph)
+    await db.commit()
     return {"ok": True}
 
 
-# ── Config by ID ────────────────────────────────────────────────────────
+# â”€â”€ Config by ID â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.get("/{config_id}", response_model=MonthlyConfigOut)
-def get_config(config_id: int, db: Session = Depends(get_db)):
-    cfg = db.query(MonthlyConfig).get(config_id)
+async def get_config(config_id: int, db: AsyncSession = Depends(get_db)):
+    cfg = await db.get(MonthlyConfig, config_id)
     if not cfg:
         raise HTTPException(404, "Config not found")
     return cfg
 
 
 @router.delete("/{config_id}")
-def delete_config(config_id: int, db: Session = Depends(get_db)):
-    cfg = db.query(MonthlyConfig).get(config_id)
+async def delete_config(config_id: int, db: AsyncSession = Depends(get_db)):
+    cfg = await db.get(MonthlyConfig, config_id)
     if not cfg:
         raise HTTPException(404, "Config not found")
-    db.delete(cfg)
-    db.commit()
+    await db.delete(cfg)
+    await db.commit()
     return {"ok": True}
 
 
-# ── Consultant On-Call ───────────────────────────────────────────────────
+# â”€â”€ Consultant On-Call â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("/{config_id}/consultant-oncall")
-def set_consultant_oncall(
+async def set_consultant_oncall(
     config_id: int,
     entries: list[ConsultantOnCallCreate],
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    cfg = db.query(MonthlyConfig).get(config_id)
+    cfg = await db.get(MonthlyConfig, config_id)
     if not cfg:
         raise HTTPException(404, "Config not found")
-    db.query(ConsultantOnCall).filter(ConsultantOnCall.config_id == config_id).delete()
+    await db.execute(
+        delete(ConsultantOnCall).where(ConsultantOnCall.config_id == config_id)
+    )
     for e in entries:
         db.add(
             ConsultantOnCall(
@@ -143,16 +156,25 @@ def set_consultant_oncall(
             )
         )
     cfg.updated_at = sa_func.now()
-    db.commit()
+    await db.commit()
     return {"ok": True, "count": len(entries)}
 
 
 @router.get("/{config_id}/consultant-oncall", response_model=list[ConsultantOnCallOut])
-def get_consultant_oncall(config_id: int, db: Session = Depends(get_db)):
+async def get_consultant_oncall(config_id: int, db: AsyncSession = Depends(get_db)):
     rows = (
-        db.query(ConsultantOnCall)
-        .filter(ConsultantOnCall.config_id == config_id)
-        .order_by(ConsultantOnCall.date)
+        (
+            await db.execute(
+                select(ConsultantOnCall)
+                .filter(ConsultantOnCall.config_id == config_id)
+                .options(
+                    selectinload(ConsultantOnCall.consultant),
+                    selectinload(ConsultantOnCall.supervising_consultant),
+                )
+                .order_by(ConsultantOnCall.date)
+            )
+        )
+        .scalars()
         .all()
     )
     return [
@@ -170,32 +192,38 @@ def get_consultant_oncall(config_id: int, db: Session = Depends(get_db)):
     ]
 
 
-# ── AC On-Call ───────────────────────────────────────────────────────────
+# â”€â”€ AC On-Call â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("/{config_id}/ac-oncall")
-def set_ac_oncall(
+async def set_ac_oncall(
     config_id: int,
     entries: list[ACOnCallCreate],
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    cfg = db.query(MonthlyConfig).get(config_id)
+    cfg = await db.get(MonthlyConfig, config_id)
     if not cfg:
         raise HTTPException(404, "Config not found")
-    db.query(ACOnCall).filter(ACOnCall.config_id == config_id).delete()
+    await db.execute(delete(ACOnCall).where(ACOnCall.config_id == config_id))
     for e in entries:
         db.add(ACOnCall(config_id=config_id, date=e.date, ac_id=e.ac_id))
     cfg.updated_at = sa_func.now()
-    db.commit()
+    await db.commit()
     return {"ok": True, "count": len(entries)}
 
 
 @router.get("/{config_id}/ac-oncall", response_model=list[ACOnCallOut])
-def get_ac_oncall(config_id: int, db: Session = Depends(get_db)):
+async def get_ac_oncall(config_id: int, db: AsyncSession = Depends(get_db)):
     rows = (
-        db.query(ACOnCall)
-        .filter(ACOnCall.config_id == config_id)
-        .order_by(ACOnCall.date)
+        (
+            await db.execute(
+                select(ACOnCall)
+                .filter(ACOnCall.config_id == config_id)
+                .options(selectinload(ACOnCall.ac))
+                .order_by(ACOnCall.date)
+            )
+        )
+        .scalars()
         .all()
     )
     return [
@@ -204,19 +232,19 @@ def get_ac_oncall(config_id: int, db: Session = Depends(get_db)):
     ]
 
 
-# ── Registrar Duties ────────────────────────────────────────────────────
+# â”€â”€ Registrar Duties â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("/{config_id}/registrar-duties")
-def set_registrar_duties(
+async def set_registrar_duties(
     config_id: int,
     entries: list[RegistrarDutyCreate],
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    cfg = db.query(MonthlyConfig).get(config_id)
+    cfg = await db.get(MonthlyConfig, config_id)
     if not cfg:
         raise HTTPException(404, "Config not found")
-    db.query(RegistrarDuty).filter(RegistrarDuty.config_id == config_id).delete()
+    await db.execute(delete(RegistrarDuty).where(RegistrarDuty.config_id == config_id))
     for e in entries:
         db.add(
             RegistrarDuty(
@@ -228,16 +256,22 @@ def set_registrar_duties(
             )
         )
     cfg.updated_at = sa_func.now()
-    db.commit()
+    await db.commit()
     return {"ok": True, "count": len(entries)}
 
 
 @router.get("/{config_id}/registrar-duties", response_model=list[RegistrarDutyOut])
-def get_registrar_duties(config_id: int, db: Session = Depends(get_db)):
+async def get_registrar_duties(config_id: int, db: AsyncSession = Depends(get_db)):
     rows = (
-        db.query(RegistrarDuty)
-        .filter(RegistrarDuty.config_id == config_id)
-        .order_by(RegistrarDuty.date)
+        (
+            await db.execute(
+                select(RegistrarDuty)
+                .filter(RegistrarDuty.config_id == config_id)
+                .options(selectinload(RegistrarDuty.registrar))
+                .order_by(RegistrarDuty.date)
+            )
+        )
+        .scalars()
         .all()
     )
     return [
@@ -253,63 +287,73 @@ def get_registrar_duties(config_id: int, db: Session = Depends(get_db)):
     ]
 
 
-# ── Stepdown Days ────────────────────────────────────────────────────────
+# â”€â”€ Stepdown Days â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("/{config_id}/stepdown-days")
-def set_stepdown_days(
+async def set_stepdown_days(
     config_id: int,
     entries: list[StepdownDayCreate],
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
-    cfg = db.query(MonthlyConfig).get(config_id)
+    cfg = await db.get(MonthlyConfig, config_id)
     if not cfg:
         raise HTTPException(404, "Config not found")
-    db.query(StepdownDay).filter(StepdownDay.config_id == config_id).delete()
+    await db.execute(delete(StepdownDay).where(StepdownDay.config_id == config_id))
     for e in entries:
         db.add(StepdownDay(config_id=config_id, date=e.date))
     cfg.updated_at = sa_func.now()
-    db.commit()
+    await db.commit()
     return {"ok": True, "count": len(entries)}
 
 
 @router.get("/{config_id}/stepdown-days", response_model=list[StepdownDayOut])
-def get_stepdown_days(config_id: int, db: Session = Depends(get_db)):
+async def get_stepdown_days(config_id: int, db: AsyncSession = Depends(get_db)):
     rows = (
-        db.query(StepdownDay)
-        .filter(StepdownDay.config_id == config_id)
-        .order_by(StepdownDay.date)
+        (
+            await db.execute(
+                select(StepdownDay)
+                .filter(StepdownDay.config_id == config_id)
+                .order_by(StepdownDay.date)
+            )
+        )
+        .scalars()
         .all()
     )
     return [StepdownDayOut(id=r.id, date=r.date) for r in rows]
 
 
-# ── Evening OT Dates ─────────────────────────────────────────────────────
+# â”€â”€ Extended OT Dates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-@router.post("/{config_id}/evening-ot-dates")
-def set_evening_ot_dates(
+@router.post("/{config_id}/ext-ot-dates")
+async def set_ext_ot_dates(
     config_id: int,
-    entries: list[EveningOTDateCreate],
-    db: Session = Depends(get_db),
+    entries: list[ExtOTDateCreate],
+    db: AsyncSession = Depends(get_db),
 ):
-    cfg = db.query(MonthlyConfig).get(config_id)
+    cfg = await db.get(MonthlyConfig, config_id)
     if not cfg:
         raise HTTPException(404, "Config not found")
-    db.query(EveningOTDate).filter(EveningOTDate.config_id == config_id).delete()
+    await db.execute(delete(ExtOTDate).where(ExtOTDate.config_id == config_id))
     for e in entries:
-        db.add(EveningOTDate(config_id=config_id, date=e.date))
+        db.add(ExtOTDate(config_id=config_id, date=e.date))
     cfg.updated_at = sa_func.now()
-    db.commit()
+    await db.commit()
     return {"ok": True, "count": len(entries)}
 
 
-@router.get("/{config_id}/evening-ot-dates", response_model=list[EveningOTDateOut])
-def get_evening_ot_dates(config_id: int, db: Session = Depends(get_db)):
+@router.get("/{config_id}/ext-ot-dates", response_model=list[ExtOTDateOut])
+async def get_ext_ot_dates(config_id: int, db: AsyncSession = Depends(get_db)):
     rows = (
-        db.query(EveningOTDate)
-        .filter(EveningOTDate.config_id == config_id)
-        .order_by(EveningOTDate.date)
+        (
+            await db.execute(
+                select(ExtOTDate)
+                .filter(ExtOTDate.config_id == config_id)
+                .order_by(ExtOTDate.date)
+            )
+        )
+        .scalars()
         .all()
     )
-    return [EveningOTDateOut(id=r.id, date=r.date) for r in rows]
+    return [ExtOTDateOut(id=r.id, date=r.date) for r in rows]

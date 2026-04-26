@@ -48,26 +48,18 @@ export default function FairnessView() {
   const configId = active?.id ?? 0;
 
   useEffect(() => {
+    if (!configId) return;
     setCallData(null);
     setDutyData(null);
-  }, [active?.id]);
-
-  async function loadAll() {
-    if (!configId) return;
     setLoading(true);
-    try {
-      const [cd, dd] = await Promise.all([
-        api.generateCallRoster(configId),
-        api.generateDutyRoster(configId),
-      ]);
-      setCallData(cd);
-      setDutyData(dd);
-    } catch {
-      // ignore
-    } finally {
-      setLoading(false);
-    }
-  }
+    Promise.all([
+      api.generateCallRoster(configId),
+      api.generateDutyRoster(configId),
+    ])
+      .then(([cd, dd]) => { setCallData(cd); setDutyData(dd); })
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [configId]);
 
   const callFairness = callData?.fairness ?? null;
   const dutyStats = dutyData?.duty_stats ?? null;
@@ -122,9 +114,7 @@ export default function FairnessView() {
     <>
       <div className="page-header">
         <h2>Fairness Dashboard</h2>
-        <button className="btn btn-primary" onClick={loadAll} disabled={loading}>
-          {loading ? <><span className="spinner" /> Loading...</> : "Generate & View Stats"}
-        </button>
+        {loading && <span style={{ fontSize: 13, color: "var(--text-muted)" }}><span className="spinner" /> Loading...</span>}
       </div>
 
       <div className="tabs">

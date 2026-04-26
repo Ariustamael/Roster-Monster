@@ -196,8 +196,11 @@ def _assign_session(
             continue
 
         candidates = [
-            p for p in pool
-            if p.id not in assigned and p.rank != ssr_rank and p.can_do_clinic
+            p
+            for p in pool
+            if p.id not in assigned
+            and p.rank != ssr_rank
+            and p.can_do_clinic
             and (not clinic.eligible_ranks or p.rank in clinic.eligible_ranks)
         ]
         if not candidates:
@@ -249,7 +252,9 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
     sr_rank = inp.sr_rank_name
     # Prefer the RankConfig is_registrar_tier flag; fall back to legacy names
     registrar_ranks_set = (
-        set(inp.registrar_rank_names) if inp.registrar_rank_names else {ssr_rank, sr_rank}
+        set(inp.registrar_rank_names)
+        if inp.registrar_rank_names
+        else {ssr_rank, sr_rank}
     )
 
     person_by_id: dict[int, PersonInfo] = {p.id: p for p in inp.mo_pool}
@@ -276,7 +281,9 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
 
         am_assigned: set[int] = set(day.pre_assigned_am)
         pm_assigned: set[int] = set(day.pre_assigned_pm)
-        full_day_assigned: set[int] = set(day.pre_assigned_am) & set(day.pre_assigned_pm)
+        full_day_assigned: set[int] = set(day.pre_assigned_am) & set(
+            day.pre_assigned_pm
+        )
 
         # ── Consultant affinity pull ────────────────────────────────
         # Find which consultants are operating today
@@ -285,17 +292,28 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
         }
         vacated_anchor_roles: set[str] = set()
 
+        # Reverse map: staff_id → call_type_name for today (used to detect when
+        # a preferred-staff pick pulls a call holder who also has an anchor role).
+        call_type_by_staff_today: dict[int, str] = {
+            sid: ct for ct, sid in inp.call_by_type.get(day.d, {}).items()
+        }
+
         # Compute PM pool upfront (needed for PM OTs)
         available_pm_precomp = _available_mos_pm(
-            day, inp.mo_pool, inp.leave_dates,
-            inp.call_assigned, inp.postcall_dates,
-            inp.postcall_12pm_dates, inp.call_only_dates,
+            day,
+            inp.mo_pool,
+            inp.leave_dates,
+            inp.call_assigned,
+            inp.postcall_dates,
+            inp.postcall_12pm_dates,
+            inp.call_only_dates,
         )
 
         def _ot_session_context(ot_slot):
             """Return (pool, assigned_set, session_value) for this OT based on its session."""
             s = ot_slot.session or Session.FULL_DAY
             allowed_ranks = ot_slot.eligible_ranks
+
             # Respect per-staff can_do_ot flag and per-resource rank eligibility.
             def ot_eligible(p):
                 if not p.can_do_ot:
@@ -303,19 +321,35 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 if allowed_ranks and p.rank not in allowed_ranks:
                     return False
                 return True
+
             if s == Session.AM:
                 return (
-                    [p for p in available_am if p.id not in am_assigned and ot_eligible(p)],
-                    am_assigned, Session.AM,
+                    [
+                        p
+                        for p in available_am
+                        if p.id not in am_assigned and ot_eligible(p)
+                    ],
+                    am_assigned,
+                    Session.AM,
                 )
             if s == Session.PM:
                 return (
-                    [p for p in available_pm_precomp if p.id not in pm_assigned and ot_eligible(p)],
-                    pm_assigned, Session.PM,
+                    [
+                        p
+                        for p in available_pm_precomp
+                        if p.id not in pm_assigned and ot_eligible(p)
+                    ],
+                    pm_assigned,
+                    Session.PM,
                 )
             return (
-                [p for p in available_am if p.id not in full_day_assigned and ot_eligible(p)],
-                full_day_assigned, Session.FULL_DAY,
+                [
+                    p
+                    for p in available_am
+                    if p.id not in full_day_assigned and ot_eligible(p)
+                ],
+                full_day_assigned,
+                Session.FULL_DAY,
             )
 
         def _mark_ot_assigned(pid, session_value):
@@ -414,6 +448,15 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 fairness.ot_days[pref_id] += 1
                 if is_reg:
                     registrars_in_ot += 1
+                # If this staff member holds a call type with an anchor duty
+                # (e.g. MO2 → EOT MO), mark that anchor as vacated so the
+                # anchor-role section backfills it rather than double-assigning.
+                if ot_session_val == Session.FULL_DAY:
+                    ct_for_pref = call_type_by_staff_today.get(pref_id)
+                    if ct_for_pref:
+                        anchor_for_pref = inp.default_duty_by_call_type.get(ct_for_pref)
+                        if anchor_for_pref:
+                            vacated_anchor_roles.add(anchor_for_pref)
 
             if ot.assistants_needed <= 0 and ot.registrar_needed <= 0:
                 continue
@@ -489,7 +532,10 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 if filled >= ot.assistants_needed:
                     break
                 # Enforce max_registrars across the whole OT slot
-                if chosen.rank in registrar_ranks and registrars_in_ot >= ot.max_registrars:
+                if (
+                    chosen.rank in registrar_ranks
+                    and registrars_in_ot >= ot.max_registrars
+                ):
                     continue
                 results.append(
                     DutyResult(
@@ -517,7 +563,10 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
             anchor_dt = (
                 DutyType.WARD_MO if anchor_duty == "Ward MO" else DutyType.EOT_MO
             )
-            if mo_id not in full_day_assigned or anchor_duty not in vacated_anchor_roles:
+            if (
+                mo_id not in full_day_assigned
+                or anchor_duty not in vacated_anchor_roles
+            ):
                 # Either: MO is on call and not pulled (covers their role themselves), or
                 # MO is in an OT slot whose linked_manpower includes their call type
                 # (their OT IS their anchor role — emit the anchor row anyway so the
@@ -540,7 +589,8 @@ def solve_duties(inp: DutySolverInput) -> list[DutyResult]:
                 allowed_ranks = inp.anchor_duty_eligible_ranks.get(anchor_duty, set())
                 candidates = sorted(
                     [
-                        p for p in available_am
+                        p
+                        for p in available_am
                         if p.id not in full_day_assigned
                         and (not allowed_ranks or p.rank in allowed_ranks)
                     ],

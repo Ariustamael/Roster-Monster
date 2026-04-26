@@ -102,10 +102,10 @@ export const api = {
       `/roster/${configId}/duties/view`
     ),
 
-  exportRoster: (configId: number, format: "original" | "clean") =>
+  exportRoster: (configId: number, format: "full" | "clean") =>
     downloadFile(
       `/roster/${configId}/export?format=${format}`,
-      `Roster_${format === "clean" ? "Clean" : "Original"}.xlsx`
+      `Roster_${format === "clean" ? "Clean" : "Full"}.xlsx`
     ),
 
   // Leave
@@ -138,9 +138,25 @@ export const api = {
     }),
   removeOverride: (configId: number, date: string, callType: string) =>
     request<{ ok: boolean }>(
-      `/roster/${configId}/override?date=${date}&call_type=${callType}`,
+      `/roster/${configId}/override?date=${date}&call_type=${encodeURIComponent(callType)}`,
       { method: "DELETE" }
     ),
+  deleteAllCallAssignments: (configId: number) =>
+    request<{ ok: boolean; deleted: number }>(
+      `/roster/${configId}/call-assignments`,
+      { method: "DELETE" }
+    ),
+  restoreCallAssignments: (
+    configId: number,
+    rows: Array<{ date: string; staff_id: number; call_type: string; is_manual_override: boolean }>,
+    targetDate?: string,
+  ) => {
+    const qs = targetDate ? `?target_date=${targetDate}` : "";
+    return request<{ ok: boolean; count: number }>(
+      `/roster/${configId}/call-assignments/restore${qs}`,
+      { method: "POST", body: JSON.stringify(rows) }
+    );
+  },
   swapCallAssignment: (
     configId: number,
     data: { date: string; call_type: string; from_staff_id?: number | null; to_staff_id: number; force?: boolean }
@@ -278,11 +294,11 @@ export const api = {
   setStepdownDays: (configId: number, entries: { date: string }[]) =>
     request<{ ok: boolean }>(`/config/${configId}/stepdown-days`, { method: "POST", body: JSON.stringify(entries) }),
 
-  // Evening OT Dates
-  getEveningOTDates: (configId: number) =>
-    request<import("./types").EveningOTDate[]>(`/config/${configId}/evening-ot-dates`),
-  setEveningOTDates: (configId: number, entries: { date: string }[]) =>
-    request<{ ok: boolean }>(`/config/${configId}/evening-ot-dates`, { method: "POST", body: JSON.stringify(entries) }),
+  // Extended OT Dates
+  getExtOTDates: (configId: number) =>
+    request<import("./types").ExtOTDate[]>(`/config/${configId}/ext-ot-dates`),
+  setExtOTDates: (configId: number, entries: { date: string }[]) =>
+    request<{ ok: boolean }>(`/config/${configId}/ext-ot-dates`, { method: "POST", body: JSON.stringify(entries) }),
 
   // Rank Config
   getRanks: () =>

@@ -3,7 +3,9 @@ from datetime import date, timedelta
 from collections import defaultdict
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session as DBSession
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, delete, func
+from sqlalchemy.orm import selectinload
 
 from ..database import get_db
 from ..models import (
@@ -21,6 +23,8 @@ from ..models import (
     Session,
     CallTypeConfig,
     RankConfig,
+    StepdownDay,
+    ExtOTDate,
 )
 from ..schemas import (
     DutyRosterResponse,
@@ -47,7 +51,7 @@ from ..services.validators import is_overnight, get_post_call_type
 router = APIRouter(prefix="/api", tags=["duties"])
 
 
-# ── Resource Templates ──────────────────────────────────────────────────
+# â”€â”€ Resource Templates â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 def _resource_out(r: ResourceTemplate) -> ResourceTemplateOut:
@@ -75,63 +79,87 @@ def _resource_out(r: ResourceTemplate) -> ResourceTemplateOut:
 
 
 @router.get("/templates/resources", response_model=list[ResourceTemplateOut])
-def list_resource_templates(db: DBSession = Depends(get_db)):
-    """Weekly templates only — per-day overrides (effective_date set) are listed
+async def list_resource_templates(db: AsyncSession = Depends(get_db)):
+    """Weekly templates only â€” per-day overrides (effective_date set) are listed
     separately via GET /templates/resources/day."""
     rows = (
-        db.query(ResourceTemplate)
-        .filter(ResourceTemplate.effective_date.is_(None))
-        .order_by(
-            ResourceTemplate.day_of_week,
-            ResourceTemplate.session,
-            ResourceTemplate.sort_order,
-            ResourceTemplate.room,
+        (
+            await db.execute(
+                select(ResourceTemplate)
+                .filter(ResourceTemplate.effective_date.is_(None))
+                .options(selectinload(ResourceTemplate.consultant))
+                .order_by(
+                    ResourceTemplate.day_of_week,
+                    ResourceTemplate.session,
+                    ResourceTemplate.sort_order,
+                    ResourceTemplate.room,
+                )
+            )
         )
+        .scalars()
         .all()
     )
     return [_resource_out(r) for r in rows]
 
 
 @router.post("/templates/resources", response_model=ResourceTemplateOut)
-def create_resource_template(
-    payload: ResourceTemplateCreate, db: DBSession = Depends(get_db)
+async def create_resource_template(
+    payload: ResourceTemplateCreate, db: AsyncSession = Depends(get_db)
 ):
     t = ResourceTemplate(**payload.model_dump())
     db.add(t)
-    db.commit()
-    db.refresh(t)
+    await db.commit()
+    t = (
+        await db.execute(
+            select(ResourceTemplate)
+            .filter(ResourceTemplate.id == t.id)
+            .options(selectinload(ResourceTemplate.consultant))
+        )
+    ).scalar_one()
     return _resource_out(t)
 
 
 @router.put("/templates/resources/{template_id}", response_model=ResourceTemplateOut)
-def update_resource_template(
-    template_id: int, payload: ResourceTemplateCreate, db: DBSession = Depends(get_db)
+async def update_resource_template(
+    template_id: int,
+    payload: ResourceTemplateCreate,
+    db: AsyncSession = Depends(get_db),
 ):
-    t = db.query(ResourceTemplate).get(template_id)
+    t = await db.get(ResourceTemplate, template_id)
     if not t:
         raise HTTPException(404)
     for k, v in payload.model_dump().items():
         setattr(t, k, v)
-    db.commit()
-    db.refresh(t)
+    await db.commit()
+    t = (
+        await db.execute(
+            select(ResourceTemplate)
+            .filter(ResourceTemplate.id == template_id)
+            .options(selectinload(ResourceTemplate.consultant))
+        )
+    ).scalar_one()
     return _resource_out(t)
 
 
 @router.delete("/templates/resources/{template_id}")
-def delete_resource_template(template_id: int, db: DBSession = Depends(get_db)):
-    t = db.query(ResourceTemplate).get(template_id)
+async def delete_resource_template(
+    template_id: int, db: AsyncSession = Depends(get_db)
+):
+    t = await db.get(ResourceTemplate, template_id)
     if not t:
         raise HTTPException(404)
-    db.delete(t)
-    db.commit()
+    await db.delete(t)
+    await db.commit()
     return {"ok": True}
 
 
 @router.post(
     "/templates/resources/{template_id}/duplicate", response_model=ResourceTemplateOut
 )
-def duplicate_resource_template(template_id: int, db: DBSession = Depends(get_db)):
-    src = db.query(ResourceTemplate).get(template_id)
+async def duplicate_resource_template(
+    template_id: int, db: AsyncSession = Depends(get_db)
+):
+    src = await db.get(ResourceTemplate, template_id)
     if not src:
         raise HTTPException(404)
     dup = ResourceTemplate(
@@ -153,35 +181,53 @@ def duplicate_resource_template(template_id: int, db: DBSession = Depends(get_db
         eligible_rank_ids=src.eligible_rank_ids,
     )
     db.add(dup)
-    db.commit()
-    db.refresh(dup)
+    await db.commit()
+    dup = (
+        await db.execute(
+            select(ResourceTemplate)
+            .filter(ResourceTemplate.id == dup.id)
+            .options(selectinload(ResourceTemplate.consultant))
+        )
+    ).scalar_one()
     return _resource_out(dup)
 
 
 @router.put("/templates/resources/reorder")
-def reorder_resource_templates(updates: list[dict], db: DBSession = Depends(get_db)):
+async def reorder_resource_templates(
+    updates: list[dict], db: AsyncSession = Depends(get_db)
+):
     for u in updates:
-        t = db.query(ResourceTemplate).get(u["id"])
+        t = await db.get(ResourceTemplate, u["id"])
         if t:
             t.sort_order = u["sort_order"]
             if "day_of_week" in u:
                 t.day_of_week = u["day_of_week"]
             if "session" in u:
                 t.session = u["session"]
-    db.commit()
+    await db.commit()
     return {"ok": True}
 
 
-# ── Helpers ─────────────────────────────────────────────────────────────
+# â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-def _get_duty_eligible_ranks(db: DBSession) -> set[str]:
-    ranks = db.query(RankConfig).filter(RankConfig.is_duty_eligible.is_(True)).all()
+async def _get_duty_eligible_ranks(db: AsyncSession) -> set[str]:
+    ranks = (
+        (
+            await db.execute(
+                select(RankConfig).filter(RankConfig.is_duty_eligible.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
     return {r.name for r in ranks}
 
 
-def _resolve_eligible_ranks(csv_ids: str | None, rank_name_by_id: dict[int, str]) -> set[str]:
-    """CSV of RankConfig ids → set of rank names. Empty/None → empty set (no restriction)."""
+def _resolve_eligible_ranks(
+    csv_ids: str | None, rank_name_by_id: dict[int, str]
+) -> set[str]:
+    """CSV of RankConfig ids â†’ set of rank names. Empty/None â†’ empty set (no restriction)."""
     if not csv_ids:
         return set()
     out: set[str] = set()
@@ -194,8 +240,16 @@ def _resolve_eligible_ranks(csv_ids: str | None, rank_name_by_id: dict[int, str]
     return out
 
 
-def _load_ct_config_dict(db: DBSession) -> dict:
-    configs = db.query(CallTypeConfig).filter(CallTypeConfig.is_active.is_(True)).all()
+async def _load_ct_config_dict(db: AsyncSession) -> dict:
+    configs = (
+        (
+            await db.execute(
+                select(CallTypeConfig).filter(CallTypeConfig.is_active.is_(True))
+            )
+        )
+        .scalars()
+        .all()
+    )
     return {
         ct.name: {
             "is_overnight": ct.is_overnight,
@@ -206,29 +260,43 @@ def _load_ct_config_dict(db: DBSession) -> dict:
     }
 
 
-# ── Duty Generation ─────────────────────────────────────────────────────
+# â”€â”€ Duty Generation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
+async def _build_duty_input(config: MonthlyConfig, db: AsyncSession) -> DutySolverInput:
     year, month = config.year, config.month
     num_days = calendar.monthrange(year, month)[1]
 
     ph_dates = {
         r.date
-        for r in db.query(PublicHoliday).all()
+        for r in (await db.execute(select(PublicHoliday))).scalars().all()
         if r.date.year == year and r.date.month == month
     }
 
     consultant_team: dict[int, int] = {}
     for ta in (
-        db.query(TeamAssignment).filter(TeamAssignment.role == "consultant").all()
+        (
+            await db.execute(
+                select(TeamAssignment).filter(TeamAssignment.role == "consultant")
+            )
+        )
+        .scalars()
+        .all()
     ):
         consultant_team[ta.staff_id] = ta.team_id
 
-    rank_name_by_id = {r.id: r.name for r in db.query(RankConfig).all()}
+    rank_name_by_id = {
+        r.id: r.name for r in (await db.execute(select(RankConfig))).scalars().all()
+    }
 
     all_templates = (
-        db.query(ResourceTemplate).filter(ResourceTemplate.is_active.is_(True)).all()
+        (
+            await db.execute(
+                select(ResourceTemplate).filter(ResourceTemplate.is_active.is_(True))
+            )
+        )
+        .scalars()
+        .all()
     )
 
     ot_by_dow_week: dict[tuple[int, int | None], list[ResourceTemplate]] = defaultdict(
@@ -237,10 +305,12 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     clinic_by_dow_session: dict[tuple[int, str], list[ResourceTemplate]] = defaultdict(
         list
     )
-    # Per-date override sets — when a date has any override row, the day uses
+    # Per-date override sets â€” when a date has any override row, the day uses
     # ONLY those rows for resource derivation (weekly templates suppressed).
     ot_by_date: dict[date, list[ResourceTemplate]] = defaultdict(list)
-    clinic_by_date_session: dict[tuple[date, str], list[ResourceTemplate]] = defaultdict(list)
+    clinic_by_date_session: dict[tuple[date, str], list[ResourceTemplate]] = (
+        defaultdict(list)
+    )
     overridden_dates: set[date] = set()
     for t in all_templates:
         if t.effective_date:
@@ -260,10 +330,14 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
             clinic_by_dow_session[(t.day_of_week, t.session.value)].append(t)
 
     call_rows = (
-        db.query(CallAssignment)
-        .filter(
-            CallAssignment.config_id == config.id,
+        (
+            await db.execute(
+                select(CallAssignment).filter(
+                    CallAssignment.config_id == config.id,
+                )
+            )
         )
+        .scalars()
         .all()
     )
 
@@ -276,15 +350,33 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     for r in call_rows:
         call_by_type_early[r.date][r.call_type] = r.staff_id
 
-    # Call-type lookups for resolving duty-only types (EOT MO → MO2)
+    # Call-type lookups for resolving duty-only types (EOT MO â†’ MO2)
     _active_cts_for_linking = (
-        db.query(CallTypeConfig).filter(CallTypeConfig.is_active.is_(True)).all()
+        (
+            await db.execute(
+                select(CallTypeConfig)
+                .filter(CallTypeConfig.is_active.is_(True))
+                .options(selectinload(CallTypeConfig.eligible_ranks))
+            )
+        )
+        .scalars()
+        .all()
     )
     _ct_by_name_for_linking = {ct.name: ct for ct in _active_cts_for_linking}
     _ct_name_by_id_for_linking = {ct.id: ct.name for ct in _active_cts_for_linking}
 
-    ct_config_dict = _load_ct_config_dict(db)
-    stepdown_dates = {sd.date for sd in config.stepdown_days}
+    ct_config_dict = await _load_ct_config_dict(db)
+    # Eagerly fetch stepdown_dates — avoid lazy-loading config.stepdown_days
+    stepdown_dates = {
+        sd.date
+        for sd in (
+            await db.execute(
+                select(StepdownDay).filter(StepdownDay.config_id == config.id)
+            )
+        )
+        .scalars()
+        .all()
+    }
 
     postcall_dates: dict[date, set[int]] = defaultdict(set)
     postcall_12pm_dates: dict[date, set[int]] = defaultdict(set)
@@ -309,19 +401,23 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         if pct == "none" and not is_overnight(
             r.call_type, r.date, stepdown_dates, ct_config_dict
         ):
-            # Daytime call-only duties (like MO3 referral) — exclude from daytime pool
+            # Daytime call-only duties (like MO3 referral) â€” exclude from daytime pool
             cfg = ct_config_dict.get(r.call_type, {})
             if not cfg.get("is_overnight", False):
                 call_assigned[r.date].add(r.staff_id)
 
-    # Existing manual overrides — the solver must respect these (don't reassign
+    # Existing manual overrides â€” the solver must respect these (don't reassign
     # those staff, and don't refill those slots).
     manual_overrides = (
-        db.query(DutyAssignment)
-        .filter(
-            DutyAssignment.config_id == config.id,
-            DutyAssignment.is_manual_override.is_(True),
+        (
+            await db.execute(
+                select(DutyAssignment).filter(
+                    DutyAssignment.config_id == config.id,
+                    DutyAssignment.is_manual_override.is_(True),
+                )
+            )
         )
+        .scalars()
         .all()
     )
     overrides_by_date: dict[date, list[DutyAssignment]] = defaultdict(list)
@@ -341,12 +437,21 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         # - per-(kind, location) fill counts so we can decrement slot capacity
         # - per-session staff_id sets so we can pre-mark them as assigned
         ov_filled_ot: dict[str, int] = defaultdict(int)
-        ov_filled_clinic: dict[tuple[str, str], int] = defaultdict(int)  # (session, room)
+        ov_filled_clinic: dict[tuple[str, str], int] = defaultdict(
+            int
+        )  # (session, room)
         pre_am: set[int] = set()
         pre_pm: set[int] = set()
         for ov in overrides_by_date.get(d, []):
-            ov_session = ov.session.value if hasattr(ov.session, "value") else ov.session
-            if ov.duty_type in (DutyType.OT, DutyType.EOT, DutyType.WARD_MO, DutyType.EOT_MO):
+            ov_session = (
+                ov.session.value if hasattr(ov.session, "value") else ov.session
+            )
+            if ov.duty_type in (
+                DutyType.OT,
+                DutyType.EOT,
+                DutyType.WARD_MO,
+                DutyType.EOT_MO,
+            ):
                 ov_filled_ot[ov.location or ""] += 1
                 pre_am.add(ov.staff_id)
                 pre_pm.add(ov.staff_id)
@@ -358,7 +463,8 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                 elif ov_session == "PM":
                     pre_pm.add(ov.staff_id)
                 else:
-                    pre_am.add(ov.staff_id); pre_pm.add(ov.staff_id)
+                    pre_am.add(ov.staff_id)
+                    pre_pm.add(ov.staff_id)
             else:  # CLINIC / SPECIAL
                 ov_filled_clinic[(ov_session, ov.location or "")] += 1
                 if ov_session == "AM":
@@ -366,7 +472,8 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                 elif ov_session == "PM":
                     pre_pm.add(ov.staff_id)
                 else:
-                    pre_am.add(ov.staff_id); pre_pm.add(ov.staff_id)
+                    pre_am.add(ov.staff_id)
+                    pre_pm.add(ov.staff_id)
 
         day_ot_templates = []
         if d in overridden_dates:
@@ -410,6 +517,16 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                     ids.append(pid)
             return ids
 
+        # Deduplicate templates to guard against duplicate DB rows for date-overrides.
+        _seen_ot: set[tuple] = set()
+        _deduped_ot = []
+        for t in day_ot_templates:
+            _k = (t.room, t.session, t.consultant_id, t.is_emergency, t.staff_required)
+            if _k not in _seen_ot:
+                _seen_ot.add(_k)
+                _deduped_ot.append(t)
+        day_ot_templates = _deduped_ot
+
         ot_slots = []
         for t in day_ot_templates:
             preferred_ids = _resolve_preferred_ids(t.linked_manpower)
@@ -421,15 +538,22 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                         consultant_team_id=consultant_team.get(t.consultant_id)
                         if t.consultant_id
                         else None,
-                        assistants_needed=max(0, (t.staff_required or 0) - ov_filled_ot.get(t.room or "", 0)),
+                        assistants_needed=max(
+                            0,
+                            (t.staff_required or 0) - ov_filled_ot.get(t.room or "", 0),
+                        ),
                         registrar_needed=0,
                         is_emergency=True,
                         linked_call_slot=t.linked_manpower,
                         session=t.session,
                         priority=t.priority if t.priority is not None else 5,
                         preferred_staff_ids=preferred_ids,
-                        max_registrars=t.max_registrars if t.max_registrars is not None else 1,
-                        eligible_ranks=_resolve_eligible_ranks(t.eligible_rank_ids, rank_name_by_id),
+                        max_registrars=t.max_registrars
+                        if t.max_registrars is not None
+                        else 1,
+                        eligible_ranks=_resolve_eligible_ranks(
+                            t.eligible_rank_ids, rank_name_by_id
+                        ),
                     )
                 )
             elif not is_wknd and not is_ph:
@@ -440,14 +564,21 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                         consultant_team_id=consultant_team.get(t.consultant_id)
                         if t.consultant_id
                         else None,
-                        assistants_needed=max(0, (t.staff_required or 0) - ov_filled_ot.get(t.room or "", 0)),
+                        assistants_needed=max(
+                            0,
+                            (t.staff_required or 0) - ov_filled_ot.get(t.room or "", 0),
+                        ),
                         registrar_needed=0,
                         session=t.session,
                         priority=t.priority if t.priority is not None else 5,
                         preferred_staff_ids=preferred_ids,
-                        max_registrars=t.max_registrars if t.max_registrars is not None else 1,
+                        max_registrars=t.max_registrars
+                        if t.max_registrars is not None
+                        else 1,
                         linked_call_slot=t.linked_manpower,
-                        eligible_ranks=_resolve_eligible_ranks(t.eligible_rank_ids, rank_name_by_id),
+                        eligible_ranks=_resolve_eligible_ranks(
+                            t.eligible_rank_ids, rank_name_by_id
+                        ),
                     )
                 )
 
@@ -462,6 +593,19 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         else:
             am_src = []
             pm_src = []
+
+        # Deduplicate clinic templates to guard against duplicate DB rows.
+        def _dedup_clinic(src):
+            seen, out = set(), []
+            for t in src:
+                k = (t.room, t.consultant_id, t.label, t.staff_required)
+                if k not in seen:
+                    seen.add(k)
+                    out.append(t)
+            return out
+
+        am_src = _dedup_clinic(am_src)
+        pm_src = _dedup_clinic(pm_src)
         if am_src or pm_src:
             for t in am_src:
                 am_clinics.append(
@@ -469,14 +613,19 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                         room=t.room,
                         session=Session.AM,
                         clinic_type=t.label or "Sup",
-                        mos_required=max(0, (t.staff_required if t.staff_required is not None else 1)
-                                          - ov_filled_clinic.get(("AM", t.room or ""), 0)),
+                        mos_required=max(
+                            0,
+                            (t.staff_required if t.staff_required is not None else 1)
+                            - ov_filled_clinic.get(("AM", t.room or ""), 0),
+                        ),
                         consultant_id=t.consultant_id,
                         consultant_team_id=consultant_team.get(t.consultant_id)
                         if t.consultant_id
                         else None,
                         priority=t.priority if t.priority is not None else 5,
-                        eligible_ranks=_resolve_eligible_ranks(t.eligible_rank_ids, rank_name_by_id),
+                        eligible_ranks=_resolve_eligible_ranks(
+                            t.eligible_rank_ids, rank_name_by_id
+                        ),
                     )
                 )
             for t in pm_src:
@@ -485,14 +634,19 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                         room=t.room,
                         session=Session.PM,
                         clinic_type=t.label or "Sup",
-                        mos_required=max(0, (t.staff_required if t.staff_required is not None else 1)
-                                          - ov_filled_clinic.get(("PM", t.room or ""), 0)),
+                        mos_required=max(
+                            0,
+                            (t.staff_required if t.staff_required is not None else 1)
+                            - ov_filled_clinic.get(("PM", t.room or ""), 0),
+                        ),
                         consultant_id=t.consultant_id,
                         consultant_team_id=consultant_team.get(t.consultant_id)
                         if t.consultant_id
                         else None,
                         priority=t.priority if t.priority is not None else 5,
-                        eligible_ranks=_resolve_eligible_ranks(t.eligible_rank_ids, rank_name_by_id),
+                        eligible_ranks=_resolve_eligible_ranks(
+                            t.eligible_rank_ids, rank_name_by_id
+                        ),
                     )
                 )
 
@@ -509,24 +663,31 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
             )
         )
 
-    duty_eligible_ranks = _get_duty_eligible_ranks(db)
+    duty_eligible_ranks = await _get_duty_eligible_ranks(db)
     duty_staff = (
-        db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks)))
+        (
+            await db.execute(
+                select(Staff).filter(
+                    Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks))
+                )
+            )
+        )
+        .scalars()
         .all()
     )
     mo_pool: list[PersonInfo] = []
     for s in duty_staff:
         ta = (
-            db.query(TeamAssignment)
-            .filter(
-                TeamAssignment.staff_id == s.id,
-                TeamAssignment.role.in_(["mo", "consultant"]),
-                TeamAssignment.effective_from <= date(year, month, num_days),
+            await db.execute(
+                select(TeamAssignment)
+                .filter(
+                    TeamAssignment.staff_id == s.id,
+                    TeamAssignment.role.in_(["mo", "consultant"]),
+                    TeamAssignment.effective_from <= date(year, month, num_days),
+                )
+                .order_by(TeamAssignment.effective_from.desc())
             )
-            .order_by(TeamAssignment.effective_from.desc())
-            .first()
-        )
+        ).scalar_one_or_none()
         mo_pool.append(
             PersonInfo(
                 id=s.id,
@@ -543,11 +704,15 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
 
     leave_dates: dict[int, set[date]] = defaultdict(set)
     for lv in (
-        db.query(Leave)
-        .filter(
-            Leave.date >= date(year, month, 1),
-            Leave.date <= date(year, month, num_days),
+        (
+            await db.execute(
+                select(Leave).filter(
+                    Leave.date >= date(year, month, 1),
+                    Leave.date <= date(year, month, num_days),
+                )
+            )
         )
+        .scalars()
         .all()
     ):
         leave_dates[lv.staff_id].add(lv.date)
@@ -557,13 +722,21 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     for r in call_rows:
         call_by_type[r.date][r.call_type] = r.staff_id
 
-    # Build default_duty_by_call_type: maps source call type → duty type that
+    # Build default_duty_by_call_type: maps source call type â†’ duty type that
     # should auto-fill for that person. Two sources:
-    #   1. Source call type's default_duty_type ("MO1 → Ward MO")
-    #   2. Target call type's linked_to (Ward MO.linked_to = [MO1] → MO1 → Ward MO)
+    #   1. Source call type's default_duty_type ("MO1 â†’ Ward MO")
+    #   2. Target call type's linked_to (Ward MO.linked_to = [MO1] â†’ MO1 â†’ Ward MO)
     default_duty_by_call_type: dict[str, str] = {}
     active_cts = (
-        db.query(CallTypeConfig).filter(CallTypeConfig.is_active.is_(True)).all()
+        (
+            await db.execute(
+                select(CallTypeConfig)
+                .filter(CallTypeConfig.is_active.is_(True))
+                .options(selectinload(CallTypeConfig.eligible_ranks))
+            )
+        )
+        .scalars()
+        .all()
     )
     ct_name_by_id = {ct.id: ct.name for ct in active_cts}
     for ct in active_cts:
@@ -571,12 +744,15 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
             default_duty_by_call_type[ct.name] = ct.default_duty_type
     # Apply linked_to: only duty-only call types auto-fill from a source call
     # type. The reverse link (set automatically by the bidirectional sync) is
-    # for UI visibility only and must NOT drive duty assignments — otherwise a
+    # for UI visibility only and must NOT drive duty assignments â€” otherwise a
     # non-duty call type's rank eligibility gets bypassed.
     ct_by_name = {ct.name: ct for ct in active_cts}
     # Build rank name lookup so the duty solver can filter backfill candidates
     from ..models import RankConfig as _RankConfig
-    rank_name_by_id = {r.id: r.name for r in db.query(_RankConfig).all()}
+
+    rank_name_by_id = {
+        r.id: r.name for r in (await db.execute(select(_RankConfig))).scalars().all()
+    }
     anchor_duty_eligible_ranks: dict[str, set[str]] = {}
     for ct in active_cts:
         if not ct.is_duty_only:
@@ -589,9 +765,7 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
     for ct in active_cts:
         if not ct.is_duty_only or not ct.linked_to:
             continue
-        target_eligible_ranks = {
-            er.rank_id for er in ct.eligible_ranks
-        }
+        target_eligible_ranks = {er.rank_id for er in ct.eligible_ranks}
         for token in ct.linked_to.split(","):
             token = token.strip()
             if not token.isdigit():
@@ -608,6 +782,20 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
                     continue
             default_duty_by_call_type[source_name] = ct.name
 
+    registrar_rank_names = {
+        r.name
+        for r in (
+            await db.execute(
+                select(RankConfig).filter(
+                    RankConfig.is_registrar_tier.is_(True),
+                    RankConfig.is_active.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    }
+
     return DutySolverInput(
         year=year,
         month=month,
@@ -622,18 +810,58 @@ def _build_duty_input(config: MonthlyConfig, db: DBSession) -> DutySolverInput:
         call_by_type=dict(call_by_type),
         default_duty_by_call_type=default_duty_by_call_type,
         anchor_duty_eligible_ranks=anchor_duty_eligible_ranks,
-        registrar_rank_names={
-            r.name for r in db.query(RankConfig).filter(
-                RankConfig.is_registrar_tier.is_(True),
-                RankConfig.is_active.is_(True),
-            ).all()
-        },
+        registrar_rank_names=registrar_rank_names,
     )
 
 
-def _build_day_rosters(
+def _build_rank_groups(call_type_configs) -> dict[str, str]:
+    """Map each call type name to a rank-tier group label for UI display."""
+    groups = {}
+    for ct in call_type_configs:
+        ranks = [j.rank for j in ct.eligible_ranks if j.rank]
+        if not ranks:
+            groups[ct.name] = ""
+            continue
+        if any(r.is_registrar_tier for r in ranks):
+            groups[ct.name] = "Registrar"
+        elif any(r.is_consultant_tier for r in ranks):
+            groups[ct.name] = "Consultant"
+        else:
+            # Fall back to the name of the highest-seniority rank (lowest display_order)
+            top = min(ranks, key=lambda r: r.display_order)
+            groups[ct.name] = top.name
+    return groups
+
+
+async def _apply_day_flags(config_id: int, db: AsyncSession, day_rosters: list) -> None:
+    """Stamp is_stepdown and is_ext_ot onto pre-built DayDutyRoster objects."""
+    stepdown_dates = {
+        r.date
+        for r in (
+            await db.execute(
+                select(StepdownDay).filter(StepdownDay.config_id == config_id)
+            )
+        )
+        .scalars()
+        .all()
+    }
+    ext_ot_dates = {
+        r.date
+        for r in (
+            await db.execute(select(ExtOTDate).filter(ExtOTDate.config_id == config_id))
+        )
+        .scalars()
+        .all()
+    }
+    for dr in day_rosters:
+        # Use object.__setattr__ to bypass Pydantic v2 validation on already-constructed instances.
+        object.__setattr__(dr, "is_stepdown", dr.date in stepdown_dates)
+        object.__setattr__(dr, "is_ext_ot", dr.date in ext_ot_dates)
+
+
+async def _build_day_rosters(
     config: MonthlyConfig,
-    db: DBSession,
+    db: AsyncSession,
     duty_results,
     pid_to_name: dict[int, str],
     cons_names: dict[int, str],
@@ -643,7 +871,7 @@ def _build_day_rosters(
 
     ph_dates = {
         r.date
-        for r in db.query(PublicHoliday).all()
+        for r in (await db.execute(select(PublicHoliday))).scalars().all()
         if r.date.year == config.year and r.date.month == config.month
     }
 
@@ -652,12 +880,20 @@ def _build_day_rosters(
         r_date = r.date if isinstance(r, DR) else r.date
         results_by_date[r_date].append(r)
 
-    all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
+    all_staff_names = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
 
     # Expected resource templates per (day_of_week, week_in_month) so the UI can
     # render empty drop targets even when no one is currently assigned.
     all_templates = (
-        db.query(ResourceTemplate).filter(ResourceTemplate.is_active.is_(True)).all()
+        (
+            await db.execute(
+                select(ResourceTemplate).filter(ResourceTemplate.is_active.is_(True))
+            )
+        )
+        .scalars()
+        .all()
     )
     templates_by_dow: dict[int, list[ResourceTemplate]] = defaultdict(list)
     templates_by_date: dict[date, list[ResourceTemplate]] = defaultdict(list)
@@ -668,13 +904,19 @@ def _build_day_rosters(
             overridden_dates.add(t.effective_date)
         else:
             templates_by_dow[t.day_of_week].append(t)
-    cons_name_by_id = {s.id: s.name for s in db.query(Staff).all()}
+    cons_name_by_id = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
 
     call_rows = (
-        db.query(CallAssignment)
-        .filter(
-            CallAssignment.config_id == config.id,
+        (
+            await db.execute(
+                select(CallAssignment).filter(
+                    CallAssignment.config_id == config.id,
+                )
+            )
         )
+        .scalars()
         .all()
     )
     call_by_date: dict[date, dict[str, str]] = defaultdict(dict)
@@ -684,14 +926,29 @@ def _build_day_rosters(
         )
 
     cons_oncall_by_date: dict[date, str] = {}
-    for r in (
-        db.query(ConsultantOnCall).filter(ConsultantOnCall.config_id == config.id).all()
-    ):
-        cons_oncall_by_date[r.date] = all_staff_names.get(
-            r.consultant_id, f"ID:{r.consultant_id}"
-        )
     ac_oncall_by_date: dict[date, str] = {}
-    for r in db.query(ACOnCall).filter(ACOnCall.config_id == config.id).all():
+    for r in (
+        (
+            await db.execute(
+                select(ConsultantOnCall).filter(ConsultantOnCall.config_id == config.id)
+            )
+        )
+        .scalars()
+        .all()
+    ):
+        name = all_staff_names.get(r.consultant_id, f"ID:{r.consultant_id}")
+        if r.supervising_consultant_id:
+            sup = all_staff_names.get(
+                r.supervising_consultant_id, f"ID:{r.supervising_consultant_id}"
+            )
+            cons_oncall_by_date[r.date] = f"{name} / {sup}"
+        else:
+            cons_oncall_by_date[r.date] = name
+    for r in (
+        (await db.execute(select(ACOnCall).filter(ACOnCall.config_id == config.id)))
+        .scalars()
+        .all()
+    ):
         ac_oncall_by_date[r.date] = all_staff_names.get(r.ac_id, f"ID:{r.ac_id}")
 
     # Lookup keyed by (room, session, consultant_id) so multiple unsited templates
@@ -701,8 +958,14 @@ def _build_day_rosters(
         tuple[str, str, int | None], tuple[str, int | None]
     ] = {}
     for ct in (
-        db.query(ResourceTemplate)
-        .filter(ResourceTemplate.resource_type == "clinic")
+        (
+            await db.execute(
+                select(ResourceTemplate).filter(
+                    ResourceTemplate.resource_type == "clinic"
+                )
+            )
+        )
+        .scalars()
         .all()
     ):
         sess_v = ct.session.value if hasattr(ct.session, "value") else ct.session
@@ -716,17 +979,31 @@ def _build_day_rosters(
             (room_norm, sess_v, None), (label_v, ct.consultant_id)
         )
 
-    # Pool of duty-eligible MOs for auto-deriving the "free → Admin" column.
-    duty_eligible_ranks = _get_duty_eligible_ranks(db)
+    # Pool of duty-eligible MOs for auto-deriving the "free â†’ Admin" column.
+    duty_eligible_ranks = await _get_duty_eligible_ranks(db)
     duty_eligible_staff = (
-        db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks)))
+        (
+            await db.execute(
+                select(Staff).filter(
+                    Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks))
+                )
+            )
+        )
+        .scalars()
         .all()
-    ) if duty_eligible_ranks else []
-    can_do_clinic_by_id = {s.id: bool(s.can_do_clinic) for s in db.query(Staff).all()}
-    can_do_ot_by_id = {s.id: bool(s.can_do_ot) for s in db.query(Staff).all()}
+        if duty_eligible_ranks
+        else []
+    )
+    can_do_clinic_by_id = {
+        s.id: bool(s.can_do_clinic)
+        for s in (await db.execute(select(Staff))).scalars().all()
+    }
+    can_do_ot_by_id = {
+        s.id: bool(s.can_do_ot)
+        for s in (await db.execute(select(Staff))).scalars().all()
+    }
 
-    # Map (room, session_str) → set of call type names that resource pulls in via
+    # Map (room, session_str) â†’ set of call type names that resource pulls in via
     # linked_manpower. Used to silence "on-call and also assigned to X" comments when
     # the resource was designed to draft on-call holders.
     linked_by_resource: dict[tuple[str, str], set[str]] = {}
@@ -738,9 +1015,14 @@ def _build_day_rosters(
             }
 
     ct_configs = (
-        db.query(CallTypeConfig)
-        .filter(CallTypeConfig.is_active.is_(True))
-        .order_by(CallTypeConfig.display_order)
+        (
+            await db.execute(
+                select(CallTypeConfig)
+                .filter(CallTypeConfig.is_active.is_(True))
+                .order_by(CallTypeConfig.display_order)
+            )
+        )
+        .scalars()
         .all()
     )
     ct_columns = [ct.name for ct in ct_configs]
@@ -767,7 +1049,9 @@ def _build_day_rosters(
                     "reason": "Post-call",
                 }
             )
-        leave_rows = db.query(Leave).filter(Leave.date == d).all()
+        leave_rows = (
+            (await db.execute(select(Leave).filter(Leave.date == d))).scalars().all()
+        )
         for lv in leave_rows:
             unavailable.append(
                 {
@@ -794,24 +1078,21 @@ def _build_day_rosters(
             staff_id = r.staff_id
             session_val = r.session.value if hasattr(r.session, "value") else r.session
             loc = r.location or ""
-            tpl = (
-                clinic_template_lookup.get((loc, session_val, r.consultant_id))
-                or clinic_template_lookup.get((loc, session_val, None))
-            )
+            tpl = clinic_template_lookup.get(
+                (loc, session_val, r.consultant_id)
+            ) or clinic_template_lookup.get((loc, session_val, None))
             tpl_label = tpl[0] if tpl else None
             tpl_consultant_id = tpl[1] if tpl else None
             # Prefer the stored clinic_type on the assignment row (set when the
             # assignment was written) over the template lookup, so distinct
-            # templates that share (room, consultant_id) — e.g. MOPD vs Hand VC
-            # both at room="-" with no consultant — render with the right label.
+            # templates that share (room, consultant_id) â€” e.g. MOPD vs Hand VC
+            # both at room="-" with no consultant â€” render with the right label.
             ct = getattr(r, "clinic_type", None) or tpl_label
 
             # If the assignment was written without a consultant_id, back-fill from
             # the matched template so the duty card shows the consultant correctly.
             eff_cons_id = r.consultant_id or tpl_consultant_id
-            eff_cons_name = (
-                cons_names.get(eff_cons_id) if eff_cons_id else None
-            )
+            eff_cons_name = cons_names.get(eff_cons_id) if eff_cons_id else None
 
             out = DutyAssignmentOut(
                 id=getattr(r, "id", 0) or 0,
@@ -853,7 +1134,7 @@ def _build_day_rosters(
 
         # Auto-fill Admin column with free duty-eligible staff (no other duty + available).
         unavail_ids = {u["staff_id"] for u in unavailable}
-        # Resolve "on call today" set from call_team (names → ids)
+        # Resolve "on call today" set from call_team (names â†’ ids)
         name_to_id = {n: i for i, n in all_staff_names.items()}
         on_call_ids = {name_to_id[n] for n in call_team.values() if n in name_to_id}
         # Per-staff call type today (so we can check linked_manpower legitimacy)
@@ -878,33 +1159,37 @@ def _build_day_rosters(
             if s.id in unavail_ids or s.id in on_call_ids:
                 continue
             if s.id not in am_assigned_ids:
-                am_admin.append(DutyAssignmentOut(
-                    id=0,
-                    date=d,
-                    staff_id=s.id,
-                    staff_name=s.name,
-                    session=Session.AM,
-                    duty_type=DutyType.ADMIN,
-                    location=None,
-                    consultant_id=None,
-                    consultant_name=None,
-                    clinic_type=None,
-                    is_manual_override=False,
-                ))
+                am_admin.append(
+                    DutyAssignmentOut(
+                        id=0,
+                        date=d,
+                        staff_id=s.id,
+                        staff_name=s.name,
+                        session=Session.AM,
+                        duty_type=DutyType.ADMIN,
+                        location=None,
+                        consultant_id=None,
+                        consultant_name=None,
+                        clinic_type=None,
+                        is_manual_override=False,
+                    )
+                )
             if s.id not in pm_assigned_ids:
-                pm_admin.append(DutyAssignmentOut(
-                    id=0,
-                    date=d,
-                    staff_id=s.id,
-                    staff_name=s.name,
-                    session=Session.PM,
-                    duty_type=DutyType.ADMIN,
-                    location=None,
-                    consultant_id=None,
-                    consultant_name=None,
-                    clinic_type=None,
-                    is_manual_override=False,
-                ))
+                pm_admin.append(
+                    DutyAssignmentOut(
+                        id=0,
+                        date=d,
+                        staff_id=s.id,
+                        staff_name=s.name,
+                        session=Session.PM,
+                        duty_type=DutyType.ADMIN,
+                        location=None,
+                        consultant_id=None,
+                        consultant_name=None,
+                        clinic_type=None,
+                        is_manual_override=False,
+                    )
+                )
 
         # Build expected-resources list so the UI can render empty drop zones
         # when a resource's staff count goes to 0 via manual removal.
@@ -929,19 +1214,29 @@ def _build_day_rosters(
             if not day_is_overridden:
                 if t.resource_type == "clinic" and (is_wknd or is_ph):
                     continue
-                if t.resource_type == "ot" and (is_wknd or is_ph) and not t.is_emergency:
+                if (
+                    t.resource_type == "ot"
+                    and (is_wknd or is_ph)
+                    and not t.is_emergency
+                ):
                     continue
-            expected.append({
-                "resource_type": t.resource_type,
-                "room": t.room,
-                "label": t.label or "",
-                "session": t.session.value if hasattr(t.session, "value") else t.session,
-                "is_emergency": bool(t.is_emergency),
-                "consultant_id": t.consultant_id,
-                "consultant_name": cons_name_by_id.get(t.consultant_id) if t.consultant_id else None,
-                "staff_required": t.staff_required or 0,
-                "priority": t.priority if t.priority is not None else 5,
-            })
+            expected.append(
+                {
+                    "resource_type": t.resource_type,
+                    "room": t.room,
+                    "label": t.label or "",
+                    "session": t.session.value
+                    if hasattr(t.session, "value")
+                    else t.session,
+                    "is_emergency": bool(t.is_emergency),
+                    "consultant_id": t.consultant_id,
+                    "consultant_name": cons_name_by_id.get(t.consultant_id)
+                    if t.consultant_id
+                    else None,
+                    "staff_required": t.staff_required or 0,
+                    "priority": t.priority if t.priority is not None else 5,
+                }
+            )
 
         # Compute constraint warnings for this day (rendered as inline comments).
         warnings: list[str] = []
@@ -952,9 +1247,9 @@ def _build_day_rosters(
         # flag them. We DO flag them when swapped out (assigned staff isn't on any call).
         LINKED_DUTY_TYPES = (DutyType.WARD_MO, DutyType.EOT_MO)
 
-        # Real duties only — exclude linked duties from double-book detection and
+        # Real duties only â€” exclude linked duties from double-book detection and
         # general conflict checks.
-        # Pretty resource label for warnings — prefer the template label
+        # Pretty resource label for warnings â€” prefer the template label
         # (clinic_type), then location, then "-".
         def _resource_label(a) -> str:
             ct = getattr(a, "clinic_type", None)
@@ -983,7 +1278,9 @@ def _build_day_rosters(
             sname = a.staff_name
             sess_val = a.session.value if hasattr(a.session, "value") else a.session
             this_call_type = call_type_by_staff.get(a.staff_id)
-            linked_for_resource = linked_by_resource.get((a.location or "", sess_val), set())
+            linked_for_resource = linked_by_resource.get(
+                (a.location or "", sess_val), set()
+            )
             is_linked_assignment = (
                 this_call_type is not None and this_call_type in linked_for_resource
             )
@@ -994,19 +1291,29 @@ def _build_day_rosters(
                 warnings.append(f"{sname} is post-call but assigned to {res_label}")
             if a.staff_id in on_call_ids and not is_linked_assignment:
                 ct = call_type_by_staff.get(a.staff_id) or "call"
-                warnings.append(f"{sname} is on {ct} today and also assigned to {res_label}")
-            if a.duty_type == DutyType.CLINIC and not can_do_clinic_by_id.get(a.staff_id, True):
-                warnings.append(f"{sname} cannot do clinic but is assigned to {res_label}")
-            if a.duty_type in (DutyType.OT, DutyType.EOT) and not can_do_ot_by_id.get(a.staff_id, True):
+                warnings.append(
+                    f"{sname} is on {ct} today and also assigned to {res_label}"
+                )
+            if a.duty_type == DutyType.CLINIC and not can_do_clinic_by_id.get(
+                a.staff_id, True
+            ):
+                warnings.append(
+                    f"{sname} cannot do clinic but is assigned to {res_label}"
+                )
+            if a.duty_type in (DutyType.OT, DutyType.EOT) and not can_do_ot_by_id.get(
+                a.staff_id, True
+            ):
                 warnings.append(f"{sname} cannot do OT but is assigned to {res_label}")
 
         # Linked duties: flag only when a MANUAL override placed someone who isn't
         # on any call into the role. Solver-emitted backfills (because the linked
-        # call holder was pulled to a different OT) are expected — don't flag them.
+        # call holder was pulled to a different OT) are expected â€” don't flag them.
         for a in [x for x in eot_out if x.duty_type in LINKED_DUTY_TYPES]:
             if a.staff_id not in on_call_ids and a.is_manual_override:
                 label = "Ward MO" if a.duty_type == DutyType.WARD_MO else "EOT MO"
-                warnings.append(f"{a.staff_name} is doing {label} but is not on the linked call")
+                warnings.append(
+                    f"{a.staff_name} is doing {label} but is not on the linked call"
+                )
 
         # Double-bookings.
         for sid, slots in am_appearances.items():
@@ -1017,7 +1324,23 @@ def _build_day_rosters(
             if len(slots) > 1:
                 sname = all_staff_names.get(sid, f"ID:{sid}")
                 warnings.append(f"{sname} is double-booked PM: {', '.join(slots)}")
-        # Consultant double-booking — same consultant running 2+ resources in
+        # Deduplicate expected templates (guards against duplicate DB rows for date-overrides).
+        seen_tpl: set[tuple] = set()
+        deduped_expected = []
+        for r in expected:
+            tpl_key = (
+                r["resource_type"],
+                r.get("room"),
+                r.get("session"),
+                r.get("consultant_id"),
+                r.get("label"),
+            )
+            if tpl_key not in seen_tpl:
+                seen_tpl.add(tpl_key)
+                deduped_expected.append(r)
+        expected = deduped_expected
+
+        # Consultant double-booking â€” same consultant running 2+ resources in
         # overlapping sessions (Full Day OT counts toward both AM and PM).
         cons_am: dict[int, list[str]] = defaultdict(list)
         cons_pm: dict[int, list[str]] = defaultdict(list)
@@ -1037,13 +1360,17 @@ def _build_day_rosters(
         for cid, slots in cons_am.items():
             if len(slots) > 1:
                 cname = all_staff_names.get(cid, f"ID:{cid}")
-                warnings.append(f"Consultant {cname} is double-booked AM: {', '.join(slots)}")
+                warnings.append(
+                    f"Consultant {cname} is double-booked AM: {', '.join(slots)}"
+                )
         for cid, slots in cons_pm.items():
             if len(slots) > 1:
                 cname = all_staff_names.get(cid, f"ID:{cid}")
-                warnings.append(f"Consultant {cname} is double-booked PM: {', '.join(slots)}")
+                warnings.append(
+                    f"Consultant {cname} is double-booked PM: {', '.join(slots)}"
+                )
 
-        # Compute staffing shortfall — for each expected resource, count actual
+        # Compute staffing shortfall â€” for each expected resource, count actual
         # assigned staff and sum the deficits. OTs (Full Day) match by location;
         # clinics match by (session, location, consultant_id, label).
         shortfall = 0
@@ -1053,11 +1380,15 @@ def _build_day_rosters(
                 ot_assigned_count[a.location or ""] += 1
         clinic_assigned_count: dict[tuple, int] = defaultdict(int)
         for a in am_clinics_out:
-            ct_label = (a.clinic_type or "")
-            clinic_assigned_count[("AM", a.location or "", a.consultant_id, ct_label)] += 1
+            ct_label = a.clinic_type or ""
+            clinic_assigned_count[
+                ("AM", a.location or "", a.consultant_id, ct_label)
+            ] += 1
         for a in pm_clinics_out:
-            ct_label = (a.clinic_type or "")
-            clinic_assigned_count[("PM", a.location or "", a.consultant_id, ct_label)] += 1
+            ct_label = a.clinic_type or ""
+            clinic_assigned_count[
+                ("PM", a.location or "", a.consultant_id, ct_label)
+            ] += 1
         for r in expected:
             req = r.get("staff_required") or 0
             if req <= 0:
@@ -1065,10 +1396,15 @@ def _build_day_rosters(
             if r["resource_type"] == "ot":
                 got = ot_assigned_count.get(r["room"] or "", 0)
             else:
-                key = (r["session"], r["room"] or "", r["consultant_id"], r["label"] or "")
+                key = (
+                    r["session"],
+                    r["room"] or "",
+                    r["consultant_id"],
+                    r["label"] or "",
+                )
                 got = clinic_assigned_count.get(key, 0)
             if req > got:
-                shortfall += (req - got)
+                shortfall += req - got
 
         # Dedupe while preserving order.
         seen = set()
@@ -1094,6 +1430,7 @@ def _build_day_rosters(
                 unavailable=unavailable,
                 warnings=warnings,
                 shortfall=shortfall,
+                has_day_override=day_is_overridden,
             )
         )
 
@@ -1101,33 +1438,40 @@ def _build_day_rosters(
 
 
 @router.post("/roster/{config_id}/generate-duties", response_model=DutyRosterResponse)
-def generate_duties(config_id: int, db: DBSession = Depends(get_db)):
-    config = db.query(MonthlyConfig).get(config_id)
+async def generate_duties(config_id: int, db: AsyncSession = Depends(get_db)):
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404, "Config not found")
 
     existing_calls = (
-        db.query(CallAssignment)
-        .filter(
-            CallAssignment.config_id == config_id,
+        await db.execute(
+            select(func.count())
+            .select_from(CallAssignment)
+            .filter(
+                CallAssignment.config_id == config_id,
+            )
         )
-        .count()
-    )
+    ).scalar()
     if existing_calls == 0:
         raise HTTPException(
             400, "Generate call roster first (POST /api/roster/{id}/generate)"
         )
 
-    inp = _build_duty_input(config, db)
+    inp = await _build_duty_input(config, db)
     duty_results = solve_duties(inp)
 
-    db.query(DutyAssignment).filter(
-        DutyAssignment.config_id == config_id,
-        DutyAssignment.is_manual_override.is_(False),
-    ).delete()
+    await db.execute(
+        delete(DutyAssignment).where(
+            DutyAssignment.config_id == config_id,
+            DutyAssignment.is_manual_override.is_(False),
+        )
+    )
+    await db.flush()
 
     pid_to_name = {p.id: p.name for p in inp.mo_pool}
-    cons_names = {s.id: s.name for s in db.query(Staff).all()}
+    cons_names = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
 
     for r in duty_results:
         db.add(
@@ -1143,65 +1487,89 @@ def generate_duties(config_id: int, db: DBSession = Depends(get_db)):
                 clinic_type=getattr(r, "clinic_type", None),
             )
         )
-    db.commit()
+    await db.commit()
 
-    day_rosters, ct_columns = _build_day_rosters(
+    day_rosters, ct_columns = await _build_day_rosters(
         config, db, duty_results, pid_to_name, cons_names, inp.postcall_dates
     )
-    mo1_by_date = {d: slots["MO1"] for d, slots in inp.call_by_type.items() if "MO1" in slots}
+    mo1_by_date = {
+        d: slots["MO1"] for d, slots in inp.call_by_type.items() if "MO1" in slots
+    }
     duty_stats = compute_duty_stats(duty_results, inp.mo_pool, mo1_by_date)
 
+    from ..models import CallTypeEligibleRank as _CTER
+
+    ct_configs = (
+        (
+            await db.execute(
+                select(CallTypeConfig)
+                .filter(CallTypeConfig.is_active.is_(True))
+                .options(
+                    selectinload(CallTypeConfig.eligible_ranks).selectinload(_CTER.rank)
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    rank_groups = _build_rank_groups(ct_configs)
+    await _apply_day_flags(config_id, db, day_rosters)
     return DutyRosterResponse(
         year=config.year,
         month=config.month,
         days=day_rosters,
         duty_stats=duty_stats,
         call_type_columns=ct_columns,
+        call_type_rank_groups=rank_groups,
     )
 
 
-# ── Bulk reset / restore ────────────────────────────────────────────────
+# â”€â”€ Bulk reset / restore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.delete("/roster/{config_id}/duty-assignments")
-def reset_all_duty_assignments(config_id: int, db: DBSession = Depends(get_db)):
+async def reset_all_duty_assignments(
+    config_id: int, db: AsyncSession = Depends(get_db)
+):
     """Wipe every duty assignment (manual + solver) for the month. Caller
     typically chains a /generate-duties to repopulate."""
-    config = db.query(MonthlyConfig).get(config_id)
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404, "Config not found")
-    deleted = (
-        db.query(DutyAssignment)
-        .filter(DutyAssignment.config_id == config_id)
-        .delete(synchronize_session=False)
+    result = await db.execute(
+        delete(DutyAssignment).where(DutyAssignment.config_id == config_id)
     )
-    db.commit()
-    return {"ok": True, "deleted": deleted}
+    await db.commit()
+    return {"ok": True, "deleted": result.rowcount}
 
 
 @router.post("/roster/{config_id}/duty-assignments/restore")
-def restore_duty_assignments(
+async def restore_duty_assignments(
     config_id: int,
     payload: list[DutyAssignmentRestore],
-    db: DBSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
     target_date: date | None = None,
 ):
-    """Bulk-replace duty assignments with the supplied list — used by the
+    """Bulk-replace duty assignments with the supplied list â€” used by the
     frontend Undo to restore a prior snapshot.
 
     - If `target_date` is provided, wipes and restores only that date (per-day
       undo). The payload is filtered to that date.
     - Otherwise wipes the whole month and inserts the payload (global undo)."""
-    config = db.query(MonthlyConfig).get(config_id)
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404, "Config not found")
 
-    q = db.query(DutyAssignment).filter(DutyAssignment.config_id == config_id)
+    stmt = delete(DutyAssignment).where(DutyAssignment.config_id == config_id)
     if target_date is not None:
-        q = q.filter(DutyAssignment.date == target_date)
-    q.delete(synchronize_session=False)
+        stmt = delete(DutyAssignment).where(
+            DutyAssignment.config_id == config_id,
+            DutyAssignment.date == target_date,
+        )
+    await db.execute(stmt)
 
     from ..models import DutyType as DutyTypeEnum
+
     inserted = 0
     for r in payload:
         if target_date is not None and r.date != target_date:
@@ -1223,37 +1591,51 @@ def restore_duty_assignments(
             )
         )
         inserted += 1
-    db.commit()
+    await db.commit()
     return {"ok": True, "count": inserted}
 
 
-# ── Per-day resource overrides ──────────────────────────────────────────
+# â”€â”€ Per-day resource overrides â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.get("/templates/day-resources", response_model=list[ResourceTemplateOut])
-def list_day_resource_overrides(
-    target_date: date, db: DBSession = Depends(get_db)
+async def list_day_resource_overrides(
+    target_date: date, db: AsyncSession = Depends(get_db)
 ):
     """All resource templates with effective_date == target_date (per-day overrides only)."""
     rows = (
-        db.query(ResourceTemplate)
-        .filter(ResourceTemplate.effective_date == target_date)
-        .order_by(ResourceTemplate.sort_order)
+        (
+            await db.execute(
+                select(ResourceTemplate)
+                .filter(ResourceTemplate.effective_date == target_date)
+                .order_by(ResourceTemplate.sort_order)
+            )
+        )
+        .scalars()
         .all()
     )
     return [_resource_out(r) for r in rows]
 
 
-@router.post("/templates/day-resources/initialize", response_model=list[ResourceTemplateOut])
-def initialize_day_resource_overrides(
-    target_date: date, db: DBSession = Depends(get_db)
+@router.post(
+    "/templates/day-resources/initialize", response_model=list[ResourceTemplateOut]
+)
+async def initialize_day_resource_overrides(
+    target_date: date, db: AsyncSession = Depends(get_db)
 ):
     """Clone today's effective weekly templates into date-specific overrides so
-    the user can edit them without affecting the weekly schedule. Idempotent —
+    the user can edit them without affecting the weekly schedule. Idempotent â€”
     if overrides already exist for this date, returns them unchanged."""
+    # Lock the check-and-insert against concurrent requests for the same date.
     existing = (
-        db.query(ResourceTemplate)
-        .filter(ResourceTemplate.effective_date == target_date)
+        (
+            await db.execute(
+                select(ResourceTemplate)
+                .filter(ResourceTemplate.effective_date == target_date)
+                .with_for_update()
+            )
+        )
+        .scalars()
         .all()
     )
     if existing:
@@ -1262,12 +1644,16 @@ def initialize_day_resource_overrides(
     dow = target_date.weekday()
     week_num = (target_date.day - 1) // 7 + 1
     weekly = (
-        db.query(ResourceTemplate)
-        .filter(
-            ResourceTemplate.is_active.is_(True),
-            ResourceTemplate.effective_date.is_(None),
-            ResourceTemplate.day_of_week == dow,
+        (
+            await db.execute(
+                select(ResourceTemplate).filter(
+                    ResourceTemplate.is_active.is_(True),
+                    ResourceTemplate.effective_date.is_(None),
+                    ResourceTemplate.day_of_week == dow,
+                )
+            )
         )
+        .scalars()
         .all()
     )
     cloned: list[ResourceTemplate] = []
@@ -1297,60 +1683,64 @@ def initialize_day_resource_overrides(
         )
         db.add(c)
         cloned.append(c)
-    db.commit()
+    await db.commit()
     for c in cloned:
-        db.refresh(c)
+        await db.refresh(c)
     return [_resource_out(r) for r in cloned]
 
 
 @router.delete("/templates/day-resources")
-def reset_day_resource_overrides(
-    target_date: date, db: DBSession = Depends(get_db)
+async def reset_day_resource_overrides(
+    target_date: date, db: AsyncSession = Depends(get_db)
 ):
     """Delete all per-day overrides for target_date; the day reverts to weekly
     templates."""
-    deleted = (
-        db.query(ResourceTemplate)
-        .filter(ResourceTemplate.effective_date == target_date)
-        .delete(synchronize_session=False)
+    result = await db.execute(
+        delete(ResourceTemplate).where(ResourceTemplate.effective_date == target_date)
     )
-    db.commit()
-    return {"ok": True, "deleted": deleted}
+    await db.commit()
+    return {"ok": True, "deleted": result.rowcount}
 
 
-# ── Single-day regenerate ───────────────────────────────────────────────
+# â”€â”€ Single-day regenerate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("/roster/{config_id}/regenerate-day", response_model=DutyRosterResponse)
-def regenerate_day(
-    config_id: int, target_date: date, db: DBSession = Depends(get_db)
+async def regenerate_day(
+    config_id: int, target_date: date, db: AsyncSession = Depends(get_db)
 ):
-    """Reset and re-solve a single date — wipes ALL duty rows for the date
+    """Reset and re-solve a single date â€” wipes ALL duty rows for the date
     (including manual overrides) and re-runs the duty solver against the
     current resource layout. Use this to discard accidental drag-and-drop
     changes on a day, or after editing per-day resources via Edit Day."""
-    config = db.query(MonthlyConfig).get(config_id)
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404, "Config not found")
     if target_date.year != config.year or target_date.month != config.month:
         raise HTTPException(400, "target_date is outside this monthly config")
 
     existing_calls = (
-        db.query(CallAssignment).filter(CallAssignment.config_id == config_id).count()
-    )
+        await db.execute(
+            select(func.count())
+            .select_from(CallAssignment)
+            .filter(CallAssignment.config_id == config_id)
+        )
+    ).scalar()
     if existing_calls == 0:
         raise HTTPException(400, "Generate call roster first")
 
-    # Wipe BEFORE building solver input — otherwise _build_duty_input reads the
+    # Wipe BEFORE building solver input â€” otherwise _build_duty_input reads the
     # day's existing manual overrides, decrements slot capacity, and the solver
     # produces an empty result for slots it thinks are already filled.
-    db.query(DutyAssignment).filter(
-        DutyAssignment.config_id == config_id,
-        DutyAssignment.date == target_date,
-    ).delete()
-    db.commit()
+    await db.execute(
+        delete(DutyAssignment).where(
+            DutyAssignment.config_id == config_id,
+            DutyAssignment.date == target_date,
+        )
+    )
+    await db.commit()
 
-    inp = _build_duty_input(config, db)
+    inp = await _build_duty_input(config, db)
     target_day = next((d for d in inp.days if d.d == target_date), None)
     if target_day is None:
         raise HTTPException(400, "target_date has no day config")
@@ -1375,24 +1765,48 @@ def regenerate_day(
                 clinic_type=getattr(r, "clinic_type", None),
             )
         )
-    db.commit()
+    await db.commit()
 
     # Return the full updated roster view so the UI can refresh.
     all_duty_rows = (
-        db.query(DutyAssignment).filter(DutyAssignment.config_id == config_id).all()
+        (
+            await db.execute(
+                select(DutyAssignment).filter(DutyAssignment.config_id == config_id)
+            )
+        )
+        .scalars()
+        .all()
     )
     pid_to_name = {p.id: p.name for p in inp.mo_pool}
-    cons_names = {s.id: s.name for s in db.query(Staff).all()}
-    day_rosters, ct_columns = _build_day_rosters(
+    cons_names = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
+    day_rosters, ct_columns = await _build_day_rosters(
         config, db, all_duty_rows, pid_to_name, cons_names, inp.postcall_dates
     )
-    mo1_by_date = {d: slots["MO1"] for d, slots in inp.call_by_type.items() if "MO1" in slots}
+    mo1_by_date = {
+        d: slots["MO1"] for d, slots in inp.call_by_type.items() if "MO1" in slots
+    }
     duty_stats = compute_duty_stats(
-        [type("R", (), {"date": r.date, "staff_id": r.staff_id, "session": r.session,
-                         "duty_type": r.duty_type, "location": r.location,
-                         "consultant_id": r.consultant_id})() for r in all_duty_rows],
-        inp.mo_pool, mo1_by_date,
+        [
+            type(
+                "R",
+                (),
+                {
+                    "date": r.date,
+                    "staff_id": r.staff_id,
+                    "session": r.session,
+                    "duty_type": r.duty_type,
+                    "location": r.location,
+                    "consultant_id": r.consultant_id,
+                },
+            )()
+            for r in all_duty_rows
+        ],
+        inp.mo_pool,
+        mo1_by_date,
     )
+    await _apply_day_flags(config_id, db, day_rosters)
     return DutyRosterResponse(
         year=config.year,
         month=config.month,
@@ -1402,24 +1816,24 @@ def regenerate_day(
     )
 
 
-# ── Duty Overrides (manual drag-and-drop) ───────────────────────────────
+# â”€â”€ Duty Overrides (manual drag-and-drop) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
 @router.post("/roster/{config_id}/duty-override", response_model=DutyAssignmentOut)
-def create_duty_override(
-    config_id: int, payload: DutyOverrideCreate, db: DBSession = Depends(get_db)
+async def create_duty_override(
+    config_id: int, payload: DutyOverrideCreate, db: AsyncSession = Depends(get_db)
 ):
-    config = db.query(MonthlyConfig).get(config_id)
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404, "Config not found")
-    staff = db.query(Staff).get(payload.staff_id)
+    staff = await db.get(Staff, payload.staff_id)
     if not staff:
         raise HTTPException(404, "Staff not found")
 
     if payload.old_assignment_id is not None:
-        old = db.query(DutyAssignment).get(payload.old_assignment_id)
+        old = await db.get(DutyAssignment, payload.old_assignment_id)
         if old and old.config_id == config_id:
-            db.delete(old)
+            await db.delete(old)
 
     from ..models import DutyType as DutyTypeEnum
 
@@ -1428,7 +1842,9 @@ def create_duty_override(
     except ValueError:
         raise HTTPException(400, f"Invalid duty_type: {payload.duty_type}")
 
-    cons_names = {s.id: s.name for s in db.query(Staff).all()}
+    cons_names = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
     new_da = DutyAssignment(
         config_id=config_id,
         date=payload.date,
@@ -1440,8 +1856,8 @@ def create_duty_override(
         is_manual_override=True,
     )
     db.add(new_da)
-    db.commit()
-    db.refresh(new_da)
+    await db.commit()
+    await db.refresh(new_da)
 
     return DutyAssignmentOut(
         id=new_da.id,
@@ -1460,32 +1876,40 @@ def create_duty_override(
 
 
 @router.delete("/roster/{config_id}/duty-override/{assignment_id}")
-def delete_duty_override(
-    config_id: int, assignment_id: int, db: DBSession = Depends(get_db)
+async def delete_duty_override(
+    config_id: int, assignment_id: int, db: AsyncSession = Depends(get_db)
 ):
-    da = db.query(DutyAssignment).get(assignment_id)
+    da = await db.get(DutyAssignment, assignment_id)
     if not da or da.config_id != config_id:
         raise HTTPException(404, "Assignment not found")
-    db.delete(da)
-    db.commit()
+    await db.delete(da)
+    await db.commit()
     return {"ok": True}
 
 
 @router.get("/roster/{config_id}/duties", response_model=list[DutyAssignmentOut])
-def get_duties(config_id: int, db: DBSession = Depends(get_db)):
+async def get_duties(config_id: int, db: AsyncSession = Depends(get_db)):
     rows = (
-        db.query(DutyAssignment)
-        .filter(DutyAssignment.config_id == config_id)
-        .order_by(DutyAssignment.date, DutyAssignment.session)
+        (
+            await db.execute(
+                select(DutyAssignment)
+                .filter(DutyAssignment.config_id == config_id)
+                .order_by(DutyAssignment.date, DutyAssignment.session)
+            )
+        )
+        .scalars()
         .all()
     )
-    cons_names = {s.id: s.name for s in db.query(Staff).all()}
+    all_names = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
+    cons_names = all_names
     return [
         DutyAssignmentOut(
             id=r.id,
             date=r.date,
             staff_id=r.staff_id,
-            staff_name=r.staff.name,
+            staff_name=all_names.get(r.staff_id, f"ID:{r.staff_id}"),
             session=r.session,
             duty_type=r.duty_type,
             location=r.location,
@@ -1500,27 +1924,57 @@ def get_duties(config_id: int, db: DBSession = Depends(get_db)):
 
 
 @router.get("/roster/{config_id}/duties/view", response_model=DutyRosterResponse)
-def view_duties(config_id: int, db: DBSession = Depends(get_db)):
-    config = db.query(MonthlyConfig).get(config_id)
+async def view_duties(config_id: int, db: AsyncSession = Depends(get_db)):
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404, "Config not found")
 
     rows = (
-        db.query(DutyAssignment)
-        .filter(DutyAssignment.config_id == config_id)
-        .order_by(DutyAssignment.date, DutyAssignment.session)
+        (
+            await db.execute(
+                select(DutyAssignment)
+                .filter(DutyAssignment.config_id == config_id)
+                .order_by(DutyAssignment.date, DutyAssignment.session)
+            )
+        )
+        .scalars()
         .all()
     )
     if not rows:
         raise HTTPException(404, "No duty roster generated yet")
 
-    all_staff_names = {s.id: s.name for s in db.query(Staff).all()}
-    cons_names = all_staff_names
-    pid_to_name = {r.staff_id: r.staff.name for r in rows}
+    # Deduplicate: if the same (date, staff_id, session, duty_type, location) appears
+    # more than once (e.g. from a race-condition double-generate), keep the manual
+    # override row; otherwise keep the highest-id row.
+    seen_keys: dict[tuple, DutyAssignment] = {}
+    for r in rows:
+        key = (r.date, r.staff_id, r.session, r.duty_type, r.location)
+        existing = seen_keys.get(key)
+        if existing is None:
+            seen_keys[key] = r
+        elif r.is_manual_override and not existing.is_manual_override:
+            seen_keys[key] = r
+        elif r.id > existing.id and not existing.is_manual_override:
+            seen_keys[key] = r
+    rows = sorted(seen_keys.values(), key=lambda r: (r.date, r.session))
 
-    ct_config_dict = _load_ct_config_dict(db)
+    all_staff_names = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
+    cons_names = all_staff_names
+    pid_to_name = {
+        r.staff_id: all_staff_names.get(r.staff_id, f"ID:{r.staff_id}") for r in rows
+    }
+
+    ct_config_dict = await _load_ct_config_dict(db)
     call_rows = (
-        db.query(CallAssignment).filter(CallAssignment.config_id == config_id).all()
+        (
+            await db.execute(
+                select(CallAssignment).filter(CallAssignment.config_id == config_id)
+            )
+        )
+        .scalars()
+        .all()
     )
     postcall_dates: dict[date, set[int]] = defaultdict(set)
     for r in call_rows:
@@ -1529,14 +1983,39 @@ def view_duties(config_id: int, db: DBSession = Depends(get_db)):
             next_day = r.date + timedelta(days=1)
             postcall_dates[next_day].add(r.staff_id)
 
-    day_rosters, ct_columns = _build_day_rosters(
+    day_rosters, ct_columns = await _build_day_rosters(
         config, db, rows, pid_to_name, cons_names, dict(postcall_dates)
     )
 
-    duty_eligible_ranks = _get_duty_eligible_ranks(db)
+    from ..models import CallTypeEligibleRank as _CTER2
+
+    ct_configs_for_groups = (
+        (
+            await db.execute(
+                select(CallTypeConfig)
+                .filter(CallTypeConfig.is_active.is_(True))
+                .options(
+                    selectinload(CallTypeConfig.eligible_ranks).selectinload(
+                        _CTER2.rank
+                    )
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    rank_groups = _build_rank_groups(ct_configs_for_groups)
+
+    duty_eligible_ranks = await _get_duty_eligible_ranks(db)
     duty_staff = (
-        db.query(Staff)
-        .filter(Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks)))
+        (
+            await db.execute(
+                select(Staff).filter(
+                    Staff.active.is_(True), Staff.rank.in_(list(duty_eligible_ranks))
+                )
+            )
+        )
+        .scalars()
         .all()
     )
     mo_pool = [PersonInfo(id=s.id, name=s.name, rank=s.rank) for s in duty_staff]
@@ -1555,12 +2034,19 @@ def view_duties(config_id: int, db: DBSession = Depends(get_db)):
     ]
     mo1_by_date = {
         c.date: c.staff_id
-        for c in db.query(CallAssignment).filter(
-            CallAssignment.config_id == config_id,
-            CallAssignment.call_type == "MO1",
-        ).all()
+        for c in (
+            await db.execute(
+                select(CallAssignment).filter(
+                    CallAssignment.config_id == config_id,
+                    CallAssignment.call_type == "MO1",
+                )
+            )
+        )
+        .scalars()
+        .all()
     }
     duty_stats = compute_duty_stats(duty_results, mo_pool, mo1_by_date)
+    await _apply_day_flags(config_id, db, day_rosters)
 
     return DutyRosterResponse(
         year=config.year,
@@ -1568,13 +2054,14 @@ def view_duties(config_id: int, db: DBSession = Depends(get_db)):
         days=day_rosters,
         duty_stats=duty_stats,
         call_type_columns=ct_columns,
+        call_type_rank_groups=rank_groups,
     )
 
 
-# ── Duty Swap (validated drag-and-drop) ─────────────────────────────────
+# â”€â”€ Duty Swap (validated drag-and-drop) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 
-def _validate_duty_swap(
+async def _validate_duty_swap(
     config_id: int,
     target_date: date,
     duty_type: str,
@@ -1583,7 +2070,7 @@ def _validate_duty_swap(
     to_staff: Staff,
     old_assignment_id: int | None,
     duplicate: bool,
-    db: DBSession,
+    db: AsyncSession,
 ) -> list[str]:
     """Server-side constraint check for placing `to_staff` into a duty slot.
 
@@ -1596,29 +2083,47 @@ def _validate_duty_swap(
 
     # 1. Leave that day
     leave_hit = (
-        db.query(Leave)
-        .filter(Leave.staff_id == to_staff.id, Leave.date == target_date)
-        .first()
-    )
+        await db.execute(
+            select(Leave).filter(
+                Leave.staff_id == to_staff.id, Leave.date == target_date
+            )
+        )
+    ).scalar_one_or_none()
     if leave_hit:
         violations.append(
             f"{to_staff.name} is on leave ({leave_hit.leave_type or 'Leave'}) on {target_date}"
         )
 
     # 2. Post-call from a 24h call the previous day
-    ct_config_dict = _load_ct_config_dict(db)
+    ct_config_dict = await _load_ct_config_dict(db)
     call_rows = (
-        db.query(CallAssignment)
-        .filter(CallAssignment.config_id == config_id)
+        (
+            await db.execute(
+                select(CallAssignment).filter(CallAssignment.config_id == config_id)
+            )
+        )
+        .scalars()
         .all()
     )
     assignments_by_date: dict[date, dict[int, str]] = defaultdict(dict)
     for r in call_rows:
         assignments_by_date[r.date][r.staff_id] = r.call_type
-    config = db.query(MonthlyConfig).get(config_id)
-    stepdown_dates = {sd.date for sd in config.stepdown_days} if config else set()
+    stepdown_dates = {
+        sd.date
+        for sd in (
+            await db.execute(
+                select(StepdownDay).filter(StepdownDay.config_id == config_id)
+            )
+        )
+        .scalars()
+        .all()
+    }
     if not check_post_call(
-        to_staff.id, target_date, dict(assignments_by_date), stepdown_dates, ct_config_dict
+        to_staff.id,
+        target_date,
+        dict(assignments_by_date),
+        stepdown_dates,
+        ct_config_dict,
     ):
         violations.append(
             f"{to_staff.name} is post-call on {target_date} (had a 24h call the previous day)"
@@ -1632,12 +2137,16 @@ def _validate_duty_swap(
         blocked_sessions = {session_val, Session.FULL_DAY}
 
     same_day = (
-        db.query(DutyAssignment)
-        .filter(
-            DutyAssignment.config_id == config_id,
-            DutyAssignment.date == target_date,
-            DutyAssignment.staff_id == to_staff.id,
+        (
+            await db.execute(
+                select(DutyAssignment).filter(
+                    DutyAssignment.config_id == config_id,
+                    DutyAssignment.date == target_date,
+                    DutyAssignment.staff_id == to_staff.id,
+                )
+            )
         )
+        .scalars()
         .all()
     )
     for d in same_day:
@@ -1659,7 +2168,7 @@ def _validate_duty_swap(
 
     # 5. Duty-eligible rank (for non-Admin assignments)
     if duty_type != "Admin":
-        eligible_ranks = _get_duty_eligible_ranks(db)
+        eligible_ranks = await _get_duty_eligible_ranks(db)
         if eligible_ranks and to_staff.rank not in eligible_ranks:
             violations.append(
                 f"{to_staff.name} ({to_staff.rank}) is not a duty-eligible rank"
@@ -1668,18 +2177,25 @@ def _validate_duty_swap(
     # 6. Per-resource rank eligibility (e.g. SR/SSR not eligible for MOPD).
     if location and duty_type not in ("Admin", "Ward MO", "EOT MO"):
         sess_v = session_val.value if hasattr(session_val, "value") else session_val
-        # Match by (room, session) — consultant_id may not be on the request.
+        # Match by (room, session) â€” consultant_id may not be on the request.
         tpls = (
-            db.query(ResourceTemplate)
-            .filter(
-                ResourceTemplate.is_active.is_(True),
-                ResourceTemplate.room == location,
-                ResourceTemplate.session == sess_v,
+            (
+                await db.execute(
+                    select(ResourceTemplate).filter(
+                        ResourceTemplate.is_active.is_(True),
+                        ResourceTemplate.room == location,
+                        ResourceTemplate.session == sess_v,
+                    )
+                )
             )
+            .scalars()
             .all()
         )
         if tpls:
-            rank_name_by_id = {r.id: r.name for r in db.query(RankConfig).all()}
+            rank_name_by_id = {
+                r.id: r.name
+                for r in (await db.execute(select(RankConfig))).scalars().all()
+            }
             allowed: set[str] = set()
             any_restricted = False
             for tpl in tpls:
@@ -1696,18 +2212,18 @@ def _validate_duty_swap(
 
 
 @router.post("/roster/{config_id}/duty-swap", response_model=DutySwapResponse)
-def duty_swap(
-    config_id: int, payload: DutySwapRequest, db: DBSession = Depends(get_db)
+async def duty_swap(
+    config_id: int, payload: DutySwapRequest, db: AsyncSession = Depends(get_db)
 ):
     """Validate then apply a duty-roster drag-and-drop change.
 
     On constraint violations, returns `{ok: false, violations: [...]}` WITHOUT
     applying. Caller may re-submit with `force=true` to override.
     """
-    config = db.query(MonthlyConfig).get(config_id)
+    config = await db.get(MonthlyConfig, config_id)
     if not config:
         raise HTTPException(404, "Config not found")
-    to_staff = db.query(Staff).get(payload.to_staff_id)
+    to_staff = await db.get(Staff, payload.to_staff_id)
     if not to_staff:
         raise HTTPException(404, "Target staff not found")
 
@@ -1721,7 +2237,7 @@ def duty_swap(
     # If duplicating, the old row stays; pass old_assignment_id=None to validator.
     old_id_for_validation = None if payload.duplicate else payload.old_assignment_id
 
-    violations = _validate_duty_swap(
+    violations = await _validate_duty_swap(
         config_id,
         payload.date,
         payload.duty_type,
@@ -1738,11 +2254,13 @@ def duty_swap(
 
     # Apply (mirror create_duty_override)
     if not payload.duplicate and payload.old_assignment_id is not None:
-        old = db.query(DutyAssignment).get(payload.old_assignment_id)
+        old = await db.get(DutyAssignment, payload.old_assignment_id)
         if old and old.config_id == config_id:
-            db.delete(old)
+            await db.delete(old)
 
-    cons_names = {s.id: s.name for s in db.query(Staff).all()}
+    cons_names = {
+        s.id: s.name for s in (await db.execute(select(Staff))).scalars().all()
+    }
     new_da = DutyAssignment(
         config_id=config_id,
         date=payload.date,
@@ -1755,8 +2273,8 @@ def duty_swap(
         clinic_type=payload.clinic_type,
     )
     db.add(new_da)
-    db.commit()
-    db.refresh(new_da)
+    await db.commit()
+    await db.refresh(new_da)
 
     return DutySwapResponse(
         ok=True,
@@ -1770,7 +2288,9 @@ def duty_swap(
             duty_type=new_da.duty_type,
             location=new_da.location,
             consultant_id=new_da.consultant_id,
-            consultant_name=cons_names.get(new_da.consultant_id) if new_da.consultant_id else None,
+            consultant_name=cons_names.get(new_da.consultant_id)
+            if new_da.consultant_id
+            else None,
             clinic_type=new_da.clinic_type,
             is_manual_override=True,
         ),

@@ -257,8 +257,8 @@ class MonthlyConfig(Base):
     stepdown_days = relationship(
         "StepdownDay", back_populates="config", cascade="all, delete-orphan"
     )
-    evening_ot_dates = relationship(
-        "EveningOTDate", back_populates="config", cascade="all, delete-orphan"
+    ext_ot_dates = relationship(
+        "ExtOTDate", back_populates="config", cascade="all, delete-orphan"
     )
     call_assignments = relationship(
         "CallAssignment", back_populates="config", cascade="all, delete-orphan"
@@ -328,14 +328,14 @@ class StepdownDay(Base):
     __table_args__ = (UniqueConstraint("config_id", "date"),)
 
 
-class EveningOTDate(Base):
-    __tablename__ = "evening_ot_date"
+class ExtOTDate(Base):
+    __tablename__ = "ext_ot_date"
 
     id = Column(Integer, primary_key=True)
     config_id = Column(Integer, ForeignKey("monthly_config.id"), nullable=False)
     date = Column(Date, nullable=False)
 
-    config = relationship("MonthlyConfig", back_populates="evening_ot_dates")
+    config = relationship("MonthlyConfig", back_populates="ext_ot_dates")
 
     __table_args__ = (UniqueConstraint("config_id", "date"),)
 

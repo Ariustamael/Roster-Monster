@@ -85,6 +85,17 @@ export default function LegendModal({ onClose }: Props) {
           <div>Block — staff requested NOT to be on call this date.</div>
         </div>
 
+        <div style={sectionTitle}>Day card header</div>
+        <div style={row}>
+          <div style={sampleBox}>
+            <span style={{
+              fontSize: 10, fontWeight: 600, padding: "1px 5px", borderRadius: 3,
+              background: "#fef3c7", color: "#92400e", border: "1px solid #fcd34d",
+            }}>✎ edited</span>
+          </div>
+          <div>This day's resources have been customised from the weekly default — per-day overrides are active. Use <em>Edit Resources</em> on the day card to view or revert them.</div>
+        </div>
+
         <div style={sectionTitle}>Action icons</div>
         <div style={row}>
           <div style={sampleBox}><span style={{ fontSize: 16 }}>⧉</span></div>
@@ -96,7 +107,7 @@ export default function LegendModal({ onClose }: Props) {
         </div>
         <div style={row}>
           <div style={sampleBox}><span style={{ fontSize: 14 }}>✎</span></div>
-          <div>Manual override marker — non-interactive; indicates this assignment was edited by hand rather than produced by the solver.</div>
+          <div>Manual override marker — this individual assignment was set by hand, not produced by the solver.</div>
         </div>
 
         <div style={sectionTitle}>Call roster actions</div>
@@ -113,9 +124,9 @@ export default function LegendModal({ onClose }: Props) {
         <div style={sectionTitle}>Outlines & highlights</div>
         <div style={row}>
           <div style={sampleBox}>
-            <span style={{ padding: "2px 8px", border: "2px solid #2563eb", borderRadius: 4, fontSize: 12 }}>Name</span>
+            <span style={{ padding: "2px 8px", border: "2px solid var(--sem-multi)", borderRadius: 4, fontSize: 12 }}>Name</span>
           </div>
-          <div><strong style={{ color: "#2563eb" }}>Blue</strong> — legitimate multi-roster (same person assigned to more than one slot intentionally).</div>
+          <div><strong style={{ color: "var(--sem-multi)" }}>Violet</strong> — legitimate multi-roster (same person assigned to more than one slot intentionally).</div>
         </div>
         <div style={row}>
           <div style={sampleBox}>

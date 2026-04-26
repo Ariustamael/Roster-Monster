@@ -28,6 +28,8 @@ export interface DayRoster {
   consultant_oncall: string | null;
   ac_oncall: string | null;
   call_slots: Record<string, string | null>;
+  ward_mo: string[];
+  eot_mo: string[];
 }
 
 export interface RosterResponse {
@@ -37,6 +39,7 @@ export interface RosterResponse {
   violations: string[];
   fairness: Record<string, FairnessStats>;
   call_type_columns: string[];
+  call_type_rank_groups: Record<string, string>;
 }
 
 export interface FairnessStats {
@@ -66,6 +69,8 @@ export interface DayDutyRoster {
   day_name: string;
   is_weekend: boolean;
   is_ph: boolean;
+  is_stepdown: boolean;
+  is_ext_ot: boolean;
   consultant_oncall: string | null;
   ac_oncall: string | null;
   call_slots: Record<string, string | null>;
@@ -90,6 +95,7 @@ export interface DayDutyRoster {
   }[];
   warnings?: string[];
   shortfall?: number;
+  has_day_override?: boolean;
 }
 
 export interface DutyRosterResponse {
@@ -98,6 +104,7 @@ export interface DutyRosterResponse {
   days: DayDutyRoster[];
   duty_stats: Record<string, DutyStats>;
   call_type_columns: string[];
+  call_type_rank_groups: Record<string, string>;
 }
 
 export interface DutyStats {
@@ -213,7 +220,7 @@ export interface StepdownDay {
   date: string;
 }
 
-export interface EveningOTDate {
+export interface ExtOTDate {
   id: number;
   date: string;
 }
@@ -232,8 +239,9 @@ export interface ResourceDay {
   on_call: number;
   post_call: number;
   available: number;
-  needed_for_duties: number;
-  surplus: number;
+  duty_slots: number;
+  capacity_slots: number;
+  balance_slots: number | null;
 }
 
 export interface ResourcesResponse {

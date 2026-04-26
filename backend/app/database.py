@@ -1,26 +1,45 @@
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase, sessionmaker
 import os
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "roster.db")
-os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+from .config import settings
 
-engine = create_engine(f"sqlite:///{DB_PATH}", echo=False)
-SessionLocal = sessionmaker(bind=engine)
+# Derive the synchronous URL from the async one (needed for legacy migrations + inspect).
+# sqlite+aiosqlite:// → sqlite:// | postgresql+asyncpg:// → postgresql+psycopg2://
+_async_url = settings.DATABASE_URL
+_sync_url = _async_url.replace("sqlite+aiosqlite://", "sqlite://").replace(
+    "postgresql+asyncpg://", "postgresql+psycopg2://"
+)
+
+# Ensure the data directory exists for SQLite paths
+if _sync_url.startswith("sqlite:///"):
+    _db_file = _sync_url.replace("sqlite:///", "")
+    os.makedirs(os.path.dirname(os.path.abspath(_db_file)), exist_ok=True)
+
+# Async engine — used by all API request handlers
+engine = create_async_engine(_async_url, echo=False)
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+# Sync engine — used only by the legacy _migrate() runner at startup
+_sync_engine = create_engine(_sync_url, echo=False)
+# Synchronous session factory — used inside _migrate() only
+SessionLocal = sessionmaker(bind=_sync_engine)
 
 
 class Base(DeclarativeBase):
     pass
 
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
+# Legacy migration runner — handles schema evolution for existing databases that
+# pre-date Alembic. Do NOT add new migrations here; use Alembic instead:
+#   alembic revision --autogenerate -m "description"
+#   alembic upgrade head
 def _migrate(engine):
     from sqlalchemy import inspect, text
 
@@ -574,7 +593,9 @@ def _migrate(engine):
                     conn.execute(
                         text(f"ALTER TABLE staff ADD COLUMN {col} BOOLEAN DEFAULT 1")
                     )
-                    conn.execute(text(f"UPDATE staff SET {col} = 1 WHERE {col} IS NULL"))
+                    conn.execute(
+                        text(f"UPDATE staff SET {col} = 1 WHERE {col} IS NULL")
+                    )
 
     # ── Add updated_at timestamps ────────────────────────────────────────
     insp = inspect(engine)
@@ -606,30 +627,44 @@ def _migrate(engine):
         if "priority" not in cols:
             with engine.begin() as conn:
                 conn.execute(
-                    text("ALTER TABLE resource_template ADD COLUMN priority INTEGER DEFAULT 5")
+                    text(
+                        "ALTER TABLE resource_template ADD COLUMN priority INTEGER DEFAULT 5"
+                    )
                 )
                 conn.execute(
-                    text("UPDATE resource_template SET priority = 5 WHERE priority IS NULL")
+                    text(
+                        "UPDATE resource_template SET priority = 5 WHERE priority IS NULL"
+                    )
                 )
                 # One-time: normalize all existing OT templates to Full Day so
                 # previously-created AM/PM OTs become single full-day OTs.
                 conn.execute(
-                    text("UPDATE resource_template SET session = 'FULL_DAY' WHERE resource_type = 'ot'")
+                    text(
+                        "UPDATE resource_template SET session = 'FULL_DAY' WHERE resource_type = 'ot'"
+                    )
                 )
         if "max_registrars" not in cols:
             with engine.begin() as conn:
                 conn.execute(
-                    text("ALTER TABLE resource_template ADD COLUMN max_registrars INTEGER DEFAULT 1")
+                    text(
+                        "ALTER TABLE resource_template ADD COLUMN max_registrars INTEGER DEFAULT 1"
+                    )
                 )
                 conn.execute(
-                    text("UPDATE resource_template SET max_registrars = 1 WHERE max_registrars IS NULL")
+                    text(
+                        "UPDATE resource_template SET max_registrars = 1 WHERE max_registrars IS NULL"
+                    )
                 )
 
     # Collapse legacy MOPD / CAT-A duty types into Clinic. Templates and priority
     # now distinguish kinds of clinic, so the dedicated enum values are obsolete.
     if "duty_assignment" in tables:
         with engine.begin() as conn:
-            conn.execute(text("UPDATE duty_assignment SET duty_type='Clinic' WHERE duty_type IN ('MOPD','CAT-A')"))
+            conn.execute(
+                text(
+                    "UPDATE duty_assignment SET duty_type='Clinic' WHERE duty_type IN ('MOPD','CAT-A')"
+                )
+            )
 
     # Add eligible_rank_ids column to resource_template for per-resource rank
     # eligibility (e.g. SR/SSR not eligible for MOPD).
@@ -638,7 +673,9 @@ def _migrate(engine):
         if "eligible_rank_ids" not in rt_cols:
             with engine.begin() as conn:
                 conn.execute(
-                    text("ALTER TABLE resource_template ADD COLUMN eligible_rank_ids VARCHAR(100)")
+                    text(
+                        "ALTER TABLE resource_template ADD COLUMN eligible_rank_ids VARCHAR(100)"
+                    )
                 )
         if "effective_date" not in rt_cols:
             with engine.begin() as conn:
@@ -653,12 +690,24 @@ def _migrate(engine):
         if "clinic_type" not in da_cols:
             with engine.begin() as conn:
                 conn.execute(
-                    text("ALTER TABLE duty_assignment ADD COLUMN clinic_type VARCHAR(40)")
+                    text(
+                        "ALTER TABLE duty_assignment ADD COLUMN clinic_type VARCHAR(40)"
+                    )
                 )
 
+    # Rename evening_ot_date → ext_ot_date
+    if "evening_ot_date" in tables and "ext_ot_date" not in tables:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE evening_ot_date RENAME TO ext_ot_date"))
 
-def init_db():
+
+async def init_db():
     from . import models  # noqa: F401 — ensure all models registered with Base
 
-    Base.metadata.create_all(bind=engine)
-    _migrate(engine)
+    # Create tables via async engine
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    # Legacy migration runner uses the sync engine (SQLite only)
+    if _sync_url.startswith("sqlite"):
+        _migrate(_sync_engine)

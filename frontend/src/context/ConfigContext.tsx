@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { MonthlyConfig } from "../types";
 
@@ -21,20 +22,24 @@ export function useConfig() {
 }
 
 export function ConfigProvider({ children }: { children: ReactNode }) {
-  const [configs, setConfigs] = useState<MonthlyConfig[]>([]);
+  const queryClient = useQueryClient();
   const [activeId, setActiveId] = useState<number | null>(null);
 
-  async function reload() {
-    const list = await api.getConfigs();
-    setConfigs(list);
-    if (list.length > 0 && (activeId === null || !list.find((c) => c.id === activeId))) {
-      setActiveId(list[0].id);
-    }
-  }
+  const { data: configs = [] } = useQuery<MonthlyConfig[]>({
+    queryKey: ["configs"],
+    queryFn: () => api.getConfigs(),
+  });
 
+  // Auto-select first config if active selection is gone
   useEffect(() => {
-    reload();
-  }, []);
+    if (configs.length > 0 && (activeId === null || !configs.find((c) => c.id === activeId))) {
+      setActiveId(configs[0].id);
+    }
+  }, [configs, activeId]);
+
+  async function reload() {
+    await queryClient.invalidateQueries({ queryKey: ["configs"] });
+  }
 
   const active = configs.find((c) => c.id === activeId) ?? null;
 

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState, type DragEvent } from "react";
 import { api } from "../../api";
+import { useConfig } from "../../context/ConfigContext";
 import type { ResourceTemplate, Staff, CallTypeConfig } from "../../types";
 import { DAY_NAMES, CONS_RANKS, COLOR_PRESETS } from "./constants";
 import { useEscClose } from "../../hooks/useEscClose";
@@ -9,6 +10,7 @@ const SESSIONS = ["AM", "PM"] as const;
 const OT_SESSION_OPTIONS = ["AM", "PM", "Full Day"] as const;
 
 export default function ResourceTemplatesTab() {
+  const { active } = useConfig();
   const [templates, setTemplates] = useState<ResourceTemplate[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
@@ -17,6 +19,7 @@ export default function ResourceTemplatesTab() {
   const [editId, setEditId] = useState<number | null>(null);
   const [dragItem, setDragItem] = useState<{ id: number; type: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
 
   useEffect(() => {
@@ -178,13 +181,18 @@ export default function ResourceTemplatesTab() {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Resource</button>
-        {lastUpdated && (
-          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-            Last updated: {new Date(lastUpdated).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
-          </span>
-        )}
+      <div className="page-header" style={{ marginBottom: 12, alignItems: "flex-start" }}>
+        <h2>Clinic / OT Resources{active ? ` - ${new Date(active.year, active.month - 1, 1).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}` : ""}</h2>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+          <div className="btn-group">
+            <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ Add Resource</button>
+          </div>
+          {lastUpdated && (
+            <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
+              Last updated: {new Date(lastUpdated).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}
+            </span>
+          )}
+        </div>
       </div>
 
       <div className="resource-grid-container">
@@ -192,52 +200,78 @@ export default function ResourceTemplatesTab() {
           <thead>
             <tr>
               <th style={{ width: 50 }}></th>
-              {DAY_NAMES.map((d) => (
-                <th key={d} colSpan={2}>{d}</th>
-              ))}
+              {DAY_NAMES.map((d) => {
+                const collapsed = collapsedDays.has(d);
+                return (
+                  <th key={d} colSpan={collapsed ? 1 : 2} style={{ whiteSpace: "nowrap", padding: collapsed ? "4px 2px" : undefined, width: collapsed ? 20 : undefined }}>
+                    {!collapsed && <span style={{ marginRight: 6 }}>{d}</span>}
+                    <button
+                      onClick={() => setCollapsedDays(prev => {
+                        const next = new Set(prev);
+                        if (next.has(d)) next.delete(d); else next.add(d);
+                        return next;
+                      })}
+                      title={collapsed ? `Expand ${d}` : `Collapse ${d}`}
+                      style={{ fontSize: 10, padding: "1px 4px", border: "1px solid var(--border)", borderRadius: 3, background: "var(--bg)", color: "var(--text-muted)", cursor: "pointer" }}
+                    >{collapsed ? "+" : "−"}</button>
+                  </th>
+                );
+              })}
             </tr>
             <tr>
               <th></th>
-              {DAY_NAMES.map((d) => (
-                <Fragment key={d}>
-                  <th className="sub-col-header">Clinic</th>
-                  <th className="sub-col-header">OT</th>
-                </Fragment>
-              ))}
+              {DAY_NAMES.map((d) => {
+                const collapsed = collapsedDays.has(d);
+                if (collapsed) return <th key={d} style={{ width: 20, padding: 0 }} />;
+                return (
+                  <Fragment key={d}>
+                    <th className="sub-col-header">Clinic</th>
+                    <th className="sub-col-header">OT</th>
+                  </Fragment>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {SESSIONS.map((sess) => (
               <tr key={sess}>
                 <td className="session-label">{sess}</td>
-                {DAY_NAMES.map((day, dow) => (
-                  <Fragment key={`${day}-${sess}`}>
-                    {(["clinic", "ot"] as const).map((type) => (
-                      <td
-                        key={`${day}-${sess}-${type}`}
-                        className={`resource-cell ${dragItem && dragItem.type === type ? "drop-highlight" : ""}`}
-                        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
-                        onDrop={(e) => handleDrop(e, dow, sess, type)}
-                      >
-                        {grid[day][sess][type].map((t) => (
-                          <ResourceCard
-                            key={`${sess}-${t.id}`}
-                            template={t}
-                            isDragging={dragItem?.id === t.id}
-                            onDragStart={(e) => {
-                              e.dataTransfer.setData("text/plain", String(t.id));
-                              setDragItem({ id: t.id, type: t.resource_type });
-                            }}
-                            onDragEnd={() => setDragItem(null)}
-                            onClick={() => setEditId(t.id)}
-                            onDuplicate={() => handleDuplicate(t.id)}
-                            onCardDrop={() => handleCardReorder(t.id)}
-                          />
-                        ))}
-                      </td>
-                    ))}
-                  </Fragment>
-                ))}
+                {DAY_NAMES.map((day, dow) => {
+                  const collapsed = collapsedDays.has(day);
+                  if (collapsed) {
+                    return (
+                      <td key={`${day}-${sess}`} style={{ width: 20, padding: 0, background: "var(--bg-muted, #f8fafc)" }} />
+                    );
+                  }
+                  return (
+                    <Fragment key={`${day}-${sess}`}>
+                      {(["clinic", "ot"] as const).map((type) => (
+                        <td
+                          key={`${day}-${sess}-${type}`}
+                          className={`resource-cell ${dragItem && dragItem.type === type ? "drop-highlight" : ""}`}
+                          onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; }}
+                          onDrop={(e) => handleDrop(e, dow, sess, type)}
+                        >
+                          {grid[day][sess][type].map((t) => (
+                            <ResourceCard
+                              key={`${sess}-${t.id}`}
+                              template={t}
+                              isDragging={dragItem?.id === t.id}
+                              onDragStart={(e) => {
+                                e.dataTransfer.setData("text/plain", String(t.id));
+                                setDragItem({ id: t.id, type: t.resource_type });
+                              }}
+                              onDragEnd={() => setDragItem(null)}
+                              onClick={() => setEditId(t.id)}
+                              onDuplicate={() => handleDuplicate(t.id)}
+                              onCardDrop={() => handleCardReorder(t.id)}
+                            />
+                          ))}
+                        </td>
+                      ))}
+                    </Fragment>
+                  );
+                })}
               </tr>
             ))}
           </tbody>

@@ -20,7 +20,10 @@ def is_overnight(
 
 
 def is_24h_call(
-    call_type: str, d: date, stepdown_dates: set[date], call_type_configs: dict | None = None
+    call_type: str,
+    d: date,
+    stepdown_dates: set[date],
+    call_type_configs: dict | None = None,
 ) -> bool:
     """True for overnight calls that come with post-call rest (i.e., a real 24h shift).
     Night-float types are overnight but not 24h — the person works the following day."""
@@ -166,7 +169,11 @@ def validate_full_roster(
             day_labels_gap = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
             in_nf_run_gap = False
             if cfg_for_gap.get("is_night_float") and cfg_for_gap.get("night_float_run"):
-                run_days_gap = {t.strip() for t in cfg_for_gap["night_float_run"].split(",") if t.strip()}
+                run_days_gap = {
+                    t.strip()
+                    for t in cfg_for_gap["night_float_run"].split(",")
+                    if t.strip()
+                }
                 in_nf_run_gap = day_labels_gap[d.weekday()] in run_days_gap
             if not in_nf_run_gap and not check_call_gap(
                 pid, d, ctype, assignments, stepdown_dates, call_type_configs
@@ -185,10 +192,14 @@ def validate_full_roster(
             day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
             in_nf_run = False
             if cfg.get("is_night_float") and cfg.get("night_float_run"):
-                run_days = {t.strip() for t in cfg["night_float_run"].split(",") if t.strip()}
+                run_days = {
+                    t.strip() for t in cfg["night_float_run"].split(",") if t.strip()
+                }
                 in_nf_run = day_labels[d.weekday()] in run_days
-            if max_consec and not in_nf_run and not check_max_consecutive(
-                pid, d, ctype, assignments, max_consec
+            if (
+                max_consec
+                and not in_nf_run
+                and not check_max_consecutive(pid, d, ctype, assignments, max_consec)
             ):
                 violations.append(
                     f"{d}: {name} assigned {ctype} exceeds max consecutive ({max_consec})"

@@ -197,7 +197,7 @@ class StepdownDayOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class EveningOTDateOut(BaseModel):
+class ExtOTDateOut(BaseModel):
     id: int
     date: date
 
@@ -215,7 +215,7 @@ class StepdownDayCreate(BaseModel):
     date: date
 
 
-class EveningOTDateCreate(BaseModel):
+class ExtOTDateCreate(BaseModel):
     date: date
 
 
@@ -253,6 +253,13 @@ class CallSwapResponse(BaseModel):
     assignment: Optional[CallAssignmentOut] = None
 
 
+class CallAssignmentRestore(BaseModel):
+    date: date
+    staff_id: int
+    call_type: str
+    is_manual_override: bool = False
+
+
 class DayRoster(BaseModel):
     date: date
     day_name: str
@@ -262,6 +269,8 @@ class DayRoster(BaseModel):
     consultant_oncall: Optional[str] = None
     ac_oncall: Optional[str] = None
     call_slots: dict[str, Optional[str]] = {}
+    ward_mo: list[str] = []
+    eot_mo: list[str] = []
 
 
 class FairnessStats(BaseModel):
@@ -279,6 +288,7 @@ class RosterResponse(BaseModel):
     violations: list[str]
     fairness: dict[str, dict]
     call_type_columns: list[str] = []
+    call_type_rank_groups: dict[str, str] = {}
 
 
 # ── Resource Template ────────────────────────────────────────────────────
@@ -359,6 +369,7 @@ class DutyAssignmentOut(BaseModel):
 
 class DutyAssignmentRestore(BaseModel):
     """Lightweight payload for bulk-restoring duty assignments (used by Undo)."""
+
     date: date
     staff_id: int
     session: Session
@@ -412,6 +423,9 @@ class DayDutyRoster(BaseModel):
     # Total staffing shortfall — sum of (staff_required - assigned) across all
     # expected resources on this day, where the diff is positive.
     shortfall: int = 0
+    is_stepdown: bool = False
+    is_ext_ot: bool = False
+    has_day_override: bool = False
 
 
 class DutyRosterResponse(BaseModel):
@@ -420,6 +434,7 @@ class DutyRosterResponse(BaseModel):
     days: list[DayDutyRoster]
     duty_stats: dict[str, dict]
     call_type_columns: list[str] = []
+    call_type_rank_groups: dict[str, str] = {}
 
 
 # ── Rank Config ──────────────────────────────────────────────────────────

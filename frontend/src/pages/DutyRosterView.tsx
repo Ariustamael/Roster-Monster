@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useConfig } from "../context/ConfigContext";
-import type { DutyRosterResponse, DayDutyRoster, DutyAssignment, CallAssignment } from "../types";
+import { useRosterSync } from "../context/RosterSyncContext";
+import type { DutyRosterResponse, DayDutyRoster, DutyAssignment, CallAssignment, Staff, RankConfig } from "../types";
 import { monthName } from "../utils";
 import DayResourcesModal from "../components/DayResourcesModal";
+import LegendModal from "../components/LegendModal";
+import ExportButton from "../components/ExportButton";
 
 interface DragState {
   kind: "duty" | "call";
@@ -20,6 +23,7 @@ interface DragState {
 
 export default function DutyRosterView() {
   const { active } = useConfig();
+  const { syncVersion, bump } = useRosterSync();
   const [roster, setRoster] = useState<DutyRosterResponse | null>(null);
   const [callAssignments, setCallAssignments] = useState<CallAssignment[]>([]);
   const [loading, setLoading] = useState(false);
@@ -33,6 +37,12 @@ export default function DutyRosterView() {
   const [historyVersion, setHistoryVersion] = useState(0);
   const [collapsedDays, setCollapsedDays] = useState<Set<string>>(new Set());
   const [editingDay, setEditingDay] = useState<string | null>(null);
+  const [showLegend, setShowLegend] = useState(false);
+  const [hoveredName, setHoveredName] = useState<string | null>(null);
+  const [filterName, setFilterName] = useState("");
+  const [showMyRoster, setShowMyRoster] = useState(false);
+  const [myRosterName, setMyRosterName] = useState("");
+  const [staffRankOrder, setStaffRankOrder] = useState<Map<number, number>>(new Map());
 
   function bumpHistoryVersion() { setHistoryVersion(v => v + 1); }
 
@@ -167,15 +177,31 @@ export default function DutyRosterView() {
       if (data) setRoster(data);
     });
     refreshCalls();
-  }, [configId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [configId, syncVersion]);
+
+  useEffect(() => {
+    Promise.all([api.getStaff(), api.getRanks()]).then(([staff, ranks]: [Staff[], RankConfig[]]) => {
+      const rankOrder = new Map(ranks.map(r => [r.name, r.display_order]));
+      const map = new Map(staff.map(s => [s.id, rankOrder.get(s.rank) ?? 999]));
+      setStaffRankOrder(map);
+    }).catch(() => {});
+  }, []);
 
   async function generate() {
     if (!configId) return;
     setLoading(true);
     setError("");
     try {
+      await api.generateCallRoster(configId);
+    } catch {
+      // Call roster may fail — not fatal if duty-only mode
+    }
+    try {
       const data = await api.generateDutyRoster(configId);
       setRoster(data);
+      await refreshCalls();
+      bump();
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -183,7 +209,7 @@ export default function DutyRosterView() {
     }
   }
 
-  async function exportFile(format: "original" | "clean") {
+  async function exportFile(format: "full" | "clean") {
     try {
       await api.exportRoster(configId, format);
     } catch (e: any) {
@@ -225,6 +251,7 @@ export default function DutyRosterView() {
       });
       const data = await api.viewDutyRoster(configId);
       setRoster(data);
+      bump();
     } catch (e: any) {
       setError(e.message);
     }
@@ -257,6 +284,7 @@ export default function DutyRosterView() {
       // Duty roster derives from call assignments (Ward MO etc.), refresh it too
       const data = await api.viewDutyRoster(configId).catch(() => null);
       if (data) setRoster(data);
+      bump();
     } catch (e: any) {
       setError(e.message);
     }
@@ -272,6 +300,7 @@ export default function DutyRosterView() {
     try {
       const data = await api.regenerateDutyDay(configId, targetDate);
       setRoster(data);
+      bump();
     } catch (e: any) {
       setError(e.message);
     }
@@ -287,6 +316,7 @@ export default function DutyRosterView() {
       await api.resetAllDutyAssignments(configId);
       const data = await api.generateDutyRoster(configId);
       setRoster(data);
+      bump();
     } catch (e: any) {
       setError(e.message);
     }
@@ -304,6 +334,7 @@ export default function DutyRosterView() {
       await api.restoreDutyAssignments(configId, rows, targetDate);
       const data = await api.viewDutyRoster(configId);
       setRoster(data);
+      bump();
     } catch (e: any) {
       setError(e.message);
     }
@@ -324,6 +355,7 @@ export default function DutyRosterView() {
           await api.restoreDutyAssignments(configId, flattenDays(dayDays), date);
           const data = await api.viewDutyRoster(configId);
           setRoster(data);
+          bump();
         } catch (e: any) {
           setError(e.message);
         }
@@ -341,6 +373,7 @@ export default function DutyRosterView() {
       }
       const data = await api.viewDutyRoster(configId);
       setRoster(data);
+      bump();
     } catch (e: any) {
       setError(e.message);
     }
@@ -348,44 +381,42 @@ export default function DutyRosterView() {
 
   if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
 
+  const filterTerm = filterName.trim().toLowerCase();
+  const effectiveCollapsed = filterTerm
+    ? new Set(
+        roster?.days
+          .filter((d) => !dayContainsName(d, filterTerm))
+          .map((d) => d.date) ?? []
+      )
+    : collapsedDays;
+
   const callColumns = roster?.call_type_columns ?? [];
+  const rankGroups = roster?.call_type_rank_groups ?? {};
+  const _now = new Date();
+  const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
 
   return (
     <>
       <div className="page-header">
-        <h2>Duty Roster {roster ? `- ${monthName(roster.month)} ${roster.year}` : ""}</h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <h2>Duty Roster {roster ? `- ${monthName(roster.month)} ${roster.year}` : ""}</h2>
+        </div>
         <div className="btn-group">
-          <button className="btn btn-primary" onClick={generate} disabled={loading}>
-            {loading ? <><span className="spinner" /> Generating...</> : "Generate Duty Roster"}
-          </button>
           {roster && (
             <>
               <button
                 className="btn btn-secondary"
                 onClick={handleUndo}
                 disabled={historyRef.current.length === 0}
-                title={historyRef.current.length === 0
-                  ? "No actions to undo"
-                  : `Undo last change (${historyRef.current.length} in history)`}
-              >
-                ⟲ Undo
-              </button>
-              <button
-                className="btn btn-secondary"
-                onClick={handleResetAll}
-                title="Wipe ALL duty assignments for the month and re-solve from scratch"
-                style={{ color: "var(--danger)" }}
-              >
-                ↺ Reset All
-              </button>
-              <button className="btn btn-secondary" onClick={() => exportFile("original")}>
-                Export Original
-              </button>
-              <button className="btn btn-secondary" onClick={() => exportFile("clean")}>
-                Export Clean
-              </button>
+                title={historyRef.current.length === 0 ? "No actions to undo" : `Undo last change (${historyRef.current.length} in history)`}
+              >Undo</button>
+              <button className="btn btn-danger" onClick={handleResetAll} title="Wipe ALL duty assignments for the month and re-solve from scratch">Reset All</button>
+              <ExportButton onExport={exportFile} />
             </>
           )}
+          <button className="btn btn-primary" onClick={generate} disabled={loading}>
+            {loading ? <><span className="spinner" /> Generating...</> : "Generate Roster"}
+          </button>
         </div>
       </div>
 
@@ -393,45 +424,71 @@ export default function DutyRosterView() {
 
       {roster && (
         <>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", margin: "8px 0" }}>
-            <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0 }}>
-              Drag a name to move it · drag the <strong>⧉</strong> icon to duplicate · click <strong>×</strong> to clear (free MOs auto-fill Admin) · multi-rostered names outlined in <span style={{color: "#2563eb"}}>blue</span> · conflicts outlined in <span style={{color: "#f59e0b"}}>amber</span>
-            </p>
-            <span style={{ flex: 1 }} />
-            <button className="btn btn-secondary" style={{ fontSize: 11, padding: "2px 8px" }}
-              onClick={() => {
-                const today = new Date().toISOString().slice(0, 10);
-                const inMonth = roster.days.find(d => d.date === today);
-                const target = inMonth ? today : roster.days[0]?.date;
-                if (!target) return;
-                // Expand if collapsed, then scroll into view
-                setCollapsedDays(prev => {
-                  const next = new Set(prev);
-                  next.delete(target);
-                  return next;
-                });
-                setTimeout(() => {
-                  const el = document.getElementById(`day-${target}`);
-                  if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-                }, 50);
-              }}
-              title="Scroll to today (or first day of month if today isn't in this month)"
-            >📅 Today</button>
-            <button className="btn btn-secondary" style={{ fontSize: 11, padding: "2px 8px" }}
-              onClick={() => toggleColAllDays("admin")}
-              title="Show/hide the Admin column for all days"
-            >Toggle Admin</button>
-            <button className="btn btn-secondary" style={{ fontSize: 11, padding: "2px 8px" }}
-              onClick={() => toggleColAllDays("unavailable")}
-              title="Show/hide the Unavailable column for all days"
-            >Toggle Unavail</button>
-            <button className="btn btn-secondary" style={{ fontSize: 11, padding: "2px 8px" }}
-              onClick={() => {
-                setCollapsedDays(new Set(roster.days.map(d => d.date)));
-              }}>Collapse All</button>
-            <button className="btn btn-secondary" style={{ fontSize: 11, padding: "2px 8px" }}
-              onClick={() => setCollapsedDays(new Set())}>Expand All</button>
-          </div>
+          {/* View controls — compact secondary toolbar */}
+          {(() => {
+            const allDaysCollapsed = roster.days.every(d => collapsedDays.has(d.date));
+            const weekendDates = roster.days.filter(d => d.is_weekend || d.is_ph).map(d => d.date);
+            const weekendsCollapsed = weekendDates.length > 0 && weekendDates.every(d => collapsedDays.has(d));
+            const adminHidden = roster.days.every(d => getColsForDay(d.date, d.is_weekend || d.is_ph).has("admin"));
+            const unavailHidden = roster.days.every(d => getColsForDay(d.date, d.is_weekend || d.is_ph).has("unavailable"));
+            const pillActive = { background: "#dbeafe", color: "#1d4ed8", border: "1px solid #93c5fd" };
+            const pillInactive = { background: "var(--surface)", color: "var(--text-muted)", border: "1px solid var(--border)" };
+            const pillBase = { fontSize: 11, padding: "2px 8px", borderRadius: 4, cursor: "pointer", fontWeight: 500 } as const;
+            const scrollToday = () => {
+              const _now = new Date();
+              const today = `${_now.getFullYear()}-${String(_now.getMonth() + 1).padStart(2, '0')}-${String(_now.getDate()).padStart(2, '0')}`;
+              const target = roster.days.find(d => d.date === today)?.date ?? roster.days[0]?.date;
+              if (!target) return;
+              setCollapsedDays(prev => { const next = new Set(prev); next.delete(target); return next; });
+              setTimeout(() => document.getElementById(`day-${target}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+            };
+            const pillToday = { background: "#16a34a", color: "#fff", border: "1px solid #15803d" };
+            return (
+              <div style={{ display: "flex", gap: 6, alignItems: "center", margin: "6px 0" }}>
+                {/* Left: search + My Roster + Today */}
+                <input
+                  type="text"
+                  placeholder="Find person..."
+                  value={filterName}
+                  onChange={(e) => setFilterName(e.target.value)}
+                  style={{
+                    padding: "2px 8px", fontSize: 11,
+                    border: "1px solid var(--border)", borderRadius: 4,
+                    width: 130, background: "var(--surface)", color: "var(--text)",
+                    outline: filterName ? "2px solid var(--primary)" : undefined,
+                  }}
+                />
+                {filterName && (
+                  <button style={{ ...pillBase, ...pillInactive, fontWeight: 700 }} onClick={() => setFilterName("")}>×</button>
+                )}
+                <button
+                  style={{ ...pillBase, ...pillInactive }}
+                  onClick={() => { setMyRosterName(filterName.trim()); setShowMyRoster(true); }}
+                  title="Generate a personal roster summary for one staff member"
+                >My Roster</button>
+                <button style={{ ...pillBase, ...pillToday }} onClick={scrollToday} title="Scroll to today">Today</button>
+
+                <span style={{ flex: 1 }} />
+
+                {/* Right: view toggles */}
+                <button style={{ ...pillBase, ...(adminHidden ? pillInactive : pillActive) }} onClick={() => toggleColAllDays("admin")} title="Show/hide Admin column">Admin</button>
+                <button style={{ ...pillBase, ...(unavailHidden ? pillInactive : pillActive) }} onClick={() => toggleColAllDays("unavailable")} title="Show/hide Unavailable column">Unavail</button>
+                <button style={{ ...pillBase, ...(weekendsCollapsed ? pillInactive : pillActive) }} onClick={() => {
+                  setCollapsedDays(prev => {
+                    const next = new Set(prev);
+                    if (!weekendsCollapsed) weekendDates.forEach(d => next.add(d));
+                    else weekendDates.forEach(d => next.delete(d));
+                    return next;
+                  });
+                }} title="Collapse/expand weekends and public holidays">Weekends</button>
+                <button style={{ ...pillBase, ...pillInactive }} onClick={() => allDaysCollapsed ? setCollapsedDays(new Set()) : setCollapsedDays(new Set(roster.days.map(d => d.date)))}>
+                  {allDaysCollapsed ? "⊞ Expand All" : "⊟ Collapse All"}
+                </button>
+                <button style={{ ...pillBase, ...pillInactive, fontWeight: 700 }} onClick={() => setShowLegend(true)} title="Show colour legend">?</button>
+              </div>
+            );
+          })()}
+
 
           {/* Sticky day navigator — click a chip to jump */}
           <div style={{
@@ -442,7 +499,6 @@ export default function DutyRosterView() {
           }}>
             {roster.days.map((d) => {
               const dd = d.date.slice(-2);
-              const unavailCount = d.unavailable.length;
               const isOff = d.is_weekend || d.is_ph;
               return (
                 <a
@@ -461,20 +517,15 @@ export default function DutyRosterView() {
                   style={{
                     fontSize: 11, padding: "3px 8px", borderRadius: 4,
                     textDecoration: "none",
-                    background: isOff ? "#fef3c7" : "var(--bg-muted, #f8fafc)",
-                    color: isOff ? "#92400e" : "var(--text)",
-                    border: "1px solid var(--border)",
+                    background: d.date === today ? "var(--surface)" : isOff ? "var(--sem-weekend)" : "var(--bg-muted, #f8fafc)",
+                    color: d.date === today ? "var(--primary)" : isOff ? "var(--sem-weekend-text)" : "var(--text)",
+                    border: d.date === today ? "2px solid var(--primary)" : "1px solid var(--border)",
+                    fontWeight: d.date === today ? 700 : undefined,
                     display: "inline-flex", alignItems: "center", gap: 4,
                   }}
                 >
                   <span style={{ fontWeight: 600 }}>{dd}</span>
                   <span style={{ color: "var(--text-muted)", fontSize: 10 }}>{d.day_name}</span>
-                  {unavailCount > 0 && (
-                    <span style={{
-                      background: "#fca5a5", color: "#7f1d1d",
-                      borderRadius: 8, padding: "0 4px", fontSize: 9, fontWeight: 700,
-                    }}>{unavailCount}</span>
-                  )}
                 </a>
               );
             })}
@@ -495,7 +546,9 @@ export default function DutyRosterView() {
                 onEditDayResources={(date) => setEditingDay(date)}
                 onUndoDay={handleUndoDay}
                 undoCount={undoCountForDate(day.date)}
-                collapsed={collapsedDays.has(day.date)}
+                isToday={day.date === today}
+                rankGroups={rankGroups}
+                collapsed={effectiveCollapsed.has(day.date)}
                 onToggleCollapse={() => setCollapsedDays(prev => {
                   const next = new Set(prev);
                   if (next.has(day.date)) next.delete(day.date); else next.add(day.date);
@@ -503,9 +556,21 @@ export default function DutyRosterView() {
                 })}
                 collapsedCols={getColsForDay(day.date, day.is_weekend || day.is_ph)}
                 onToggleCol={(col) => toggleColForDay(day.date, col)}
+                hoveredName={hoveredName}
+                onHoverName={setHoveredName}
+                filterTerm={filterTerm}
+                staffRankOrder={staffRankOrder}
               />
             ))}
         </>
+      )}
+      {showLegend && <LegendModal onClose={() => setShowLegend(false)} />}
+      {showMyRoster && roster && (
+        <MyRosterModal
+          roster={roster}
+          initialName={myRosterName}
+          onClose={() => setShowMyRoster(false)}
+        />
       )}
       {editingDay && (
         <DayResourcesModal
@@ -521,9 +586,34 @@ export default function DutyRosterView() {
   );
 }
 
+function dayContainsName(day: DayDutyRoster, term: string): boolean {
+  const names: (string | null | undefined)[] = [
+    day.consultant_oncall,
+    day.ac_oncall,
+    ...Object.values(day.call_slots),
+    ...day.ot_assignments.map((a) => a.staff_name),
+    ...day.eot_assignments.map((a) => a.staff_name),
+    ...day.am_clinics.map((a) => a.staff_name),
+    ...day.pm_clinics.map((a) => a.staff_name),
+    ...day.am_admin.map((a) => a.staff_name),
+    ...day.pm_admin.map((a) => a.staff_name),
+    ...day.unavailable.map((u) => u.staff_name),
+  ];
+  return names.some((n) => n?.toLowerCase().includes(term));
+}
+
+function sortByRankAlpha(arr: DutyAssignment[], rankOrder: Map<number, number>): DutyAssignment[] {
+  return [...arr].sort((a, b) => {
+    const ra = rankOrder.get(a.staff_id) ?? 999;
+    const rb = rankOrder.get(b.staff_id) ?? 999;
+    if (ra !== rb) return ra - rb;
+    return a.staff_name.localeCompare(b.staff_name);
+  });
+}
+
 function DayCard({
-  day, callColumns, callAssignments, dragRef, onDrop, onCallDrop, onRemove, onRegenerateDay, onEditDayResources, onUndoDay, undoCount, collapsed, onToggleCollapse,
-  collapsedCols, onToggleCol,
+  day, callColumns, callAssignments, dragRef, onDrop, onCallDrop, onRemove, onRegenerateDay, onEditDayResources, onUndoDay, undoCount, isToday, rankGroups, collapsed, onToggleCollapse,
+  collapsedCols, onToggleCol, hoveredName, onHoverName, filterTerm, staffRankOrder,
 }: {
   day: DayDutyRoster;
   callColumns: string[];
@@ -536,10 +626,16 @@ function DayCard({
   onEditDayResources: (date: string) => void;
   onUndoDay: (date: string) => void;
   undoCount: number;
+  isToday: boolean;
+  rankGroups: Record<string, string>;
   collapsed: boolean;
   onToggleCollapse: () => void;
   collapsedCols: Set<string>;
   onToggleCol: (col: string) => void;
+  hoveredName: string | null;
+  onHoverName: (name: string | null) => void;
+  filterTerm: string;
+  staffRankOrder: Map<number, number>;
 }) {
   const [dragOver, setDragOver] = useState<string | null>(null);
 
@@ -591,9 +687,13 @@ function DayCard({
   const amAssignedKeys = new Set(clinicAmGroups.map(g => clinicGroupKey(g.room, g.consultantId, g.clinicType)));
   const pmAssignedKeys = new Set(clinicPmGroups.map(g => clinicGroupKey(g.room, g.consultantId, g.clinicType)));
 
+  const tierOrder = (group: string) =>
+    group === "Consultant" ? 0 : group === "Registrar" ? 1 : 2;
+
   const moList = callColumns
     .map((col) => ({ label: col, name: day.call_slots[col] ?? "" }))
-    .filter((m) => m.name);
+    .filter((m) => m.name)
+    .sort((a, b) => tierOrder(rankGroups[a.label] ?? "") - tierOrder(rankGroups[b.label] ?? ""));
 
   // Pill counts for the day-header
   const otCount = day.ot_assignments.length + day.eot_assignments.length;
@@ -670,7 +770,7 @@ function DayCard({
         onDrop(dutyType, session, location, consultantId, day.date, clinicType);
       },
       style: {
-        outline: dragOver === zoneKey ? "2px dashed #6366f1" : undefined,
+        outline: dragOver === zoneKey ? "2px dashed var(--sem-drag-outline)" : undefined,
         borderRadius: 4,
         minHeight: 24,
       },
@@ -678,25 +778,56 @@ function DayCard({
   }
 
   return (
-    <div id={`day-${day.date}`} className="card" style={{ marginBottom: 12, scrollMarginTop: 48 }}>
+    <div id={`day-${day.date}`} className="card" style={{
+      marginBottom: 12,
+      scrollMarginTop: 48,
+      borderLeft: isToday
+        ? "4px solid #16a34a"
+        : (day.warnings?.length ?? 0) > 0
+        ? "3px solid var(--sem-conflict)"
+        : (day.shortfall ?? 0) > 0
+        ? "3px solid var(--sem-shortfall-text)"
+        : undefined,
+    }}>
       <div
-        style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: collapsed ? 0 : 10, cursor: "pointer" }}
+        style={{
+          display: "flex", alignItems: "center", gap: 12,
+          marginBottom: collapsed ? 0 : 10,
+          cursor: "pointer",
+          position: "sticky",
+          top: 44,
+          zIndex: 3,
+          background: "var(--surface)",
+          marginLeft: -16,
+          marginRight: -16,
+          padding: "6px 16px",
+          borderBottom: collapsed ? undefined : "1px solid var(--border)",
+        }}
         onClick={onToggleCollapse}
       >
         <span style={{ fontSize: 12, color: "var(--text-muted)", width: 16, textAlign: "center" }}>{collapsed ? "▶" : "▼"}</span>
-        <h3 style={{ margin: 0 }}>
+        <h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 6 }}>
           {day.date.slice(5)} {day.day_name}
+          {isToday && (
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: "#16a34a", color: "#fff" }}>TODAY</span>
+          )}
           {(day.is_weekend || day.is_ph) && (
-            <span style={{ fontSize: 10, fontWeight: 700, marginLeft: 6, padding: "2px 6px", borderRadius: 3, background: "#fef3c7", color: "#92400e" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: "var(--sem-weekend)", color: "var(--sem-weekend-text)" }}>
               {day.is_ph ? "PH" : "WEEKEND"}
             </span>
           )}
+          {day.is_stepdown && (
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: "#ddd6fe", color: "#5b21b6" }}>SD</span>
+          )}
+          {day.is_ext_ot && (
+            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 3, background: "#fed7aa", color: "#9a3412" }}>ExtOT</span>
+          )}
         </h3>
         <span style={{ display: "inline-flex", gap: 4, flexWrap: "wrap" }}>
-          {otCount > 0 && <HeaderPill label={`${otCount} OT`} bg="#dbeafe" fg="#1e40af" />}
+          {otCount > 0 && <HeaderPill label={`${otCount} OT`} bg="var(--cat-ot)" fg="var(--cat-ot-text)" />}
           {(amClinicCount + pmClinicCount) > 0 && (
             <HeaderPill
-              label={`${amClinicCount}/${pmClinicCount} clin`}
+              label={`${amClinicCount}/${pmClinicCount} clinic`}
               bg="#d1fae5" fg="#065f46"
               title={`Clinics — ${amClinicCount} AM · ${pmClinicCount} PM`}
             />
@@ -708,12 +839,15 @@ function DayCard({
               title={`Admin — ${amAdminCount} AM · ${pmAdminCount} PM`}
             />
           )}
-          {unavailCount > 0 && <HeaderPill label={`${unavailCount} unav`} bg="#fee2e2" fg="#991b1b" />}
+          {unavailCount > 0 && <HeaderPill label={`${unavailCount} unavail`} bg="var(--cat-unavail)" fg="var(--cat-unavail-text)" />}
           {(day.shortfall ?? 0) > 0 && (
-            <HeaderPill label={`${day.shortfall} short`} bg="#fde68a" fg="#7c2d12" />
+            <HeaderPill label={`${day.shortfall} short`} bg="var(--sem-shortfall-bg)" fg="var(--sem-shortfall-text)" />
           )}
           {(day.warnings?.length ?? 0) > 0 && (
-            <HeaderPill label={`⚠ ${day.warnings!.length}`} bg="#fef3c7" fg="#92400e" />
+            <HeaderPill label={`⚠ ${day.warnings!.length}`} bg="var(--sem-warning-bg)" fg="var(--sem-weekend-text)" />
+          )}
+          {day.has_day_override && (
+            <HeaderPill label="✎ edited" bg="#fef3c7" fg="#92400e" title="Resources have been edited for this day" />
           )}
         </span>
         <span style={{ marginLeft: "auto", display: "inline-flex", gap: 6 }}>
@@ -739,7 +873,7 @@ function DayCard({
               border: "1px solid var(--border)", borderRadius: 4, background: "white",
               color: "var(--text-muted)", cursor: "pointer",
             }}
-          >✎ Edit Day</button>
+          >✎ Edit Resources</button>
           <button
             onClick={(e) => { e.stopPropagation(); onRegenerateDay(day.date); }}
             title="Reset this day — wipes ALL duty assignments (including manual changes) and re-solves from scratch"
@@ -756,7 +890,7 @@ function DayCard({
         <div style={{
           marginBottom: 10,
           padding: "8px 10px",
-          background: "#fffbeb",
+          background: "var(--sem-warning-bg)",
           border: "1px solid #fde68a",
           borderRadius: 4,
           fontSize: 12,
@@ -780,108 +914,146 @@ function DayCard({
       }}>
         {/* Column 1: Call Team */}
         <div>
-          <SectionLabel label="Call Team" color="#ede9fe" />
-          {day.consultant_oncall && (
-            <div style={{ marginBottom: 4 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>Consultant </span>
-              <span className="duty-tag" style={{ background: "#ddd6fe", color: "#4c1d95" }}>{day.consultant_oncall}</span>
-            </div>
-          )}
-          {day.ac_oncall && (
-            <div style={{ marginBottom: 4 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>AC </span>
-              <span className="duty-tag" style={{ background: "#e9d5ff", color: "#6b21a8" }}>{day.ac_oncall}</span>
-            </div>
-          )}
-          {moList.map((m) => {
-            const ca = callAssignments.find((c) => c.call_type === m.label);
-            const zoneKey = `call_${m.label}`;
-            return (
-              <div
-                key={m.label}
-                style={{
-                  marginBottom: 4,
-                  outline: dragOver === zoneKey ? "2px dashed #6366f1" : undefined,
-                  borderRadius: 4,
-                }}
-                onDragOver={(e) => {
-                  if (dragRef.current?.kind === "call") {
-                    e.preventDefault();
-                    setDragOver(zoneKey);
-                  }
-                }}
-                onDragLeave={() => setDragOver(null)}
-                onDrop={(e) => {
-                  if (dragRef.current?.kind === "call") {
-                    e.preventDefault();
-                    setDragOver(null);
-                    onCallDrop(m.label, day.date);
-                  }
-                }}
-              >
-                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>{m.label} </span>
+          <SectionLabel label="Call Team" color="var(--cat-call)" />
+          <div style={{ display: "grid", gridTemplateColumns: "max-content 1fr", gap: "2px 8px", marginBottom: 4, alignItems: "start" }}>
+            {day.consultant_oncall && (
+              <div style={{ display: "contents" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", lineHeight: "20px" }}>Consultant</span>
                 <span
                   className="duty-tag"
-                  draggable={!!ca}
+                  onMouseEnter={() => onHoverName(day.consultant_oncall!)}
+                  onMouseLeave={() => onHoverName(null)}
                   style={{
-                    background: "#f3e8ff",
-                    color: "#7e22ce",
-                    cursor: ca ? "grab" : "default",
-                    userSelect: "none",
+                    background: "var(--cat-call)", color: "var(--cat-call-text)",
+                    outline: (hoveredName === day.consultant_oncall || (filterTerm && day.consultant_oncall?.toLowerCase().includes(filterTerm))) ? "2px solid var(--primary)" : undefined,
+                    outlineOffset: (hoveredName === day.consultant_oncall || (filterTerm && day.consultant_oncall?.toLowerCase().includes(filterTerm))) ? 1 : undefined,
                   }}
-                  onDragStart={() => {
-                    if (ca) {
-                      dragRef.current = {
-                        kind: "call",
-                        duplicate: false,
-                        callSlot: m.label,
-                        staffId: ca.staff_id,
-                        staffName: ca.staff_name,
-                        date: day.date,
-                      };
-                    }
+                >{day.consultant_oncall}</span>
+              </div>
+            )}
+            {day.ac_oncall && (
+              <div style={{ display: "contents" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", lineHeight: "20px" }}>AC</span>
+                <span
+                  className="duty-tag"
+                  onMouseEnter={() => onHoverName(day.ac_oncall!)}
+                  onMouseLeave={() => onHoverName(null)}
+                  style={{
+                    background: "var(--cat-call)", color: "var(--cat-call-text)",
+                    outline: (hoveredName === day.ac_oncall || (filterTerm && day.ac_oncall?.toLowerCase().includes(filterTerm))) ? "2px solid var(--primary)" : undefined,
+                    outlineOffset: (hoveredName === day.ac_oncall || (filterTerm && day.ac_oncall?.toLowerCase().includes(filterTerm))) ? 1 : undefined,
                   }}
-                  title={ca ? "Drag to another call slot to swap" : undefined}
-                >
-                  {m.name}
-                  {ca?.is_manual_override && <sup style={{ fontSize: 8, color: "#6366f1" }}>✎</sup>}
-                </span>
+                >{day.ac_oncall}</span>
               </div>
-            );
-          })}
-          {wardMo.length > 0 && (
-            <div style={{ marginBottom: 4 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>Ward MO </span>
-              <div {...dropProps("ward_mo", "Ward MO", "AM", null, null)} style={{ display: "inline-flex", flexWrap: "wrap", gap: 4 }}>
-                {wardMo.map((a) => (
-                  <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
-                    color={{ bg: "#fef3c7", fg: "#92400e" }} highlight={tagHighlight(a.staff_id)} />
-                ))}
+            )}
+            {moList.length > 0 && (day.consultant_oncall || day.ac_oncall) && (
+              <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--border)", margin: "3px 0" }} />
+            )}
+            {moList.map((m, i) => {
+              const ca = callAssignments.find((c) => c.call_type === m.label);
+              const zoneKey = `call_${m.label}`;
+              const prevGroup = i > 0 ? rankGroups[moList[i - 1].label] : null;
+              const thisGroup = rankGroups[m.label];
+              const showDivider = i > 0 && thisGroup && prevGroup !== thisGroup;
+              return (
+                <div key={m.label} style={{ display: "contents" }}>
+                  {showDivider && (
+                    <div style={{ gridColumn: "1 / -1", borderTop: "1px solid var(--border)", margin: "3px 0" }} />
+                  )}
+                  <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", lineHeight: "20px" }}>{m.label}</span>
+                  <div
+                    style={{
+                      outline: dragOver === zoneKey ? "2px dashed var(--sem-drag-outline)" : undefined,
+                      borderRadius: 4,
+                    }}
+                    onDragOver={(e) => {
+                      if (dragRef.current?.kind === "call") {
+                        e.preventDefault();
+                        setDragOver(zoneKey);
+                      }
+                    }}
+                    onDragLeave={() => setDragOver(null)}
+                    onDrop={(e) => {
+                      if (dragRef.current?.kind === "call") {
+                        e.preventDefault();
+                        setDragOver(null);
+                        onCallDrop(m.label, day.date);
+                      }
+                    }}
+                  >
+                    <span
+                      className="duty-tag"
+                      draggable={!!ca}
+                      style={{
+                        background: "var(--cat-call)",
+                        color: "var(--cat-call-text)",
+                        cursor: ca ? "grab" : "default",
+                        userSelect: "none",
+                        outline: (hoveredName === m.name || (filterTerm && m.name.toLowerCase().includes(filterTerm))) ? "2px solid var(--primary)" : undefined,
+                        outlineOffset: (hoveredName === m.name || (filterTerm && m.name.toLowerCase().includes(filterTerm))) ? 1 : undefined,
+                      }}
+                      onMouseEnter={() => onHoverName(m.name)}
+                      onMouseLeave={() => onHoverName(null)}
+                      onDragStart={() => {
+                        if (ca) {
+                          dragRef.current = {
+                            kind: "call",
+                            duplicate: false,
+                            callSlot: m.label,
+                            staffId: ca.staff_id,
+                            staffName: ca.staff_name,
+                            date: day.date,
+                          };
+                        }
+                      }}
+                      title={ca ? "Drag to another call slot to swap" : undefined}
+                    >
+                      {m.name}
+                      {ca?.is_manual_override && <sup style={{ fontSize: 8, color: "var(--sem-override)" }}>✎</sup>}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+            {(wardMo.length > 0 || eotMo.length > 0) && (
+              <div style={{ gridColumn: "1 / -1", borderTop: "1px dashed var(--border)", margin: "3px 0" }} />
+            )}
+            {wardMo.length > 0 && (
+              <div style={{ display: "contents" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", lineHeight: "20px" }}>Ward MO</span>
+                <div {...dropProps("ward_mo", "Ward MO", "AM", null, null)} style={{ display: "flex", flexWrap: "wrap", gap: 4, minHeight: 20 }}>
+                  {wardMo.map((a) => (
+                    <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
+                      color={{ bg: "var(--cat-eot)", fg: "var(--cat-eot-text)" }} highlight={tagHighlight(a.staff_id)}
+                      hoveredName={hoveredName} onHoverName={onHoverName} filterTerm={filterTerm} />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-          {eotMo.length > 0 && (
-            <div style={{ marginBottom: 4 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)" }}>EOT MO </span>
-              <div {...dropProps("eot_mo", "EOT MO", "Full Day", null, null)} style={{ display: "inline-flex", flexWrap: "wrap", gap: 4 }}>
-                {eotMo.map((a) => (
-                  <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
-                    color={{ bg: "#fed7aa", fg: "#c2410c" }} highlight={tagHighlight(a.staff_id)} />
-                ))}
+            )}
+            {eotMo.length > 0 && (
+              <div style={{ display: "contents" }}>
+                <span style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", lineHeight: "20px" }}>EOT MO</span>
+                <div {...dropProps("eot_mo", "EOT MO", "Full Day", null, null)} style={{ display: "flex", flexWrap: "wrap", gap: 4, minHeight: 20 }}>
+                  {eotMo.map((a) => (
+                    <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
+                      color={{ bg: "var(--cat-eot)", fg: "var(--cat-eot-text)" }} highlight={tagHighlight(a.staff_id)}
+                      hoveredName={hoveredName} onHoverName={onHoverName} filterTerm={filterTerm} />
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
           {!day.consultant_oncall && !day.ac_oncall && moList.length === 0 && wardMo.length === 0 && eotMo.length === 0 && <EmptyNote />}
         </div>
 
         {/* Column 2: OT / EOT */}
         <div>
-          <SectionLabel label="OT / EOT (Full Day)" color="var(--ot-bg)" />
+          <SectionLabel label="OT / EOT (Full Day)" color="var(--cat-ot)" />
           {Object.keys(otGroups).length === 0 && Object.keys(eotGroups).length === 0 && <EmptyNote />}
           {Object.entries(otGroups).map(([room, g]) => (
             <div key={room} style={{ marginBottom: 6 }}>
               <div
-                style={{ fontSize: 11, fontWeight: 700, color: "#1e40af", cursor: "default" }}
+                style={{ fontSize: 11, fontWeight: 700, color: "var(--cat-ot-text)", cursor: "default" }}
                 {...dropProps(`ot_${room}`, "OT", "Full Day", room, g.consultantId)}
               >
                 {room} {g.consultant && <span style={{ fontWeight: 400, color: "var(--text-muted)" }}>({g.consultant})</span>}
@@ -889,7 +1061,8 @@ function DayCard({
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {g.staff.map((a) => (
                   <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
-                    color={{ bg: undefined, fg: undefined }} className="duty-tag ot" highlight={tagHighlight(a.staff_id)} />
+                    color={{ bg: undefined, fg: undefined }} className="duty-tag ot" highlight={tagHighlight(a.staff_id)}
+                    hoveredName={hoveredName} onHoverName={onHoverName} filterTerm={filterTerm} />
                 ))}
               </div>
             </div>
@@ -897,7 +1070,7 @@ function DayCard({
           {Object.entries(eotGroups).map(([room, g]) => (
             <div key={room} style={{ marginBottom: 6 }}>
               <div
-                style={{ fontSize: 11, fontWeight: 700, color: "#92400e", cursor: "default" }}
+                style={{ fontSize: 11, fontWeight: 700, color: "var(--cat-eot-text)", cursor: "default" }}
                 {...dropProps(`eot_${room}`, "EOT", "Full Day", room, g.consultantId)}
               >
                 ⚡{room}
@@ -905,7 +1078,8 @@ function DayCard({
               <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                 {g.staff.map((a) => (
                   <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
-                    color={{ bg: "#fef3c7", fg: "#92400e" }} highlight={tagHighlight(a.staff_id)} />
+                    color={{ bg: "var(--cat-eot)", fg: "var(--cat-eot-text)" }} highlight={tagHighlight(a.staff_id)}
+                    hoveredName={hoveredName} onHoverName={onHoverName} filterTerm={filterTerm} />
                 ))}
               </div>
             </div>
@@ -913,39 +1087,40 @@ function DayCard({
           {/* Empty-placeholder OTs and EOTs — still show header + drop zone */}
           {emptyOt.map((r) => (
             <EmptyResourceRow key={`empty-ot-${r.room}`} r={r} zoneKey={`ot_${r.room}`}
-              dutyType="OT" session="Full Day" dropProps={dropProps} color="#1e40af" />
+              dutyType="OT" session="Full Day" dropProps={dropProps} color="var(--cat-ot-text)" />
           ))}
           {emptyEot.map((r) => (
             <EmptyResourceRow key={`empty-eot-${r.room}`} r={r} zoneKey={`eot_${r.room}`}
-              dutyType="EOT" session="Full Day" dropProps={dropProps} color="#92400e" prefix="⚡" />
+              dutyType="EOT" session="Full Day" dropProps={dropProps} color="var(--cat-eot-text)" prefix="⚡" />
           ))}
         </div>
 
         {/* Column 3: AM */}
         <div>
-          <SectionLabel label="AM" color="#d1fae5" />
+          <SectionLabel label="AM Clinic" color="var(--cat-am)" />
           {(clinicAmGroups.length > 0 || emptyAmClinics.length > 0) && (
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>CLINICS</div>
               {clinicAmGroups.map((g) => (
                 <div key={clinicGroupKey(g.room, g.consultantId, g.clinicType)} style={{ marginBottom: 4 }}>
                   <div
-                    style={{ fontSize: 11, fontWeight: 600, color: "#065f46" }}
+                    style={{ fontSize: 11, fontWeight: 600, color: "var(--cat-am-text)" }}
                     {...dropProps(`am_clinic_${g.room}_${g.consultantId ?? "null"}_${g.clinicType}`, g.staff[0]?.duty_type || "Clinic", "AM", g.room, g.consultantId, g.clinicType)}
                   >
                     {clinicRoomHeader(g.room, g.staff[0])}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {g.staff.map((a) => (
+                    {sortByRankAlpha(g.staff, staffRankOrder).map((a) => (
                       <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
-                        color={{ bg: undefined, fg: undefined }} className="duty-tag clinic" highlight={tagHighlight(a.staff_id)} />
+                        color={{ bg: undefined, fg: undefined }} className="duty-tag clinic" highlight={tagHighlight(a.staff_id)}
+                        hoveredName={hoveredName} onHoverName={onHoverName} filterTerm={filterTerm} />
                     ))}
                   </div>
                 </div>
               ))}
               {emptyAmClinics.map((r, i) => (
                 <EmptyResourceRow key={`empty-am-${r.room}-${r.consultant_id ?? "null"}-${r.label || ""}-${i}`} r={r} zoneKey={`am_clinic_${r.room}_${r.consultant_id ?? "null"}_${r.label || ""}`}
-                  dutyType="Clinic" session="AM" dropProps={dropProps} color="#065f46" />
+                  dutyType="Clinic" session="AM" dropProps={dropProps} color="var(--cat-am-text)" />
               ))}
             </div>
           )}
@@ -953,29 +1128,30 @@ function DayCard({
 
         {/* Column 4: PM */}
         <div>
-          <SectionLabel label="PM" color="#dbeafe" />
+          <SectionLabel label="PM Clinic" color="var(--cat-pm)" />
           {(clinicPmGroups.length > 0 || emptyPmClinics.length > 0) && (
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: "var(--text-muted)", marginBottom: 4 }}>CLINICS</div>
               {clinicPmGroups.map((g) => (
                 <div key={clinicGroupKey(g.room, g.consultantId, g.clinicType)} style={{ marginBottom: 4 }}>
                   <div
-                    style={{ fontSize: 11, fontWeight: 600, color: "#065f46" }}
+                    style={{ fontSize: 11, fontWeight: 600, color: "var(--cat-pm-text)" }}
                     {...dropProps(`pm_clinic_${g.room}_${g.consultantId ?? "null"}_${g.clinicType}`, g.staff[0]?.duty_type || "Clinic", "PM", g.room, g.consultantId, g.clinicType)}
                   >
                     {clinicRoomHeader(g.room, g.staff[0])}
                   </div>
                   <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {g.staff.map((a) => (
+                    {sortByRankAlpha(g.staff, staffRankOrder).map((a) => (
                       <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
-                        color={{ bg: undefined, fg: undefined }} className="duty-tag clinic" highlight={tagHighlight(a.staff_id)} />
+                        color={{ bg: "var(--cat-pm)", fg: "var(--cat-pm-text)" }} className="duty-tag clinic" highlight={tagHighlight(a.staff_id)}
+                        hoveredName={hoveredName} onHoverName={onHoverName} filterTerm={filterTerm} />
                     ))}
                   </div>
                 </div>
               ))}
               {emptyPmClinics.map((r, i) => (
                 <EmptyResourceRow key={`empty-pm-${r.room}-${r.consultant_id ?? "null"}-${r.label || ""}-${i}`} r={r} zoneKey={`pm_clinic_${r.room}_${r.consultant_id ?? "null"}_${r.label || ""}`}
-                  dutyType="Clinic" session="PM" dropProps={dropProps} color="#065f46" />
+                  dutyType="Clinic" session="PM" dropProps={dropProps} color="var(--cat-pm-text)" />
               ))}
             </div>
           )}
@@ -985,7 +1161,7 @@ function DayCard({
         <div>
           <CollapsibleSectionLabel
             label="Admin"
-            color="#e5e7eb"
+            color="var(--cat-admin)"
             collapsed={collapsedCols.has("admin")}
             onToggle={() => onToggleCol("admin")}
           />
@@ -1000,9 +1176,10 @@ function DayCard({
                 </div>
                 {day.am_admin.length === 0 && <EmptyNote />}
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {day.am_admin.map((a) => (
+                  {sortByRankAlpha(day.am_admin, staffRankOrder).map((a) => (
                     <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
-                      color={{ bg: undefined, fg: undefined }} className="duty-tag admin" highlight={tagHighlight(a.staff_id)} />
+                      color={{ bg: undefined, fg: undefined }} className="duty-tag admin" highlight={tagHighlight(a.staff_id)}
+                      hoveredName={hoveredName} onHoverName={onHoverName} filterTerm={filterTerm} />
                   ))}
                 </div>
               </div>
@@ -1015,9 +1192,10 @@ function DayCard({
                 </div>
                 {day.pm_admin.length === 0 && <EmptyNote />}
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {day.pm_admin.map((a) => (
+                  {sortByRankAlpha(day.pm_admin, staffRankOrder).map((a) => (
                     <DragTag key={`${a.id}-${a.staff_id}-${a.session}-${a.duty_type}`} a={a} date={day.date} dragRef={dragRef} onRemove={onRemove}
-                      color={{ bg: undefined, fg: undefined }} className="duty-tag admin" highlight={tagHighlight(a.staff_id)} />
+                      color={{ bg: undefined, fg: undefined }} className="duty-tag admin" highlight={tagHighlight(a.staff_id)}
+                      hoveredName={hoveredName} onHoverName={onHoverName} filterTerm={filterTerm} />
                   ))}
                 </div>
               </div>
@@ -1029,7 +1207,7 @@ function DayCard({
         <div>
           <CollapsibleSectionLabel
             label="Unavailable"
-            color="#fee2e2"
+            color="var(--cat-unavail)"
             collapsed={collapsedCols.has("unavailable")}
             onToggle={() => onToggleCol("unavailable")}
           />
@@ -1045,13 +1223,13 @@ function DayCard({
                       className="duty-tag"
                       draggable
                       style={{
-                        background: "#fecaca",
-                        color: "#991b1b",
+                        background: "var(--cat-unavail)",
+                        color: "var(--cat-unavail-text)",
                         cursor: "grab",
                         userSelect: "none",
                         // Ghost styling — dashed border + reduced opacity to read as "normally here, but absent"
                         opacity: 0.55,
-                        border: "1px dashed #991b1b",
+                        border: "1px dashed var(--cat-unavail-text)",
                       }}
                       onDragStart={() => {
                         dragRef.current = {
@@ -1090,7 +1268,7 @@ function DayCard({
 }
 
 function DragTag({
-  a, date, dragRef, onRemove, color, className, highlight,
+  a, date, dragRef, onRemove, color, className, highlight, hoveredName, onHoverName, filterTerm,
 }: {
   a: DutyAssignment;
   date: string;
@@ -1099,9 +1277,12 @@ function DragTag({
   color: { bg?: string; fg?: string };
   className?: string;
   highlight?: "conflict" | "multi" | boolean;
+  hoveredName: string | null;
+  onHoverName: (name: string | null) => void;
+  filterTerm?: string;
 }) {
-  const hlColor = highlight === "conflict" ? "#f59e0b"
-    : highlight === "multi" || highlight === true ? "#2563eb"
+  const hlColor = highlight === "conflict" ? "var(--sem-conflict)"
+    : highlight === "multi" || highlight === true ? "var(--sem-multi)"
     : undefined;
   const hlTitle = highlight === "conflict"
     ? "Conflict: this person is unavailable today (leave / post-call) but still assigned"
@@ -1116,6 +1297,7 @@ function DragTag({
     staffName: a.staff_name,
     date,
   };
+  const nameMatchesFilter = filterTerm ? a.staff_name.toLowerCase().includes(filterTerm) : false;
   return (
     <span
       draggable
@@ -1128,28 +1310,28 @@ function DragTag({
         display: "inline-flex",
         alignItems: "center",
         gap: 2,
-        outline: hlColor ? `2px solid ${hlColor}` : undefined,
-        outlineOffset: hlColor ? 1 : undefined,
+        outline: hlColor ? `2px solid ${hlColor}` : (hoveredName === a.staff_name || nameMatchesFilter) ? "2px solid var(--primary)" : undefined,
+        outlineOffset: (hlColor || hoveredName === a.staff_name || nameMatchesFilter) ? 1 : undefined,
       }}
+      onMouseEnter={() => onHoverName(a.staff_name)}
+      onMouseLeave={() => onHoverName(null)}
       onDragStart={() => { dragRef.current = { ...baseDrag, duplicate: false }; }}
       title={hlTitle}
     >
       <span>{a.staff_name}</span>
-      {a.is_manual_override && <sup style={{ fontSize: 8, color: "#6366f1" }}>✎</sup>}
+      {a.is_manual_override && <sup style={{ fontSize: 8, color: "var(--sem-override)" }}>✎</sup>}
       {/* Copy icon — drag THIS to duplicate instead of move */}
       <span
         draggable
         role="button"
         aria-label="Duplicate to another zone"
+        className="duty-tag-handle"
         onDragStart={(e) => {
           e.stopPropagation();
           dragRef.current = { ...baseDrag, duplicate: true };
         }}
-        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.opacity = "1")}
-        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.opacity = "0.75")}
         style={{
           fontSize: 11,
-          opacity: 0.75,
           cursor: "copy",
           padding: "0 3px",
           lineHeight: 1,
@@ -1160,15 +1342,13 @@ function DragTag({
       <span
         role="button"
         aria-label="Send to Admin"
+        className="duty-tag-handle"
         onClick={(e) => {
           e.stopPropagation();
           onRemove(a.id, a.staff_id, date, session);
         }}
-        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.opacity = "1")}
-        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.opacity = "0.75")}
         style={{
           fontSize: 13,
-          opacity: 0.75,
           cursor: "pointer",
           padding: "0 3px",
           lineHeight: 1,
@@ -1271,5 +1451,165 @@ function EmptyResourceRow({
 
 function EmptyNote() {
   return <div style={{ fontSize: 11, color: "var(--text-muted)", fontStyle: "italic" }}>—</div>;
+}
+
+function getAllStaffNames(roster: DutyRosterResponse): string[] {
+  const names = new Set<string>();
+  for (const day of roster.days) {
+    Object.values(day.call_slots).forEach((n) => n && names.add(n));
+    [...day.ot_assignments, ...day.eot_assignments,
+     ...day.am_clinics, ...day.pm_clinics,
+     ...day.am_admin, ...day.pm_admin]
+      .forEach((a) => names.add(a.staff_name));
+    day.unavailable.forEach((u) => names.add(u.staff_name));
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
+}
+
+function generateMyRosterText(name: string, roster: DutyRosterResponse): string {
+  const lines: string[] = [`=== MY ROSTER — ${monthName(roster.month)} ${roster.year} ===`, `=== ${name} ===`];
+
+  for (const day of roster.days) {
+    const dayLines: string[] = [];
+
+    // Unavailable (post-call / leave)
+    const unavail = day.unavailable.find((u) => u.staff_name === name);
+    if (unavail) dayLines.push(`  ${unavail.reason}`);
+
+    // On-call slot
+    for (const [slot, staffName] of Object.entries(day.call_slots)) {
+      if (staffName === name) dayLines.push(`  ${slot} (On Call)`);
+    }
+
+    // OT / EOT full-day assignments (excluding Ward MO / EOT MO anchor rows)
+    const fullDay = [...day.ot_assignments, ...day.eot_assignments].filter(
+      (a) => a.staff_name === name && a.duty_type !== "Ward MO" && a.duty_type !== "EOT MO"
+    );
+    for (const a of fullDay) {
+      const loc = a.location || a.duty_type;
+      const cons = a.consultant_name ? ` (${a.consultant_name})` : "";
+      const session = !a.session || a.session === "Full Day" ? "Full Day" : a.session;
+      dayLines.push(`  ${session}: ${loc}${cons}`);
+    }
+
+    // Ward MO / EOT MO
+    const wardMo = [...day.ot_assignments, ...day.eot_assignments].find(
+      (a) => a.staff_name === name && a.duty_type === "Ward MO"
+    );
+    if (wardMo) dayLines.push("  Ward MO");
+
+    const eotMo = [...day.ot_assignments, ...day.eot_assignments].find(
+      (a) => a.staff_name === name && a.duty_type === "EOT MO"
+    );
+    if (eotMo) dayLines.push("  EOT MO");
+
+    // AM clinics
+    for (const a of day.am_clinics.filter((a) => a.staff_name === name)) {
+      const label = a.clinic_type || a.location || "Clinic";
+      const cons = a.consultant_name ? ` (${a.consultant_name})` : "";
+      dayLines.push(`  AM: ${label}${cons}`);
+    }
+
+    // PM clinics
+    for (const a of day.pm_clinics.filter((a) => a.staff_name === name)) {
+      const label = a.clinic_type || a.location || "Clinic";
+      const cons = a.consultant_name ? ` (${a.consultant_name})` : "";
+      dayLines.push(`  PM: ${label}${cons}`);
+    }
+
+    // Admin (skip on weekends/PH — off-day admin is implicit)
+    if (!day.is_weekend && !day.is_ph) {
+      if (day.am_admin.find((a) => a.staff_name === name)) dayLines.push("  AM: Admin");
+      if (day.pm_admin.find((a) => a.staff_name === name)) dayLines.push("  PM: Admin");
+    }
+
+    lines.push("");
+    lines.push(`${day.date.slice(5)} ${day.day_name}`);
+    lines.push(dayLines.length === 0 ? "  —" : dayLines.join("\n"));
+  }
+
+  return lines.join("\n");
+}
+
+function MyRosterModal({
+  roster, initialName, onClose,
+}: {
+  roster: DutyRosterResponse;
+  initialName: string;
+  onClose: () => void;
+}) {
+  const allNames = getAllStaffNames(roster);
+  const [selectedName, setSelectedName] = useState(() => {
+    if (!initialName) return "";
+    const exact = allNames.find((n) => n.toLowerCase() === initialName.toLowerCase());
+    if (exact) return exact;
+    const partial = allNames.find((n) => n.toLowerCase().includes(initialName.toLowerCase()));
+    return partial ?? "";
+  });
+  const [copied, setCopied] = useState(false);
+
+  const text = selectedName ? generateMyRosterText(selectedName, roster) : "";
+
+  function handleCopy() {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 480, maxWidth: "95vw" }} onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ marginTop: 0 }}>My Roster</h3>
+        <div className="form-group" style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 12, fontWeight: 600 }}>Select staff member</label>
+          <select
+            autoFocus
+            value={selectedName}
+            onChange={(e) => { setSelectedName(e.target.value); setCopied(false); }}
+            style={{ width: "100%", marginTop: 4 }}
+          >
+            <option value="" disabled>Choose name...</option>
+            {allNames.map((n) => (
+              <option key={n} value={n}>{n}</option>
+            ))}
+          </select>
+        </div>
+
+        {selectedName && (
+          <>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+              <button
+                className="btn btn-primary"
+                style={{ fontSize: 12, padding: "4px 12px" }}
+                onClick={handleCopy}
+              >
+                {copied ? "Copied!" : "Copy to Clipboard"}
+              </button>
+            </div>
+            <pre style={{
+              background: "var(--bg-muted, #f8fafc)",
+              border: "1px solid var(--border)",
+              borderRadius: 4,
+              padding: "10px 14px",
+              fontSize: 12,
+              lineHeight: 1.7,
+              maxHeight: 420,
+              overflowY: "auto",
+              whiteSpace: "pre-wrap",
+              fontFamily: "monospace",
+              margin: 0,
+            }}>
+              {text}
+            </pre>
+          </>
+        )}
+
+        <div className="modal-actions" style={{ marginTop: 12 }}>
+          <button className="btn btn-secondary" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
 }
 

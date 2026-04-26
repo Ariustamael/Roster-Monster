@@ -27,11 +27,9 @@ export default function DayResourcesModal({
     setLoading(true);
     setError(null);
     try {
-      let rows = await api.listDayResourceOverrides(date);
-      if (rows.length === 0) {
-        // Lazy initialize: clone weekly defaults so the user has something to edit.
-        rows = await api.initializeDayResourceOverrides(date);
-      }
+      // Always call initialize — it's idempotent (returns existing rows if present,
+      // clones weekly defaults if not). Avoids a list→initialize two-step race.
+      const rows = await api.initializeDayResourceOverrides(date);
       setItems(rows);
     } catch (e: any) {
       setError(e.message);
@@ -94,9 +92,15 @@ export default function DayResourcesModal({
                     <td>{t.consultant_name ?? "-"}</td>
                     <td>{t.staff_required}</td>
                     <td>{t.priority ?? 5}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button className="btn-link" onClick={() => setEditingId(t.id)}>Edit</button>
-                      <button className="btn-link" onClick={() => handleDelete(t.id)} style={{ color: "var(--danger)" }}>×</button>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button
+                        onClick={() => setEditingId(t.id)}
+                        style={{ fontSize: 11, padding: "2px 8px", marginRight: 4, border: "1px solid var(--border)", borderRadius: 4, background: "var(--bg)", color: "var(--text)", cursor: "pointer" }}
+                      >Edit</button>
+                      <button
+                        onClick={() => handleDelete(t.id)}
+                        style={{ fontSize: 11, padding: "2px 8px", border: "1px solid #fecaca", borderRadius: 4, background: "#fef2f2", color: "var(--danger)", cursor: "pointer" }}
+                      >Delete</button>
                     </td>
                   </tr>
                 ))}
@@ -119,7 +123,10 @@ export default function DayResourcesModal({
           <DayResourceForm
             initial={editingId === "new" ? null : items.find(t => t.id === editingId) ?? null}
             date={date}
-            consultants={consultants}
+            consultants={consultants.filter(c => {
+              const rank = ranks.find(r => r.name === c.rank);
+              return rank?.is_consultant_tier ?? false;
+            })}
             ranks={ranks}
             onClose={() => setEditingId(null)}
             onSaved={async () => { setEditingId(null); await load(); onSaved(); }}

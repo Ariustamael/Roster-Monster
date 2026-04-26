@@ -1,47 +1,83 @@
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import { ConfigProvider } from "./context/ConfigContext";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ConfigProvider, useConfig } from "./context/ConfigContext";
+import { RosterSyncProvider } from "./context/RosterSyncContext";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import Layout from "./components/Layout";
 import CallRosterView from "./pages/CallRosterView";
 import DutyRosterView from "./pages/DutyRosterView";
-import FairnessView from "./pages/FairnessView";
+import CallDistributionView from "./pages/CallDistributionView";
+import DutyDistributionView from "./pages/DutyDistributionView";
 import StaffView from "./pages/StaffView";
 import TeamsView from "./pages/TeamsView";
-import ResourcesView from "./pages/ResourcesView";
 import RulesView from "./pages/RulesView";
-import ConfigView from "./pages/ConfigView";
 import RosterTabs from "./pages/RosterTabs";
 import StaffTabs from "./pages/StaffTabs";
 import ConfigTabs from "./pages/ConfigTabs";
+import RankConfigTab from "./pages/config/RankConfigTab";
+import CallTypeConfigTab from "./pages/config/CallTypeConfigTab";
+import ResourceTemplatesTab from "./pages/resources/ResourceTemplatesTab";
+import ConsultantRosterTab from "./pages/resources/ConsultantRosterTab";
+import SupplyDemandTab from "./pages/resources/SupplyDemandTab";
 import "./styles/app.css";
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { staleTime: 30_000, retry: 1 } },
+});
+
+function ConRegRoute() {
+  const { active } = useConfig();
+  if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
+  return <ConsultantRosterTab configId={active.id} year={active.year} month={active.month} />;
+}
+
+function SupplyDemandRoute() {
+  const { active } = useConfig();
+  if (!active) return <p style={{ color: "var(--text-muted)" }}>Select a month in the sidebar.</p>;
+  return <SupplyDemandTab configId={active.id} />;
+}
 
 export default function App() {
   return (
-    <ConfigProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route path="/" element={<RosterTabs />}>
-              <Route index element={<CallRosterView />} />
-              <Route path="duty" element={<DutyRosterView />} />
-              <Route path="fairness" element={<FairnessView />} />
-            </Route>
-            <Route path="/roster" element={<RosterTabs />}>
-              <Route index element={<CallRosterView />} />
-              <Route path="duty" element={<DutyRosterView />} />
-              <Route path="fairness" element={<FairnessView />} />
-            </Route>
-            <Route path="/staff" element={<StaffTabs />}>
-              <Route index element={<StaffView />} />
-              <Route path="teams" element={<TeamsView />} />
-            </Route>
-            <Route path="/resources" element={<ResourcesView />} />
-            <Route path="/config" element={<ConfigTabs />}>
-              <Route index element={<ConfigView />} />
-              <Route path="rules" element={<RulesView />} />
-            </Route>
-          </Route>
-        </Routes>
-      </BrowserRouter>
-    </ConfigProvider>
+    <QueryClientProvider client={queryClient}>
+      <ConfigProvider>
+        <RosterSyncProvider>
+          <BrowserRouter>
+            <ErrorBoundary>
+              <Routes>
+                <Route element={<Layout />}>
+                  <Route path="/" element={<RosterTabs />}>
+                    <Route index element={<CallRosterView />} />
+                    <Route path="duty" element={<DutyRosterView />} />
+                    <Route path="conreg" element={<ConRegRoute />} />
+                    <Route path="supply" element={<SupplyDemandRoute />} />
+                    <Route path="call-distribution" element={<CallDistributionView />} />
+                    <Route path="duty-distribution" element={<DutyDistributionView />} />
+                  </Route>
+                  <Route path="/roster" element={<RosterTabs />}>
+                    <Route index element={<CallRosterView />} />
+                    <Route path="duty" element={<DutyRosterView />} />
+                    <Route path="conreg" element={<ConRegRoute />} />
+                    <Route path="supply" element={<SupplyDemandRoute />} />
+                    <Route path="call-distribution" element={<CallDistributionView />} />
+                    <Route path="duty-distribution" element={<DutyDistributionView />} />
+                  </Route>
+                  <Route path="/resources" element={<StaffTabs />}>
+                    <Route index element={<TeamsView />} />
+                    <Route path="staff" element={<StaffView />} />
+                    <Route path="clinics" element={<ResourceTemplatesTab />} />
+                  </Route>
+                  <Route path="/config" element={<ConfigTabs />}>
+                    <Route index element={<RankConfigTab />} />
+                    <Route path="call-types" element={<CallTypeConfigTab />} />
+                    <Route path="rules" element={<RulesView />} />
+                  </Route>
+                </Route>
+              </Routes>
+            </ErrorBoundary>
+          </BrowserRouter>
+        </RosterSyncProvider>
+      </ConfigProvider>
+    </QueryClientProvider>
   );
 }

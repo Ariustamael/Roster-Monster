@@ -3,7 +3,7 @@ import { api } from "../../api";
 
 export default function DayFlagsTab({ configId, year, month }: { configId: number; year: number; month: number }) {
   const [stepdownDates, setStepdownDates] = useState<Set<string>>(new Set());
-  const [eveningOTDates, setEveningOTDates] = useState<Set<string>>(new Set());
+  const [extOTDates, setExtOTDates] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -14,10 +14,10 @@ export default function DayFlagsTab({ configId, year, month }: { configId: numbe
     setLoading(true);
     const [sd, eot] = await Promise.all([
       api.getStepdownDays(configId),
-      api.getEveningOTDates(configId),
+      api.getExtOTDates(configId),
     ]);
     setStepdownDates(new Set(sd.map((r) => r.date)));
-    setEveningOTDates(new Set(eot.map((r) => r.date)));
+    setExtOTDates(new Set(eot.map((r) => r.date)));
     setDirty(false);
     setLoading(false);
   }, [configId]);
@@ -33,8 +33,8 @@ export default function DayFlagsTab({ configId, year, month }: { configId: numbe
     setDirty(true);
   }
 
-  function toggleEveningOT(dateStr: string) {
-    setEveningOTDates((prev) => {
+  function toggleExtOT(dateStr: string) {
+    setExtOTDates((prev) => {
       const next = new Set(prev);
       if (next.has(dateStr)) next.delete(dateStr); else next.add(dateStr);
       return next;
@@ -47,7 +47,7 @@ export default function DayFlagsTab({ configId, year, month }: { configId: numbe
     try {
       await Promise.all([
         api.setStepdownDays(configId, [...stepdownDates].map((d) => ({ date: d }))),
-        api.setEveningOTDates(configId, [...eveningOTDates].map((d) => ({ date: d }))),
+        api.setExtOTDates(configId, [...extOTDates].map((d) => ({ date: d }))),
       ]);
       setDirty(false);
     } catch (e: any) {
@@ -61,7 +61,7 @@ export default function DayFlagsTab({ configId, year, month }: { configId: numbe
 
   const days = Array.from({ length: numDays }, (_, i) => {
     const dt = new Date(year, month - 1, i + 1);
-    const dateStr = dt.toISOString().slice(0, 10);
+    const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`;
     const dayName = dt.toLocaleDateString("en", { weekday: "short" });
     const isWeekend = dt.getDay() === 0 || dt.getDay() === 6;
     return { dateStr, dayName, isWeekend };
@@ -105,8 +105,8 @@ export default function DayFlagsTab({ configId, year, month }: { configId: numbe
                   <td style={{ textAlign: "center" }}>
                     <input
                       type="checkbox"
-                      checked={eveningOTDates.has(d.dateStr)}
-                      onChange={() => toggleEveningOT(d.dateStr)}
+                      checked={extOTDates.has(d.dateStr)}
+                      onChange={() => toggleExtOT(d.dateStr)}
                       disabled={d.isWeekend}
                     />
                   </td>

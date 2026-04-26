@@ -21,6 +21,8 @@ export default function RankConfigTab() {
   const [editId, setEditId] = useState<number | "new" | null>(null);
   const [draft, setDraft] = useState<DraftRank | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [dragRankId, setDragRankId] = useState<number | null>(null);
+  const [dragOverRankId, setDragOverRankId] = useState<number | null>(null);
 
   useEscClose(() => { setEditId(null); setDraft(null); }, editId != null);
 
@@ -37,6 +39,28 @@ export default function RankConfigTab() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function handleDrop(targetId: number) {
+    if (dragRankId === null || dragRankId === targetId) {
+      setDragRankId(null);
+      setDragOverRankId(null);
+      return;
+    }
+    const ordered = [...ranks];
+    const fromIdx = ordered.findIndex((r) => r.id === dragRankId);
+    const toIdx = ordered.findIndex((r) => r.id === targetId);
+    const [moved] = ordered.splice(fromIdx, 1);
+    ordered.splice(toIdx, 0, moved);
+    setRanks(ordered);
+    setDragRankId(null);
+    setDragOverRankId(null);
+    for (let i = 0; i < ordered.length; i++) {
+      if (ordered[i].display_order !== i) {
+        await api.updateRank(ordered[i].id, { ...ordered[i], display_order: i });
+      }
+    }
+    await load();
+  }
 
   function startEdit(r: RankConfig) {
     setEditId(r.id);
@@ -118,8 +142,11 @@ export default function RankConfigTab() {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button className="btn btn-primary" onClick={startAdd}>+ Add Rank</button>
+      <div className="page-header" style={{ marginBottom: 12 }}>
+        <h2>Ranks</h2>
+        <div className="btn-group">
+          <button className="btn btn-primary" onClick={startAdd}>+ Add Rank</button>
+        </div>
       </div>
 
       <div className="card">
@@ -127,7 +154,7 @@ export default function RankConfigTab() {
           <table className="config-table">
             <thead>
               <tr>
-                <th>Order</th>
+                <th style={{ width: 32 }}></th>
                 <th>Name</th>
                 <th>Abbr</th>
                 <th>Call Eligible</th>
@@ -140,10 +167,21 @@ export default function RankConfigTab() {
             </thead>
             <tbody>
               {ranks.map((r) => (
-                <tr key={r.id} style={{ opacity: r.is_active ? 1 : 0.5 }}>
-                  <td>{r.display_order}</td>
-                  <td>{r.name}</td>
-                  <td>{r.abbreviation}</td>
+                <tr
+                  key={r.id}
+                  draggable
+                  onDragStart={() => setDragRankId(r.id)}
+                  onDragOver={(e) => { e.preventDefault(); setDragOverRankId(r.id); }}
+                  onDragLeave={() => setDragOverRankId(null)}
+                  onDrop={async () => { await handleDrop(r.id); }}
+                  style={{
+                    opacity: r.is_active ? 1 : 0.5,
+                    outline: dragOverRankId === r.id ? "2px dashed var(--primary)" : undefined,
+                  }}
+                >
+                  <td style={{ cursor: "grab", textAlign: "center", userSelect: "none" }}>☰</td>
+                  <td style={{ fontWeight: 600 }}>{r.name}</td>
+                  <td style={{ fontWeight: 600 }}>{r.abbreviation}</td>
                   <td>{r.is_call_eligible ? "Yes" : "No"}</td>
                   <td>{r.is_duty_eligible ? "Yes" : "No"}</td>
                   <td>{r.is_consultant_tier ? "Yes" : "No"}</td>
@@ -173,10 +211,6 @@ export default function RankConfigTab() {
             <div className="form-group">
               <label htmlFor="rank-abbr">Abbreviation</label>
               <input id="rank-abbr" type="text" value={draft.abbreviation} onChange={(e) => setDraft({ ...draft, abbreviation: e.target.value })} placeholder="e.g. MO" />
-            </div>
-            <div className="form-group">
-              <label>Display Order</label>
-              <input type="number" value={draft.display_order} onChange={(e) => setDraft({ ...draft, display_order: Number(e.target.value) })} />
             </div>
             <div className="form-group">
               <label style={{ display: "flex", alignItems: "center", gap: 8 }}>

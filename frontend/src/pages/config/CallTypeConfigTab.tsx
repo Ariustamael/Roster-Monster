@@ -233,8 +233,11 @@ export default function CallTypeConfigTab() {
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <button className="btn btn-primary" onClick={startAdd}>+ Add Call Type</button>
+      <div className="page-header" style={{ marginBottom: 12 }}>
+        <h2>Call Types</h2>
+        <div className="btn-group">
+          <button className="btn btn-primary" onClick={startAdd}>+ Add Call Type</button>
+        </div>
       </div>
 
       <div className="card">

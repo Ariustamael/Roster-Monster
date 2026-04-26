@@ -124,7 +124,7 @@ export default function RegistrarRosterTab({ configId, year, month }: { configId
                     >
                       {Array.from({ length: numDays }, (_, i) => {
                         const d = new Date(year, month - 1, i + 1);
-                        const ds = d.toISOString().slice(0, 10);
+                        const ds = `${year}-${String(month).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`;
                         const dn = d.toLocaleDateString("en", { weekday: "short" });
                         return <option key={ds} value={ds}>{ds.slice(5)} {dn}</option>;
                       })}
