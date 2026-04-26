@@ -106,14 +106,20 @@ def _wait_for_server(url, timeout=30):
     return False
 
 
+def _kill_tree(proc):
+    """Kill a process AND all its children (e.g. uvicorn watcher + workers)."""
+    if proc.poll() is not None:
+        return
+    subprocess.run(
+        ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+        creationflags=CREATE_NO_WINDOW,
+        capture_output=True,
+    )
+
+
 def _quit(icon, backend_proc, frontend_proc):
     for proc in [backend_proc, frontend_proc]:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                proc.kill()
+        _kill_tree(proc)
     icon.stop()
 
 
