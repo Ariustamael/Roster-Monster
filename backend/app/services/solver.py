@@ -501,6 +501,47 @@ def _solve_cp_sat(
                         break
                     model.add(x[(pi, di, cti)] + x[(pi, di2, cti)] <= 1)
 
+    # 8. Night-float run continuity: consecutive run-days must be covered by the
+    # same person.  Without this the fairness objective can split a Tue–Fri block
+    # across two people (e.g. person A Tue+Wed, person B Thu+Fri), which is
+    # operationally wrong.
+    for cti, ct in enumerate(inp.call_type_configs):
+        if not ct.is_night_float or not ct.night_float_run:
+            continue
+        run_days_set = {t.strip() for t in ct.night_float_run.split(",") if t.strip()}
+        for di in range(len(days) - 1):
+            label_a = DAY_LABELS[days[di].d.weekday()]
+            label_b = DAY_LABELS[days[di + 1].d.weekday()]
+            if label_a not in run_days_set or label_b not in run_days_set:
+                continue
+            # Both days are consecutive run-days: every person must have the
+            # same assignment value on both days (either both 1 or both 0).
+            for pi in range(len(people)):
+                model.add(x[(pi, di, cti)] == x[(pi, di + 1, cti)])
+
+    # 9. No overnight call-type switching within switch_window_days.
+    # The greedy validator catches this; mirror it in CP-SAT so the solver
+    # doesn't produce plans it would then flag as violations.
+    overnight_ctis = [
+        (cti, ct)
+        for cti, ct in enumerate(inp.call_type_configs)
+        if ct.is_overnight and ct.switch_window_days > 0
+    ]
+    for pi in range(len(people)):
+        for cti1, ct1 in overnight_ctis:
+            window = ct1.switch_window_days
+            for di in range(len(days)):
+                for offset in range(1, window + 1):
+                    di2 = di + offset
+                    if di2 >= len(days):
+                        break
+                    for cti2, ct2 in overnight_ctis:
+                        if cti2 == cti1:
+                            continue
+                        # Person cannot have ct1 on di and a different overnight
+                        # type on di2 (within the switching window).
+                        model.add(x[(pi, di, cti1)] + x[(pi, di2, cti2)] <= 1)
+
     # ── Objective: minimise spread of difficulty-points across staff ──────────
     # difficulty[pi] = sum over all (di, cti) of ct.difficulty_points * x[pi][di][cti]
     # Minimise max(difficulty) - min(difficulty)

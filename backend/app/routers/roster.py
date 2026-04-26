@@ -1243,6 +1243,7 @@ async def get_assignments(config_id: int, db: AsyncSession = Depends(get_db)):
                 select(CallAssignment)
                 .filter(CallAssignment.config_id == config_id)
                 .order_by(CallAssignment.date, CallAssignment.call_type)
+                .options(selectinload(CallAssignment.staff))
             )
         )
         .scalars()
