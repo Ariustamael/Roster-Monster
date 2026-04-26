@@ -43,6 +43,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CallTypeInfo:
+    id: int
     name: str
     display_order: int
     is_overnight: bool
@@ -71,6 +72,8 @@ class PersonInfo:
     rank: str
     team_id: int | None = None
     supervisor_id: int | None = None
+    # IDs of call types this person is eligible for beyond their rank default.
+    extra_call_type_ids: set[int] = field(default_factory=set)
 
 
 @dataclass
@@ -248,7 +251,9 @@ def _is_eligible(
     if d in block_dates.get(pid, set()):
         return False
 
-    if person.rank not in ct.eligible_rank_names:
+    # Rank check: pass if rank is in the default eligible set OR the person
+    # has been granted explicit eligibility via extra_call_type_ids.
+    if person.rank not in ct.eligible_rank_names and ct.id not in person.extra_call_type_ids:
         return False
 
     if not check_not_already_assigned_today(pid, d, daily_assignments):
@@ -428,25 +433,61 @@ def _solve_cp_sat(
             model.add(x[(pi, di, cti)] == 1)
             override_set.add((pid, di, ctype))
 
-    # 2. Coverage: each required slot must be filled by exactly one person
+    # 2. Coverage: each required slot must be filled by exactly one person.
+    #    Mutually exclusive groups (e.g. MO3(WE) vs R1+2 on weekends) are
+    #    handled as "exactly one assignment across the whole group" so the
+    #    solver chooses which slot to fill rather than being forced to fill
+    #    both — which would be infeasible or operationally wrong.
+    def _cp_eligible(ct: CallTypeInfo, day: DayConfig) -> list[int]:
+        return [
+            pi
+            for pi, p in enumerate(people)
+            if (p.rank in ct.eligible_rank_names or ct.id in p.extra_call_type_ids)
+            and day.d not in inp.leave_dates.get(p.id, set())
+            and day.d not in inp.block_dates.get(p.id, set())
+        ]
+
+    processed_ctis: set[int] = set()
     for di, day in enumerate(days):
         for ct in required_slots[di]:
             cti = ct_index[ct.name]
-            eligible = [
-                pi
-                for pi, p in enumerate(people)
-                if p.rank in ct.eligible_rank_names
-                and day.d not in inp.leave_dates.get(p.id, set())
-                and day.d not in inp.block_dates.get(p.id, set())
-            ]
-            if not eligible:
-                # Infeasible slot — let greedy handle it
-                return None
-            model.add_exactly_one([x[(pi, di, cti)] for pi in eligible])
-            # Force ineligible people's variables to 0 for this slot
-            all_pis = set(range(len(people)))
-            for pi in all_pis - set(eligible):
-                model.add(x[(pi, di, cti)] == 0)
+            if cti in processed_ctis:
+                continue
+
+            # Collect all mutually exclusive partners also required today
+            mutex_group: list[CallTypeInfo] = [ct]
+            for ct2 in required_slots[di]:
+                if ct2.name != ct.name and ct2.name in ct.mutually_exclusive_names:
+                    mutex_group.append(ct2)
+
+            if len(mutex_group) == 1:
+                # No same-day mutual exclusivity — require exactly one person
+                eligible = _cp_eligible(ct, day)
+                if not eligible:
+                    return None  # Infeasible slot — let greedy handle it
+                model.add_exactly_one([x[(pi, di, cti)] for pi in eligible])
+                for pi in set(range(len(people))) - set(eligible):
+                    model.add(x[(pi, di, cti)] == 0)
+            else:
+                # Mutually exclusive group: at most one per slot, but exactly
+                # one assignment across the entire group on this day.
+                group_vars: list = []
+                for ct_g in mutex_group:
+                    cti_g = ct_index[ct_g.name]
+                    eligible_g = _cp_eligible(ct_g, day)
+                    ct_vars = [x[(pi, di, cti_g)] for pi in eligible_g]
+                    if ct_vars:
+                        model.add_at_most_one(ct_vars)
+                    group_vars.extend(ct_vars)
+                    for pi in set(range(len(people))) - set(eligible_g):
+                        model.add(x[(pi, di, cti_g)] == 0)
+                    processed_ctis.add(cti_g)
+                if not group_vars:
+                    return None  # Entire group infeasible — let greedy handle
+                model.add(sum(group_vars) == 1)
+
+            processed_ctis.add(cti)
+        processed_ctis.clear()  # Reset per day
 
     # 3. Non-required slots: all zero (don't assign outside the schedule)
     for di, day in enumerate(days):

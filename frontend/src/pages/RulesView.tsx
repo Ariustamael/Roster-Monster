@@ -1,20 +1,37 @@
 import { useEffect, useState } from "react";
 import { api } from "../api";
-import type { RankConfig, CallTypeConfig } from "../types";
+import type { RankConfig, CallTypeConfig, TeamAssignment } from "../types";
 
 export default function RulesView() {
   const [ranks, setRanks] = useState<RankConfig[]>([]);
   const [callTypes, setCallTypes] = useState<CallTypeConfig[]>([]);
+  const [teamAssignments, setTeamAssignments] = useState<TeamAssignment[]>([]);
 
   useEffect(() => {
     api.getRanks().then(r => setRanks(r.sort((a, b) => a.display_order - b.display_order)));
     api.getCallTypes().then(c => setCallTypes(c.sort((a, b) => a.display_order - b.display_order)));
+    api.getAllTeamAssignments().then(setTeamAssignments);
   }, []);
 
   const activeCallTypes = callTypes.filter(ct => ct.is_active && !ct.is_duty_only);
   const dutyOnlyTypes = callTypes.filter(ct => ct.is_active && ct.is_duty_only);
-  const overnightTypes = activeCallTypes.filter(ct => ct.is_overnight);
+  const affinityCallTypes = activeCallTypes.filter(ct => ct.uses_consultant_affinity);
   const rankById = new Map(ranks.map(r => [r.id, r]));
+
+  // MOs with a supervisor linked (for consultant affinity display)
+  const staffById = new Map<number, string>();
+  teamAssignments.forEach(ta => {
+    if (ta.staff_name) staffById.set(ta.staff_id, ta.staff_name);
+  });
+  const moAssignmentsWithSupervisor = teamAssignments.filter(
+    ta => ta.role === "mo" && ta.supervisor_id && ta.supervisor_name
+  );
+
+  function overnightLabel(ct: CallTypeConfig): string {
+    if (ct.is_night_float) return "Night Float";
+    if (ct.is_overnight) return "Yes (24h)";
+    return "No";
+  }
 
   return (
     <>
@@ -69,7 +86,7 @@ export default function RulesView() {
               {activeCallTypes.map(ct => (
                 <tr key={ct.id}>
                   <td style={{ fontWeight: 600 }}>{ct.name}</td>
-                  <td>{ct.is_overnight ? "Yes (24h)" : "No"}</td>
+                  <td>{overnightLabel(ct)}</td>
                   <td>{ct.post_call_type === "none" ? "-" : ct.post_call_type}</td>
                   <td style={{ fontSize: 11 }}>{ct.applicable_days}</td>
                   <td style={{ fontSize: 11 }}>{ct.required_conditions || "-"}</td>
@@ -114,12 +131,17 @@ export default function RulesView() {
           <div className="rule">
             <div className="rule-title">Overnight calls and post-call rest</div>
             <div className="rule-body">
-              {overnightTypes.length > 0 ? (
+              {activeCallTypes.filter(ct => ct.is_overnight && !ct.is_night_float).length > 0 ? (
                 <>
-                  <strong>Overnight call types:</strong> {overnightTypes.map(ct => ct.name).join(", ")}
+                  <strong>24h overnight call types:</strong>{" "}
+                  {activeCallTypes.filter(ct => ct.is_overnight && !ct.is_night_float).map(ct => ct.name).join(", ")}
                   <br />
-                  After an overnight call, the person receives post-call rest as configured (8am off, 12pm off, etc.).
-                  There must be a minimum gap between consecutive overnight calls (configured per call type).
+                  After a 24h overnight call the person receives post-call rest the following day (off from 8am, 12pm, or 5pm as configured). No assignment is made on that rest day.
+                  <br /><br />
+                  <strong>Night Float call types:</strong>{" "}
+                  {activeCallTypes.filter(ct => ct.is_night_float).map(ct => ct.name).join(", ") || "None"}
+                  <br />
+                  Night float calls are overnight but carry <em>no post-call rest day</em> — the person returns to normal duties the next morning. The same person must cover the entire configured run (e.g. Tue–Fri) without splitting across staff.
                 </>
               ) : "No overnight call types configured."}
             </div>
@@ -134,31 +156,73 @@ export default function RulesView() {
           </div>
 
           <div className="rule">
-            <div className="rule-title">MO1 team matching</div>
+            <div className="rule-title">Consultant affinity</div>
             <div className="rule-body">
-              The MO1 slot is preferentially filled by someone from the same team as the on-call consultant.
-              <br />
-              <strong>Supervisor match (+5.0):</strong> If the MO is directly tagged to the on-call consultant.
-              <br />
-              <strong>Team match (+3.0):</strong> If the MO is in the same team as the on-call consultant.
+              {affinityCallTypes.length > 0 ? (
+                <>
+                  Call types with consultant affinity pull staff towards their linked supervising consultant
+                  when that consultant is the on-call consultant for the day.
+                  <br />
+                  <strong>Supervisor match (+5.0):</strong> Staff directly tagged to the on-call consultant.
+                  <br />
+                  <strong>Team match (+3.0):</strong> Staff in the same team as the on-call consultant.
+                  <br /><br />
+                  <strong>Affinity-enabled call types:</strong>{" "}
+                  {affinityCallTypes.map(ct => ct.name).join(", ")}
+                  <br /><br />
+                  <strong>Staff currently linked to a supervisor:</strong>
+                  {moAssignmentsWithSupervisor.length > 0 ? (
+                    <table className="rules-table" style={{ marginTop: 8 }}>
+                      <thead>
+                        <tr><th>Staff</th><th>Supervisor</th></tr>
+                      </thead>
+                      <tbody>
+                        {moAssignmentsWithSupervisor.map(ta => (
+                          <tr key={ta.id}>
+                            <td>{ta.staff_name}</td>
+                            <td>{ta.supervisor_name}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <span style={{ color: "var(--text-muted)", marginLeft: 8 }}>
+                      No supervisor links configured. Set them in the Staff / Teams page.
+                    </span>
+                  )}
+                </>
+              ) : (
+                "No call types have consultant affinity configured."
+              )}
             </div>
           </div>
 
           <div className="rule">
-            <div className="rule-title">Call request preference (+4.0) and spacing bonus (up to +2.0)</div>
+            <div className="rule-title">Call request preference (+20.0) and spacing bonus (up to +2.0)</div>
             <div className="rule-body">
-              Call requests give a +4.0 scoring bonus. People who haven't had a recent call receive a spacing bonus proportional to days since their last call.
+              Call requests give a <strong>+20.0</strong> scoring bonus — strong enough to nearly guarantee the slot
+              unless the person is ineligible. Staff who haven't had a recent call receive a spacing bonus
+              proportional to days since their last call (up to +2.0).
             </div>
           </div>
 
           <div className="rule">
             <div className="rule-title">Fairness</div>
             <div className="rule-body">
-              Only overnight/24h calls count towards fairness tracking.
+              Fairness scoring applies to all call types with <strong>counts_towards_fairness</strong> enabled.
+              The solver picks the person with the lowest accumulated workload, weighted as follows:
+              <br /><br />
+              <strong>Total 24h calls (+10.0):</strong> Primary metric — counts only true 24h overnight calls
+              (overnight + post-call rest day). Night float calls do not count here.
               <br />
-              <strong>Total 24h calls (+10.0):</strong> Primary fairness metric.
-              <strong> Per-type balance (+3.0).</strong>
-              <strong> Weekend/PH balance (+8.0).</strong>
+              <strong>Per-type balance (+3.0):</strong> Balances how many times each person has done this
+              specific call type.
+              <br />
+              <strong>Difficulty-weighted balance (+2.0):</strong> Accounts for the cumulative difficulty
+              points across all call types assigned so far.
+              <br />
+              <strong>Weekend / PH balance (+8.0):</strong> Applied only when assigning a weekend or public
+              holiday slot — balances who has done the most weekend calls.
             </div>
           </div>
         </section>
@@ -234,7 +298,7 @@ export default function RulesView() {
           <div className="rule">
             <div className="rule-title">Duty scoring</div>
             <div className="rule-body">
-              <strong>OT:</strong> Fairness (up to +10.0), supervisor match (+5.0), team match (+3.0), registrar-tier bonus (+3.0).
+              <strong>OT:</strong> Fairness (up to +10.0), supervisor match (+5.0), team match (+3.0), registrar-tier bonus (+3.0), OT preference nudge (+2.0).
               <br /><strong>Clinic / general daytime:</strong> Fairness (up to +5.0), supervisor match (+5.0), team match (+3.0), staff <strong>duty_preference</strong> bonus (+2.0).
               <br />Eligibility per resource is governed by per-staff <strong>can_do_clinic / can_do_ot</strong> flags and rank-level eligibility.
             </div>
@@ -244,7 +308,8 @@ export default function RulesView() {
             <div className="rule-title">Staff duty preferences</div>
             <div className="rule-body">
               Individual staff can have a <strong>duty_preference</strong> of "OT" or "Clinic" set in their profile.
-              Staff with <strong>extra_call_type_ids</strong> are eligible for additional call types beyond their rank default.
+              Staff with <strong>extra_call_type_ids</strong> are eligible for additional call types beyond their rank default
+              (e.g. an MO granted eligibility for registrar call slots).
             </div>
           </div>
 

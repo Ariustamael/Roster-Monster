@@ -133,6 +133,7 @@ async def _load_call_type_infos(db: AsyncSession) -> list[CallTypeInfo]:
                         mutex_names.add(n)
         result.append(
             CallTypeInfo(
+                id=ct.id,
                 name=ct.name,
                 display_order=ct.display_order,
                 is_overnight=ct.is_overnight,
@@ -248,7 +249,9 @@ async def _build_solver_input(config: MonthlyConfig, db: AsyncSession) -> Solver
         )
 
     call_eligible_ranks = await _get_call_eligible_ranks(db)
-    mo_staff = (
+
+    # Load the primary call-eligible pool (by rank)
+    mo_staff_by_rank = (
         (
             await db.execute(
                 select(Staff).filter(
@@ -263,8 +266,33 @@ async def _build_solver_input(config: MonthlyConfig, db: AsyncSession) -> Solver
         .all()
     )
 
+    # Also load staff who are outside normal call-eligible ranks but have
+    # been granted eligibility for specific call types via extra_call_type_ids
+    # (e.g. MOs allowed to cover registrar slots).
+    extra_eligible_staff = (
+        (
+            await db.execute(
+                select(Staff).filter(
+                    Staff.active.is_(True),
+                    Staff.rank.notin_(list(call_eligible_ranks)),
+                    Staff.extra_call_type_ids.isnot(None),
+                    Staff.extra_call_type_ids != "",
+                    (Staff.can_do_call.is_(True)) | (Staff.can_do_call.is_(None)),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    # Merge, de-duplicating by id
+    all_mo_staff = {s.id: s for s in mo_staff_by_rank}
+    for s in extra_eligible_staff:
+        if s.id not in all_mo_staff:
+            all_mo_staff[s.id] = s
+
     mo_pool: list[PersonInfo] = []
-    for s in mo_staff:
+    for s in all_mo_staff.values():
         ta = (
             (
                 await db.execute(
@@ -280,6 +308,13 @@ async def _build_solver_input(config: MonthlyConfig, db: AsyncSession) -> Solver
             .scalars()
             .first()
         )
+        # Parse extra_call_type_ids from stored CSV string (e.g. "7,8")
+        extra_ct_ids: set[int] = set()
+        if s.extra_call_type_ids:
+            for tok in s.extra_call_type_ids.split(","):
+                tok = tok.strip()
+                if tok.isdigit():
+                    extra_ct_ids.add(int(tok))
         mo_pool.append(
             PersonInfo(
                 id=s.id,
@@ -287,6 +322,7 @@ async def _build_solver_input(config: MonthlyConfig, db: AsyncSession) -> Solver
                 rank=s.rank,
                 team_id=ta.team_id if ta else None,
                 supervisor_id=ta.supervisor_id if ta else None,
+                extra_call_type_ids=extra_ct_ids,
             )
         )
 
@@ -662,7 +698,6 @@ async def view_roster(config_id: int, db: AsyncSession = Depends(get_db)):
                 select(Staff).filter(
                     Staff.active.is_(True),
                     Staff.rank.in_(list(call_eligible_ranks)),
-                    # Exclude staff flagged as unable to take call
                     (Staff.can_do_call.is_(True)) | (Staff.can_do_call.is_(None)),
                 )
             )
