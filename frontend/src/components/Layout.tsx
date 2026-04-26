@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { NavLink, Outlet } from "react-router-dom";
 import { useConfig } from "../context/ConfigContext";
 import { api } from "../api";
@@ -9,6 +10,19 @@ const MONTH_NAMES = [
 
 export default function Layout() {
   const { configs, active, setActiveId, reload } = useConfig();
+  const [quitting, setQuitting] = useState(false);
+
+  async function handleQuit() {
+    if (!confirm("Quit Roster Monster? This will stop the backend and frontend servers.")) return;
+    setQuitting(true);
+    try {
+      await api.quit();
+    } catch {
+      // Server killed itself before responding — that's fine
+    }
+    // Page will go blank once Vite stops; window.close() works when opened by script
+    window.close();
+  }
 
   async function addMonth() {
     const input = prompt("Enter year and month (e.g. 2026-05):");
@@ -66,6 +80,15 @@ export default function Layout() {
           <NavLink to="/resources">Resources</NavLink>
           <NavLink to="/config">Configuration</NavLink>
         </nav>
+
+        <button
+          className="btn-quit"
+          onClick={handleQuit}
+          disabled={quitting}
+          title="Stop all servers and quit Roster Monster"
+        >
+          {quitting ? "Shutting down…" : "⏻  Quit"}
+        </button>
       </aside>
       <main className="main">
         <Outlet />

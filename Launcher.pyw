@@ -23,6 +23,9 @@ REQUIREMENTS = ROOT / "backend" / "requirements.txt"
 FRONTEND_DIR = ROOT / "frontend"
 VITE_JS = FRONTEND_DIR / "node_modules" / "vite" / "bin" / "vite.js"
 ICON_PATH = ROOT / "tray-icon.png"
+# Sentinel file written by the backend /api/quit endpoint or its heartbeat
+# watchdog.  This thread monitors it and triggers a clean shutdown.
+QUIT_FLAG = ROOT / "backend" / "__quit__.flag"
 
 CREATE_NO_WINDOW = 0x08000000
 
@@ -120,7 +123,37 @@ def _kill_tree(proc):
 def _quit(icon, backend_proc, frontend_proc):
     for proc in [backend_proc, frontend_proc]:
         _kill_tree(proc)
+    # Clean up any leftover sentinel so next launch isn't immediately killed
+    try:
+        QUIT_FLAG.unlink()
+    except FileNotFoundError:
+        pass
     icon.stop()
+
+
+def _monitor(icon_ref, backend_proc, frontend_proc):
+    """Background thread: watch for the quit sentinel and for unexpected backend death."""
+    while True:
+        time.sleep(1)
+
+        # Sentinel written by /api/quit or the heartbeat watchdog
+        if QUIT_FLAG.exists():
+            try:
+                QUIT_FLAG.unlink()
+            except FileNotFoundError:
+                pass
+            _kill_tree(backend_proc)
+            _kill_tree(frontend_proc)
+            if icon_ref[0]:
+                icon_ref[0].stop()
+            return
+
+        # Backend died without going through the normal quit flow
+        if backend_proc.poll() is not None:
+            _kill_tree(frontend_proc)
+            if icon_ref[0]:
+                icon_ref[0].stop()
+            return
 
 
 def _make_menu(backend_proc, frontend_proc):
@@ -155,6 +188,12 @@ def _make_menu(backend_proc, frontend_proc):
 
 
 def main():
+    # Clean up any stale quit flag from a previous session
+    try:
+        QUIT_FLAG.unlink()
+    except FileNotFoundError:
+        pass
+
     ensure_venv()
     ensure_node_modules()
 
@@ -171,6 +210,13 @@ def main():
     image = Image.open(str(ICON_PATH))
     menu = _make_menu(backend_proc, frontend_proc)
     icon = pystray.Icon("Roster Monster", image, "Roster Monster", menu)
+
+    # icon_ref lets the monitor thread call icon.stop() once the icon exists
+    icon_ref = [icon]
+    threading.Thread(
+        target=_monitor, args=(icon_ref, backend_proc, frontend_proc), daemon=True
+    ).start()
+
     icon.run()
 
 

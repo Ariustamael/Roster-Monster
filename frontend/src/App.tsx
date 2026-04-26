@@ -1,9 +1,11 @@
+import { useEffect } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ConfigProvider, useConfig } from "./context/ConfigContext";
 import { RosterSyncProvider } from "./context/RosterSyncContext";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import Layout from "./components/Layout";
+import { api } from "./api";
 import CallRosterView from "./pages/CallRosterView";
 import DutyRosterView from "./pages/DutyRosterView";
 import CallDistributionView from "./pages/CallDistributionView";
@@ -37,12 +39,26 @@ function SupplyDemandRoute() {
   return <SupplyDemandTab configId={active.id} />;
 }
 
+function Heartbeat() {
+  useEffect(() => {
+    // Ping the backend every 5 s so it knows the tab is still open.
+    // If pings stop for 30 s the backend watchdog writes a quit sentinel
+    // and the Launcher shuts everything down — i.e. closing the tab quits
+    // the whole application.
+    api.heartbeat();
+    const id = setInterval(() => api.heartbeat(), 5_000);
+    return () => clearInterval(id);
+  }, []);
+  return null;
+}
+
 export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <ConfigProvider>
         <RosterSyncProvider>
           <BrowserRouter>
+            <Heartbeat />
             <ErrorBoundary>
               <Routes>
                 <Route element={<Layout />}>

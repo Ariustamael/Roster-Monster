@@ -30,6 +30,9 @@ async function downloadFile(path: string, filename: string): Promise<void> {
 }
 
 export const api = {
+  quit: () => request<{ ok: boolean }>("/quit", { method: "POST" }),
+  heartbeat: () => fetch(`${API}/heartbeat`, { method: "POST" }).catch(() => {}),
+
   getStaff: () => request<import("./types").Staff[]>("/staff"),
   getTeams: () => request<import("./types").Team[]>("/teams"),
   getConfigs: () => request<import("./types").MonthlyConfig[]>("/config"),
