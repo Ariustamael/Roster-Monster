@@ -21,7 +21,7 @@ VENV_PY = ROOT / "backend" / "venv" / "Scripts" / "python.exe"
 VENV_DIR = ROOT / "backend" / "venv"
 REQUIREMENTS = ROOT / "backend" / "requirements.txt"
 FRONTEND_DIR = ROOT / "frontend"
-VITE_CMD = FRONTEND_DIR / "node_modules" / ".bin" / "vite.cmd"
+VITE_JS = FRONTEND_DIR / "node_modules" / "vite" / "bin" / "vite.js"
 ICON_PATH = ROOT / "tray-icon.png"
 
 CREATE_NO_WINDOW = 0x08000000
@@ -84,10 +84,10 @@ def start_backend():
 
 
 def start_frontend():
-    # Use the local vite.cmd directly — avoids npx path resolution issues
-    # with long OneDrive paths
+    # Call node directly with vite.js — bypasses vite.cmd which breaks
+    # when the path contains '&' (e.g. "30-39 Career & Professional")
     return subprocess.Popen(
-        [str(VITE_CMD), "--host", "127.0.0.1"],
+        ["node", str(VITE_JS), "--host", "127.0.0.1"],
         cwd=str(FRONTEND_DIR),
         startupinfo=_si,
         creationflags=CREATE_NO_WINDOW,
