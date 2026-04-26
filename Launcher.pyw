@@ -1,19 +1,27 @@
-import os
+import ctypes
 import shutil
 import subprocess
 import threading
 import time
+import urllib.request
 import webbrowser
 from pathlib import Path
 
 import pystray
 from PIL import Image
 
+# ── Single-instance guard ──────────────────────────────────────────────────────
+_mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "RosterMonsterLauncher")
+if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+    raise SystemExit(0)
+
+# ── Paths ──────────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).parent.resolve()
 VENV_PY = ROOT / "backend" / "venv" / "Scripts" / "python.exe"
 VENV_DIR = ROOT / "backend" / "venv"
 REQUIREMENTS = ROOT / "backend" / "requirements.txt"
 FRONTEND_DIR = ROOT / "frontend"
+VITE_CMD = FRONTEND_DIR / "node_modules" / ".bin" / "vite.cmd"
 ICON_PATH = ROOT / "tray-icon.png"
 
 CREATE_NO_WINDOW = 0x08000000
@@ -76,13 +84,26 @@ def start_backend():
 
 
 def start_frontend():
+    # Use the local vite.cmd directly — avoids npx path resolution issues
+    # with long OneDrive paths
     return subprocess.Popen(
-        "npx --yes vite --host 127.0.0.1",
+        [str(VITE_CMD), "--host", "127.0.0.1"],
         cwd=str(FRONTEND_DIR),
-        shell=True,
         startupinfo=_si,
         creationflags=CREATE_NO_WINDOW,
     )
+
+
+def _wait_for_server(url, timeout=30):
+    """Poll until the server responds or timeout is reached."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            urllib.request.urlopen(url, timeout=1)
+            return True
+        except Exception:
+            time.sleep(0.5)
+    return False
 
 
 def _quit(icon, backend_proc, frontend_proc):
@@ -135,7 +156,8 @@ def main():
     frontend_proc = start_frontend()
 
     def _open_browser():
-        time.sleep(4)
+        # Wait until the frontend is actually serving before opening the browser
+        _wait_for_server("http://127.0.0.1:5173", timeout=30)
         webbrowser.open("http://127.0.0.1:5173")
 
     threading.Thread(target=_open_browser, daemon=True).start()
